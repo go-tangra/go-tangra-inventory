@@ -32,7 +32,8 @@ openapi:
 		--proto_path=proto \
 		--proto_path=/usr/include \
 		--proto_path=$(KRATOS_THIRD_PARTY) \
-		proto/inventory/collector/v1/collector.proto
+		proto/inventory/collector/v1/collector.proto \
+		proto/inventory/collector/v1/collector_doc.proto
 
 gen: proto openapi
 

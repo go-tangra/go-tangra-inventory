@@ -1,24 +1,115 @@
-name: Build
+name: CI
 
 on:
   push:
-    branches: [main]
-    tags: ["v*"]
+    branches:
+      - main
+      - master
+    tags:
+      - 'v*'
   pull_request:
-    branches: [main]
+    branches:
+      - main
+      - master
+  schedule:
+    - cron: '0 0 * * 0'
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
   build:
+    name: Build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v5
+      - name: Setup Go
+        uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
+          go-version: '1.24'
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build
+        run: go build ./...
+
+  buf-lint:
+    name: Buf Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Buf
+        uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ github.token }}
+
+      - name: Buf lint
+        uses: bufbuild/buf-lint-action@v1
+        with:
+          input: proto
+
+  buf-breaking:
+    name: Buf Breaking Change Detection
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Buf
+        uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ github.token }}
+
+      - name: Buf breaking change detection
+        uses: bufbuild/buf-breaking-action@v1
+        with:
+          input: proto
+          against: 'https://github.com/${{ github.repository }}.git#branch=${{ github.base_ref }},subdir=proto'
+
+  buf-push:
+    name: Buf Push
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    needs:
+      - build
+      - buf-lint
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Buf
+        uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ github.token }}
+
+      - name: Buf push
+        uses: bufbuild/buf-push-action@v1
+        with:
+          input: proto
+          buf_token: ${{ secrets.BUF_TOKEN }}
+
+  package:
+    name: Package Binaries
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'push'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
 
       - name: Set ldflags
         id: ldflags
@@ -75,8 +166,9 @@ jobs:
           path: dist/inventory-collector-linux-*
 
   msi:
-    needs: build
+    needs: package
     runs-on: windows-latest
+    if: github.event_name == 'push'
     steps:
       - uses: actions/checkout@v4
 
@@ -137,7 +229,7 @@ jobs:
           path: dist/*.msi
 
   release:
-    needs: [build, msi]
+    needs: [package, msi]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:

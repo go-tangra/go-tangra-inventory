@@ -1,0 +1,43 @@
+syntax = "proto3";
+
+package inventory.collector.v1;
+
+option go_package = "inventory/collector/v1;collectorv1";
+
+import "gnostic/openapi/v3/annotations.proto";
+
+option (gnostic.openapi.v3.document) = {
+  info: {
+    title: "InventoryCollectorService API";
+    version: "0.0.1";
+    description: "InventoryCollectorService receives hardware inventory data and stores it.";
+  }
+
+  security: [
+    {
+      additional_properties: [
+        {
+          name: "ApiKeyAuth"; value: {}
+        }
+      ]
+    }
+  ]
+
+  components: {
+    security_schemes: {
+      additional_properties: [
+        {
+          name: "ApiKeyAuth";
+          value: {
+            security_scheme: {
+              type: "apiKey";
+              name: "X-API-Key";
+              in: "header";
+              description: "API key for authenticating requests";
+            }
+          }
+        }
+      ]
+    }
+  }
+};
