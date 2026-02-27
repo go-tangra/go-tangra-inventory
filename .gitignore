@@ -1,3 +1,8 @@
+# Binaries
+/inventory
+/inventory-collector
+/collector
+/bin/
 *.exe
 *.exe~
 *.dll
@@ -5,4 +10,21 @@
 *.dylib
 *.test
 *.out
-dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build
+/dist/
+
+# Data
+*.db
+*.db-journal
+*.db-wal
+*.db-shm

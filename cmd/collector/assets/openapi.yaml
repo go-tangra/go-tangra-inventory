@@ -1,0 +1,526 @@
+# Generated with protoc-gen-openapi
+# https://github.com/google/gnostic/tree/master/cmd/protoc-gen-openapi
+
+openapi: 3.0.3
+info:
+    title: InventoryCollectorService API
+    description: InventoryCollectorService receives hardware inventory data and stores it.
+    version: 0.0.1
+paths:
+    /v1/agents:
+        get:
+            tags:
+                - InventoryCollectorService
+            description: ListConnectedAgents returns the currently connected agents.
+            operationId: InventoryCollectorService_ListConnectedAgents
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListConnectedAgentsResponse'
+    /v1/inventories:
+        get:
+            tags:
+                - InventoryCollectorService
+            description: ListInventories lists stored inventories with optional filters.
+            operationId: InventoryCollectorService_ListInventories
+            parameters:
+                - name: hostname
+                  in: query
+                  schema:
+                    type: string
+                - name: username
+                  in: query
+                  schema:
+                    type: string
+                - name: systemUuid
+                  in: query
+                  schema:
+                    type: string
+                - name: collectedAfter
+                  in: query
+                  schema:
+                    type: string
+                    format: date-time
+                - name: collectedBefore
+                  in: query
+                  schema:
+                    type: string
+                    format: date-time
+                - name: pageSize
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: page
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListInventoriesResponse'
+        post:
+            tags:
+                - InventoryCollectorService
+            description: SubmitInventory receives inventory from a client and stores it.
+            operationId: InventoryCollectorService_SubmitInventory
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/SubmitInventoryRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/SubmitInventoryResponse'
+    /v1/inventories/latest/{hostname}:
+        get:
+            tags:
+                - InventoryCollectorService
+            description: GetLatestByHostname returns the most recent inventory for a hostname.
+            operationId: InventoryCollectorService_GetLatestByHostname
+            parameters:
+                - name: hostname
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetLatestByHostnameResponse'
+    /v1/inventories/refresh:
+        post:
+            tags:
+                - InventoryCollectorService
+            description: RefreshInventory sends a refresh command to a connected agent.
+            operationId: InventoryCollectorService_RefreshInventory
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/RefreshInventoryRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RefreshInventoryResponse'
+    /v1/inventories/{id}:
+        get:
+            tags:
+                - InventoryCollectorService
+            description: GetInventory retrieves a stored inventory by ID.
+            operationId: InventoryCollectorService_GetInventory
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetInventoryResponse'
+        delete:
+            tags:
+                - InventoryCollectorService
+            description: DeleteInventory removes a stored inventory by ID.
+            operationId: InventoryCollectorService_DeleteInventory
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DeleteInventoryResponse'
+components:
+    schemas:
+        BIOSInfo:
+            type: object
+            properties:
+                vendor:
+                    type: string
+                version:
+                    type: string
+                releaseDate:
+                    type: string
+            description: BIOSInfo holds BIOS vendor, version, and release date (Type 0).
+        BIOSLanguageInfo:
+            type: object
+            properties:
+                currentLanguage:
+                    type: string
+                installableLanguages:
+                    type: array
+                    items:
+                        type: string
+            description: BIOSLanguageInfo holds BIOS language settings (Type 13).
+        BaseboardInfo:
+            type: object
+            properties:
+                manufacturer:
+                    type: string
+                product:
+                    type: string
+                version:
+                    type: string
+                serialNumber:
+                    type: string
+                assetTag:
+                    type: string
+                locationInChassis:
+                    type: string
+                boardType:
+                    type: string
+            description: BaseboardInfo holds baseboard/motherboard details (Type 2).
+        CacheInfo:
+            type: object
+            properties:
+                socketDesignation:
+                    type: string
+            description: CacheInfo holds cache designation (Type 7).
+        ChassisInfo:
+            type: object
+            properties:
+                manufacturer:
+                    type: string
+                version:
+                    type: string
+                serialNumber:
+                    type: string
+                assetTagNumber:
+                    type: string
+                skuNumber:
+                    type: string
+            description: ChassisInfo holds system enclosure/chassis details (Type 3).
+        ConnectedAgent:
+            type: object
+            properties:
+                clientId:
+                    type: string
+                version:
+                    type: string
+                connectedAt:
+                    type: string
+                    format: date-time
+        DeleteInventoryResponse:
+            type: object
+            properties: {}
+        GetInventoryResponse:
+            type: object
+            properties:
+                id:
+                    type: string
+                inventory:
+                    $ref: '#/components/schemas/Inventory'
+                storedAt:
+                    type: string
+                    format: date-time
+        GetLatestByHostnameResponse:
+            type: object
+            properties:
+                id:
+                    type: string
+                inventory:
+                    $ref: '#/components/schemas/Inventory'
+                storedAt:
+                    type: string
+                    format: date-time
+        Inventory:
+            type: object
+            properties:
+                collectedAt:
+                    type: string
+                    format: date-time
+                hostname:
+                    type: string
+                username:
+                    type: string
+                smbiosVersion:
+                    $ref: '#/components/schemas/VersionInfo'
+                bios:
+                    $ref: '#/components/schemas/BIOSInfo'
+                system:
+                    $ref: '#/components/schemas/SystemInfo'
+                baseboard:
+                    $ref: '#/components/schemas/BaseboardInfo'
+                chassis:
+                    $ref: '#/components/schemas/ChassisInfo'
+                processors:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ProcessorInfo'
+                cache:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/CacheInfo'
+                memory:
+                    $ref: '#/components/schemas/MemoryInfo'
+                ports:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/PortInfo'
+                slots:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/SlotInfo'
+                oemStrings:
+                    type: array
+                    items:
+                        type: string
+                biosLanguage:
+                    $ref: '#/components/schemas/BIOSLanguageInfo'
+                monitor:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/MonitorInfo'
+            description: Inventory holds the complete hardware inventory of a host.
+        InventorySummary:
+            type: object
+            properties:
+                id:
+                    type: string
+                hostname:
+                    type: string
+                username:
+                    type: string
+                systemUuid:
+                    type: string
+                systemSerial:
+                    type: string
+                collectedAt:
+                    type: string
+                    format: date-time
+                storedAt:
+                    type: string
+                    format: date-time
+        ListConnectedAgentsResponse:
+            type: object
+            properties:
+                agents:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ConnectedAgent'
+        ListInventoriesResponse:
+            type: object
+            properties:
+                inventories:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/InventorySummary'
+                totalCount:
+                    type: integer
+                    format: int32
+        MemoryInfo:
+            type: object
+            properties:
+                totalPhysicalBytes:
+                    type: string
+                totalPhysicalGb:
+                    type: number
+                    format: double
+                array:
+                    $ref: '#/components/schemas/PhysicalMemoryArray'
+                modules:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/MemoryModule'
+            description: MemoryInfo holds total physical memory and per-module details.
+        MemoryModule:
+            type: object
+            properties:
+                deviceLocator:
+                    type: string
+                bankLocator:
+                    type: string
+                capacityBytes:
+                    type: string
+                formFactor:
+                    type: string
+                memoryType:
+                    type: string
+                typeDetail:
+                    type: string
+                speedMtS:
+                    type: integer
+                    format: uint32
+                configuredSpeedMtS:
+                    type: integer
+                    format: uint32
+                manufacturer:
+                    type: string
+                serialNumber:
+                    type: string
+                assetTag:
+                    type: string
+                partNumber:
+                    type: string
+                minimumVoltage:
+                    type: string
+                maximumVoltage:
+                    type: string
+                configuredVoltage:
+                    type: string
+                totalWidth:
+                    type: string
+                dataWidth:
+                    type: string
+            description: MemoryModule holds details for a single physical memory DIMM (Type 17).
+        MonitorInfo:
+            type: object
+            properties:
+                manufacturer:
+                    type: string
+                model:
+                    type: string
+                serialNumber:
+                    type: string
+            description: MonitorInfo holds connected display details.
+        PhysicalMemoryArray:
+            type: object
+            properties:
+                location:
+                    type: string
+                use:
+                    type: string
+                errorCorrection:
+                    type: string
+                maximumCapacity:
+                    type: string
+                numberOfMemoryDevices:
+                    type: integer
+                    format: uint32
+            description: PhysicalMemoryArray holds the memory array metadata (Type 16).
+        PortInfo:
+            type: object
+            properties:
+                internalDesignator:
+                    type: string
+                externalDesignator:
+                    type: string
+            description: PortInfo holds port connector details (Type 8).
+        ProcessorInfo:
+            type: object
+            properties:
+                socketDesignation:
+                    type: string
+                manufacturer:
+                    type: string
+                version:
+                    type: string
+                maxSpeedMhz:
+                    type: integer
+                    format: uint32
+                currentSpeedMhz:
+                    type: integer
+                    format: uint32
+                socketPopulated:
+                    type: boolean
+                serialNumber:
+                    type: string
+                assetTag:
+                    type: string
+                partNumber:
+                    type: string
+                coreCount:
+                    type: integer
+                    format: uint32
+                coreEnabled:
+                    type: integer
+                    format: uint32
+                threadCount:
+                    type: integer
+                    format: uint32
+            description: ProcessorInfo holds processor details (Type 4).
+        RefreshInventoryRequest:
+            type: object
+            properties:
+                hostname:
+                    type: string
+        RefreshInventoryResponse:
+            type: object
+            properties:
+                sent:
+                    type: boolean
+                commandId:
+                    type: string
+        SlotInfo:
+            type: object
+            properties:
+                designation:
+                    type: string
+            description: SlotInfo holds system slot details (Type 9).
+        SubmitInventoryRequest:
+            type: object
+            properties:
+                inventory:
+                    $ref: '#/components/schemas/Inventory'
+        SubmitInventoryResponse:
+            type: object
+            properties:
+                id:
+                    type: string
+                storedAt:
+                    type: string
+                    format: date-time
+        SystemInfo:
+            type: object
+            properties:
+                manufacturer:
+                    type: string
+                productName:
+                    type: string
+                version:
+                    type: string
+                serialNumber:
+                    type: string
+                uuid:
+                    type: string
+                wakeUpType:
+                    type: string
+                skuNumber:
+                    type: string
+                family:
+                    type: string
+            description: SystemInfo holds system manufacturer, product, serial, and UUID (Type 1).
+        VersionInfo:
+            type: object
+            properties:
+                major:
+                    type: integer
+                    format: int32
+                minor:
+                    type: integer
+                    format: int32
+                revision:
+                    type: integer
+                    format: int32
+            description: VersionInfo holds the SMBIOS specification version.
+tags:
+    - name: InventoryCollectorService

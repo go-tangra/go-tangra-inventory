@@ -1,0 +1,25 @@
+# Inventory Collector configuration
+
+# gRPC listen address
+listen: ":9550"
+
+# HTTP listen address (Swagger UI)
+http_listen: ":9551"
+
+# Enable Swagger UI at /docs/
+enable_swagger: true
+
+# SQLite database file path
+database: "inventory.db"
+
+# Retention: delete records older than N days (0 = disabled)
+retention_days: 0
+
+# How often to run the purge check (only if retention_days > 0)
+purge_interval: "24h"
+
+# Secret for gRPC inventory agents (empty = no auth)
+client_secret: ""
+
+# Secret for REST API clients (empty = no auth)
+api_secret: ""

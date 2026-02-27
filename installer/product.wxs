@@ -1,17 +1,38 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
-  <Package Name="Tangra Inventory"
+  <Package Name="Tangra Inventory Agent"
            Manufacturer="Go-Tangra"
            Version="$(ProductVersion)"
            UpgradeCode="e1b3a5c7-8f42-4d6e-9a1b-3c5d7e9f0a2b">
 
-    <MajorUpgrade DowngradeErrorMessage="A newer version of Tangra Inventory is already installed." />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Tangra Inventory Agent is already installed." />
     <MediaTemplate EmbedCab="yes" />
+
+    <!-- Public properties configurable via msiexec -->
+    <Property Id="COLLECTOR_ADDR" Secure="yes" />
+    <Property Id="CLIENT_SECRET" Secure="yes" />
+
+    <!-- Require COLLECTOR_ADDR to be set -->
+    <Launch Condition="COLLECTOR_ADDR" Message="COLLECTOR_ADDR property is required. Usage: msiexec /i [msi] COLLECTOR_ADDR=host:port" />
 
     <StandardDirectory Id="ProgramFiles6432Folder">
       <Directory Id="INSTALLFOLDER" Name="Tangra Inventory">
         <Component Id="MainExecutable" Guid="a2c4e6f8-1b3d-5a7c-9e0f-2b4d6a8c0e1f">
           <File Id="InventoryExe" Source="$(ExePath)" KeyPath="yes" />
+          <ServiceInstall Id="InstallAgentService"
+                          Name="TangraInventoryAgent"
+                          DisplayName="Tangra Inventory Agent"
+                          Description="Collects hardware and software inventory and reports to a Tangra collector"
+                          Type="ownProcess"
+                          Start="auto"
+                          ErrorControl="normal"
+                          Arguments="-collector [COLLECTOR_ADDR] -secret=[CLIENT_SECRET] -daemon" />
+          <ServiceControl Id="ControlAgentService"
+                          Name="TangraInventoryAgent"
+                          Start="install"
+                          Stop="both"
+                          Remove="uninstall"
+                          Wait="yes" />
         </Component>
         <Component Id="AddToPath" Guid="b3d5f7a9-2c4e-6b8d-0f1a-3c5e7b9d1f2a">
           <Environment Id="PATH" Name="PATH" Value="[INSTALLFOLDER]"
@@ -20,7 +41,7 @@
       </Directory>
     </StandardDirectory>
 
-    <Feature Id="Complete" Title="Tangra Inventory" Level="1">
+    <Feature Id="Complete" Title="Tangra Inventory Agent" Level="1">
       <ComponentRef Id="MainExecutable" />
       <ComponentRef Id="AddToPath" />
     </Feature>

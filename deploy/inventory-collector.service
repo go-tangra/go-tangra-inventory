@@ -1,0 +1,22 @@
+[Unit]
+Description=Tangra Inventory Collector
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/inventory-collector --config /etc/inventory-collector/collector.yaml
+Restart=on-failure
+RestartSec=5s
+WorkingDirectory=/var/lib/inventory-collector
+User=inventory-collector
+Group=inventory-collector
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/inventory-collector
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

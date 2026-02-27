@@ -18,25 +18,61 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.22"
+          go-version: "1.24"
 
-      - name: Build Windows amd64
+      - name: Set ldflags
+        id: ldflags
+        run: |
+          echo "flags=-X main.version=${GITHUB_REF_NAME:-dev} -X main.commitHash=${GITHUB_SHA::7} -X main.buildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - name: Build Windows amd64 (inventory agent)
         env:
           GOOS: windows
           GOARCH: amd64
-        run: go build -o dist/go-tangra-inventory-amd64.exe ./cmd/inventory/
+        run: go build -ldflags "${{ steps.ldflags.outputs.flags }}" -o dist/go-tangra-inventory-amd64.exe ./cmd/inventory/
 
-      - name: Build Windows arm64
+      - name: Build Windows arm64 (inventory agent)
         env:
           GOOS: windows
           GOARCH: arm64
-        run: go build -o dist/go-tangra-inventory-arm64.exe ./cmd/inventory/
+        run: go build -ldflags "${{ steps.ldflags.outputs.flags }}" -o dist/go-tangra-inventory-arm64.exe ./cmd/inventory/
 
-      - name: Upload artifacts
+      - name: Build Windows amd64 (collector)
+        env:
+          GOOS: windows
+          GOARCH: amd64
+        run: go build -ldflags "${{ steps.ldflags.outputs.flags }}" -o dist/inventory-collector-windows-amd64.exe ./cmd/collector/
+
+      - name: Build Windows arm64 (collector)
+        env:
+          GOOS: windows
+          GOARCH: arm64
+        run: go build -ldflags "${{ steps.ldflags.outputs.flags }}" -o dist/inventory-collector-windows-arm64.exe ./cmd/collector/
+
+      - name: Build Linux amd64 (collector)
+        env:
+          GOOS: linux
+          GOARCH: amd64
+        run: go build -ldflags "${{ steps.ldflags.outputs.flags }}" -o dist/inventory-collector-linux-amd64 ./cmd/collector/
+
+      - name: Build Linux arm64 (collector)
+        env:
+          GOOS: linux
+          GOARCH: arm64
+        run: go build -ldflags "${{ steps.ldflags.outputs.flags }}" -o dist/inventory-collector-linux-arm64 ./cmd/collector/
+
+      - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
           name: windows-binaries
-          path: dist/*.exe
+          path: |
+            dist/*.exe
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-binaries
+          path: dist/inventory-collector-linux-*
 
   msi:
     needs: build
@@ -62,7 +98,7 @@ jobs:
             echo "version=0.0.1" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Build MSI (amd64)
+      - name: Build agent MSI (amd64)
         run: >
           wix build installer/product.wxs
           -arch x64
@@ -70,13 +106,29 @@ jobs:
           -d ExePath=dist/go-tangra-inventory-amd64.exe
           -o dist/go-tangra-inventory-amd64.msi
 
-      - name: Build MSI (arm64)
+      - name: Build agent MSI (arm64)
         run: >
           wix build installer/product.wxs
           -arch arm64
           -d ProductVersion=${{ steps.version.outputs.version }}
           -d ExePath=dist/go-tangra-inventory-arm64.exe
           -o dist/go-tangra-inventory-arm64.msi
+
+      - name: Build collector MSI (amd64)
+        run: >
+          wix build installer/collector.wxs
+          -arch x64
+          -d ProductVersion=${{ steps.version.outputs.version }}
+          -d ExePath=dist/inventory-collector-windows-amd64.exe
+          -o dist/inventory-collector-amd64.msi
+
+      - name: Build collector MSI (arm64)
+        run: >
+          wix build installer/collector.wxs
+          -arch arm64
+          -d ProductVersion=${{ steps.version.outputs.version }}
+          -d ExePath=dist/inventory-collector-windows-arm64.exe
+          -o dist/inventory-collector-arm64.msi
 
       - name: Upload MSI artifacts
         uses: actions/upload-artifact@v4
@@ -101,10 +153,16 @@ jobs:
           name: windows-msi
           path: dist/
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-binaries
+          path: dist/
+
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/*.exe
             dist/*.msi
+            dist/inventory-collector-linux-*
           generate_release_notes: true
