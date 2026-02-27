@@ -38,8 +38,54 @@ jobs:
           name: windows-binaries
           path: dist/*.exe
 
-  release:
+  msi:
     needs: build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install WiX Toolset v4
+        run: dotnet tool install --global wix
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-binaries
+          path: dist/
+
+      - name: Extract version
+        id: version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=0.0.1" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build MSI (amd64)
+        run: >
+          wix build installer/product.wxs
+          -arch x64
+          -d ProductVersion=${{ steps.version.outputs.version }}
+          -d ExePath=dist/go-tangra-inventory-amd64.exe
+          -o dist/go-tangra-inventory-amd64.msi
+
+      - name: Build MSI (arm64)
+        run: >
+          wix build installer/product.wxs
+          -arch arm64
+          -d ProductVersion=${{ steps.version.outputs.version }}
+          -d ExePath=dist/go-tangra-inventory-arm64.exe
+          -o dist/go-tangra-inventory-arm64.msi
+
+      - name: Upload MSI artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-msi
+          path: dist/*.msi
+
+  release:
+    needs: [build, msi]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
@@ -50,8 +96,15 @@ jobs:
           name: windows-binaries
           path: dist/
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-msi
+          path: dist/
+
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.exe
+          files: |
+            dist/*.exe
+            dist/*.msi
           generate_release_notes: true
