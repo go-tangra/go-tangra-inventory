@@ -26,14 +26,7 @@ proto:
 		proto/inventory/collector/v1/collector.proto
 
 openapi:
-	protoc \
-		--openapi_out=cmd/collector/assets \
-		--openapi_opt=naming=json,depth=2,default_response=false,enum_type=string,output_mode=merged,fq_schema_naming=false \
-		--proto_path=proto \
-		--proto_path=/usr/include \
-		--proto_path=$(KRATOS_THIRD_PARTY) \
-		proto/inventory/collector/v1/collector.proto \
-		proto/inventory/collector/v1/collector_doc.proto
+	buf generate --template buf.openapi.gen.yaml
 
 gen: proto openapi
 

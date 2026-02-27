@@ -1,0 +1,30 @@
+version: v2
+
+clean: false
+
+managed:
+  enabled: true
+
+  disable:
+    - module: buf.build/googleapis/googleapis
+    - module: buf.build/gnostic/gnostic
+
+  override:
+    - file_option: go_package_prefix
+      value: github.com/go-tangra/go-tangra-inventory/gen/go
+
+inputs:
+  - directory: proto
+    paths:
+      - proto/inventory/collector/v1
+
+plugins:
+  - local: protoc-gen-openapi
+    out: cmd/collector/assets
+    opt:
+      - naming=json
+      - depth=2
+      - default_response=false
+      - enum_type=string
+      - output_mode=merged
+      - fq_schema_naming=false
