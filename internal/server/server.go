@@ -11,6 +11,7 @@ import (
 	swaggerUI "github.com/tx7do/kratos-swagger-ui"
 
 	collectorv1 "github.com/go-tangra/go-tangra-inventory/gen/go/inventory/collector/v1"
+	_ "github.com/go-tangra/go-tangra-inventory/internal/codec" // register custom JSON codec (uint64 as numbers)
 	"github.com/go-tangra/go-tangra-inventory/internal/config"
 	"github.com/go-tangra/go-tangra-inventory/internal/store"
 

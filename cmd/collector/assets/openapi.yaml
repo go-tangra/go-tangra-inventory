@@ -236,7 +236,8 @@ components:
             type: object
             properties:
                 id:
-                    type: string
+                    type: integer
+                    format: int64
                 inventory:
                     $ref: '#/components/schemas/Inventory'
                 storedAt:
@@ -246,7 +247,8 @@ components:
             type: object
             properties:
                 id:
-                    type: string
+                    type: integer
+                    format: int64
                 inventory:
                     $ref: '#/components/schemas/Inventory'
                 storedAt:
@@ -305,7 +307,8 @@ components:
             type: object
             properties:
                 id:
-                    type: string
+                    type: integer
+                    format: int64
                 hostname:
                     type: string
                 username:
@@ -341,7 +344,9 @@ components:
             type: object
             properties:
                 totalPhysicalBytes:
-                    type: string
+                    type: integer
+                    format: uint64
+                    example: 17179869184
                 totalPhysicalGb:
                     type: number
                     format: double
@@ -360,7 +365,9 @@ components:
                 bankLocator:
                     type: string
                 capacityBytes:
-                    type: string
+                    type: integer
+                    format: uint64
+                    example: 8589934592
                 formFactor:
                     type: string
                 memoryType:
@@ -485,7 +492,8 @@ components:
             type: object
             properties:
                 id:
-                    type: string
+                    type: integer
+                    format: int64
                 storedAt:
                     type: string
                     format: date-time
