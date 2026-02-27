@@ -29,10 +29,14 @@ func (w *eventLogWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// SetupEventLog opens the named event log source and redirects the
-// standard logger output to it.  Event log entries carry their own
-// timestamps, so log flags are cleared.
+// SetupEventLog ensures the named event log source is registered, then
+// opens it and redirects the standard logger output to it.  Event log
+// entries carry their own timestamps, so log flags are cleared.
 func SetupEventLog(name string) {
+	// Ensure the event source is registered (idempotent — ignores "already exists").
+	// This covers the MSI install path where ServiceInstall doesn't create the source.
+	_ = eventlog.InstallAsEventCreate(name, eventlog.Error|eventlog.Warning|eventlog.Info)
+
 	elog, err := eventlog.Open(name)
 	if err != nil {
 		return // fall back to default stderr logging
