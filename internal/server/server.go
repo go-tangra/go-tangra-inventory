@@ -30,10 +30,10 @@ func Run(ctx context.Context, cfg *config.Config, openApiData []byte) error {
 	cmdReg := NewCommandRegistry()
 	handler := NewHandler(db, cmdReg)
 
-	// gRPC server with client-secret auth interceptors (unary + stream).
+	// gRPC server with auth interceptors (unary + stream).
 	grpcSrv := grpc.NewServer(
-		grpc.ChainUnaryInterceptor(ClientSecretInterceptor(cfg.ClientSecret)),
-		grpc.ChainStreamInterceptor(ClientSecretStreamInterceptor(cfg.ClientSecret)),
+		grpc.ChainUnaryInterceptor(AuthInterceptor(cfg.ClientSecret, cfg.ApiSecret)),
+		grpc.ChainStreamInterceptor(AuthStreamInterceptor(cfg.ClientSecret, cfg.ApiSecret)),
 	)
 	collectorv1.RegisterInventoryCollectorServiceServer(grpcSrv, handler)
 	reflection.Register(grpcSrv)

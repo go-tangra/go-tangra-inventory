@@ -21,13 +21,15 @@ var allowedClientSecretStreamMethods = map[string]bool{
 	"/StreamCommands": true,
 }
 
-// ClientSecretInterceptor returns a gRPC unary server interceptor that
-// validates the x-client-secret metadata header. When the secret is non-empty,
-// only the SubmitInventory RPC is allowed for client-secret authenticated callers.
-// An empty secret disables authentication (pass-through).
-func ClientSecretInterceptor(secret string) grpc.UnaryServerInterceptor {
+// AuthInterceptor returns a gRPC unary server interceptor that validates
+// either x-client-secret or x-api-secret metadata headers.
+//
+// When both secrets are empty, authentication is disabled (pass-through).
+// x-client-secret callers may only invoke SubmitInventory (agent write path).
+// x-api-secret callers may invoke any RPC (service-to-service read path).
+func AuthInterceptor(clientSecret, apiSecret string) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
-		if secret == "" {
+		if clientSecret == "" && apiSecret == "" {
 			return handler(ctx, req)
 		}
 
@@ -36,38 +38,50 @@ func ClientSecretInterceptor(secret string) grpc.UnaryServerInterceptor {
 			return nil, status.Error(codes.Unauthenticated, "missing metadata")
 		}
 
-		vals := md.Get("x-client-secret")
-		if len(vals) == 0 {
-			return nil, status.Error(codes.Unauthenticated, "missing x-client-secret")
-		}
-
-		if subtle.ConstantTimeCompare([]byte(vals[0]), []byte(secret)) != 1 {
-			return nil, status.Error(codes.Unauthenticated, "invalid x-client-secret")
-		}
-
-		// Client-secret callers may only call allowed unary methods.
-		allowed := false
-		for suffix := range allowedClientSecretUnaryMethods {
-			if strings.HasSuffix(info.FullMethod, suffix) {
-				allowed = true
-				break
+		// Try x-api-secret first — grants access to all RPCs.
+		if apiSecret != "" {
+			if vals := md.Get("x-api-secret"); len(vals) > 0 {
+				if subtle.ConstantTimeCompare([]byte(vals[0]), []byte(apiSecret)) == 1 {
+					return handler(ctx, req)
+				}
+				return nil, status.Error(codes.Unauthenticated, "invalid x-api-secret")
 			}
 		}
-		if !allowed {
-			return nil, status.Error(codes.PermissionDenied, "client-secret not permitted for this method")
+
+		// Fall back to x-client-secret — restricted to agent methods only.
+		if clientSecret != "" {
+			if vals := md.Get("x-client-secret"); len(vals) > 0 {
+				if subtle.ConstantTimeCompare([]byte(vals[0]), []byte(clientSecret)) != 1 {
+					return nil, status.Error(codes.Unauthenticated, "invalid x-client-secret")
+				}
+
+				allowed := false
+				for suffix := range allowedClientSecretUnaryMethods {
+					if strings.HasSuffix(info.FullMethod, suffix) {
+						allowed = true
+						break
+					}
+				}
+				if !allowed {
+					return nil, status.Error(codes.PermissionDenied, "client-secret not permitted for this method")
+				}
+
+				return handler(ctx, req)
+			}
 		}
 
-		return handler(ctx, req)
+		return nil, status.Error(codes.Unauthenticated, "missing x-api-secret or x-client-secret")
 	}
 }
 
-// ClientSecretStreamInterceptor returns a gRPC stream server interceptor that
-// validates the x-client-secret metadata header. When the secret is non-empty,
-// only the StreamCommands RPC is allowed for client-secret authenticated callers.
-// An empty secret disables authentication (pass-through).
-func ClientSecretStreamInterceptor(secret string) grpc.StreamServerInterceptor {
+// AuthStreamInterceptor returns a gRPC stream server interceptor that validates
+// either x-client-secret or x-api-secret metadata headers.
+//
+// x-client-secret callers may only invoke StreamCommands (agent path).
+// x-api-secret callers may invoke any streaming RPC.
+func AuthStreamInterceptor(clientSecret, apiSecret string) grpc.StreamServerInterceptor {
 	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
-		if secret == "" {
+		if clientSecret == "" && apiSecret == "" {
 			return handler(srv, ss)
 		}
 
@@ -76,27 +90,38 @@ func ClientSecretStreamInterceptor(secret string) grpc.StreamServerInterceptor {
 			return status.Error(codes.Unauthenticated, "missing metadata")
 		}
 
-		vals := md.Get("x-client-secret")
-		if len(vals) == 0 {
-			return status.Error(codes.Unauthenticated, "missing x-client-secret")
-		}
-
-		if subtle.ConstantTimeCompare([]byte(vals[0]), []byte(secret)) != 1 {
-			return status.Error(codes.Unauthenticated, "invalid x-client-secret")
-		}
-
-		// Client-secret callers may only call allowed streaming methods.
-		allowed := false
-		for suffix := range allowedClientSecretStreamMethods {
-			if strings.HasSuffix(info.FullMethod, suffix) {
-				allowed = true
-				break
+		// Try x-api-secret first — grants access to all RPCs.
+		if apiSecret != "" {
+			if vals := md.Get("x-api-secret"); len(vals) > 0 {
+				if subtle.ConstantTimeCompare([]byte(vals[0]), []byte(apiSecret)) == 1 {
+					return handler(srv, ss)
+				}
+				return status.Error(codes.Unauthenticated, "invalid x-api-secret")
 			}
 		}
-		if !allowed {
-			return status.Error(codes.PermissionDenied, "client-secret not permitted for this method")
+
+		// Fall back to x-client-secret — restricted to agent methods only.
+		if clientSecret != "" {
+			if vals := md.Get("x-client-secret"); len(vals) > 0 {
+				if subtle.ConstantTimeCompare([]byte(vals[0]), []byte(clientSecret)) != 1 {
+					return status.Error(codes.Unauthenticated, "invalid x-client-secret")
+				}
+
+				allowed := false
+				for suffix := range allowedClientSecretStreamMethods {
+					if strings.HasSuffix(info.FullMethod, suffix) {
+						allowed = true
+						break
+					}
+				}
+				if !allowed {
+					return status.Error(codes.PermissionDenied, "client-secret not permitted for this method")
+				}
+
+				return handler(srv, ss)
+			}
 		}
 
-		return handler(srv, ss)
+		return status.Error(codes.Unauthenticated, "missing x-api-secret or x-client-secret")
 	}
 }
