@@ -1,0 +1,576 @@
+syntax = "proto3";
+
+// inventory.v1 carries two related surfaces of the inventory module:
+//
+//   * The module-to-module API (InventoryHostService, InventorySnapshotService,
+//     InventoryStatisticsService, InventoryAgentService). It is NOT proxied by
+//     the gateway: callers are authenticated platform services on the Freya
+//     SPIFFE mTLS channel, acting for the tenant named in each request
+//     (tenant_id). The actor identity comes from the verified SPIFFE peer.
+//
+//   * The off-mesh ingest edge (IngestService), served on a dedicated listener
+//     network-isolated from the mesh, where endpoint agents authenticate with a
+//     per-agent sealed credential presented in call metadata.
+//
+// Redaction: no message ever carries an agent's sealed credential or an
+// enrollment-token secret, with the single deliberate exception of
+// EnrollResponse.agent_credential (issued exactly once at enrollment) and
+// MintEnrollmentTokenResponse.token (the mint secret, returned exactly once).
+// Snapshot and host messages exclude sealed fields and are safe to log.
+package inventory.v1;
+
+option go_package = "github.com/go-freya/freya/services/inventory/api/proto/inventory/v1;inventoryv1";
+
+// ---- Enums
+
+// HostStatus is the lifecycle status of a managed host.
+enum HostStatus {
+  HOST_STATUS_UNSPECIFIED = 0;
+  HOST_STATUS_ACTIVE = 1;
+  HOST_STATUS_STALE = 2;
+  HOST_STATUS_RETIRED = 3;
+}
+
+// SnapshotSource is where a snapshot originated.
+enum SnapshotSource {
+  SNAPSHOT_SOURCE_UNSPECIFIED = 0;
+  SNAPSHOT_SOURCE_AGENT = 1;
+  SNAPSHOT_SOURCE_MANUAL = 2;
+  SNAPSHOT_SOURCE_IMPORT = 3;
+}
+
+// ChangeType classifies a detected component change.
+enum ChangeType {
+  CHANGE_TYPE_UNSPECIFIED = 0;
+  CHANGE_TYPE_ADDED = 1;
+  CHANGE_TYPE_REMOVED = 2;
+  CHANGE_TYPE_MODIFIED = 3;
+}
+
+// CommandType is a command delivered to a connected agent.
+enum CommandType {
+  COMMAND_TYPE_UNSPECIFIED = 0;
+  COMMAND_TYPE_REFRESH = 1;
+}
+
+// ---- Shared identity + host messages
+
+// Identity carries the fields an agent reports to resolve a stable host.
+message Identity {
+  string hardware_uuid = 1;
+  string machine_id = 2;
+  string hostname = 3;
+}
+
+// Host is a managed endpoint (one row per host per tenant). Never carries agent
+// credentials.
+message Host {
+  string id = 1;
+  string tenant_id = 2;
+  string hostname = 3;
+  string machine_id = 4;
+  string hardware_uuid = 5;
+  string system_serial = 6;
+  string identity_key = 7;
+  string manufacturer = 8;
+  string model = 9;
+  string os_name = 10;
+  string os_version = 11;
+  string os_arch = 12;
+  string agent_version = 13;
+  string assigned_user = 14;
+  HostStatus status = 15;
+  map<string, string> tags = 16;
+  int64 first_seen = 17;        // unix seconds
+  int64 last_seen = 18;         // unix seconds
+  string last_snapshot_id = 19;
+  int64 created_at = 20;        // unix seconds
+  int64 updated_at = 21;        // unix seconds
+}
+
+// SnapshotSummary is a snapshot's lifted columns without the full payload.
+message SnapshotSummary {
+  string id = 1;
+  string tenant_id = 2;
+  string host_id = 3;
+  int64 collected_at = 4;   // unix seconds
+  int64 received_at = 5;    // unix seconds
+  string agent_version = 6;
+  SnapshotSource source = 7;
+  string os_name = 8;
+  string os_version = 9;
+  string manufacturer = 10;
+  string model = 11;
+}
+
+// Snapshot is an immutable inventory report bound to a host, with its full
+// payload. Excludes all sealed fields.
+message Snapshot {
+  SnapshotSummary summary = 1;
+  Inventory payload = 2;
+}
+
+// ---- Inventory payload (mirrors the data-model inventory payload)
+
+// Inventory is the full collected payload (hardware + software/OS + network).
+message Inventory {
+  Identity identity = 1;
+  int64 collected_at = 2;   // unix seconds
+  string agent_version = 3;
+  OSInfo os = 4;
+  BIOSInfo bios = 5;
+  SystemInfo system = 6;
+  BaseboardInfo baseboard = 7;
+  ChassisInfo chassis = 8;
+  repeated Processor processors = 9;
+  repeated CacheInfo cache = 10;
+  MemoryInfo memory = 11;
+  repeated string ports = 12;
+  repeated string slots = 13;
+  repeated string oem_strings = 14;
+  string bios_language = 15;
+  repeated Monitor monitors = 16;
+  repeated Program installed_programs = 17;
+  repeated Service services = 18;
+  repeated UserAccount users = 19;
+  repeated Patch patches = 20;
+  Environment environment = 21;
+  repeated NetworkInterface network_interfaces = 22;
+  repeated Disk disks = 23;
+}
+
+message BIOSInfo {
+  string vendor = 1;
+  string version = 2;
+  string release_date = 3;
+}
+
+message SystemInfo {
+  string manufacturer = 1;
+  string product_name = 2;
+  string version = 3;
+  string serial_number = 4;
+  string uuid = 5;
+  string wake_up_type = 6;
+  string sku_number = 7;
+  string family = 8;
+}
+
+message BaseboardInfo {
+  string manufacturer = 1;
+  string product = 2;
+  string version = 3;
+  string serial_number = 4;
+  string asset_tag = 5;
+  string location_in_chassis = 6;
+  string board_type = 7;
+}
+
+message ChassisInfo {
+  string manufacturer = 1;
+  string version = 2;
+  string serial_number = 3;
+  string asset_tag = 4;
+  string sku_number = 5;
+  string type = 6;
+}
+
+message Processor {
+  string socket_designation = 1;
+  string manufacturer = 2;
+  string version = 3;
+  uint32 max_speed_mhz = 4;
+  uint32 current_speed_mhz = 5;
+  uint32 core_count = 6;
+  uint32 core_enabled = 7;
+  uint32 thread_count = 8;
+  string part_number = 9;
+  string serial_number = 10;
+  bool socket_populated = 11;
+}
+
+message CacheInfo {
+  string socket_designation = 1;
+}
+
+message MemoryInfo {
+  uint64 total_physical_bytes = 1;
+  MemoryArray array = 2;
+  repeated MemoryModule modules = 3;
+}
+
+message MemoryArray {
+  string location = 1;
+  string use = 2;
+  string error_correction = 3;
+  uint64 maximum_capacity = 4;
+  uint32 number_of_devices = 5;
+}
+
+message MemoryModule {
+  string device_locator = 1;
+  string bank_locator = 2;
+  uint64 capacity_bytes = 3;
+  string form_factor = 4;
+  string memory_type = 5;
+  uint32 speed_mt_s = 6;
+  uint32 configured_speed_mt_s = 7;
+  string manufacturer = 8;
+  string serial_number = 9;
+  string part_number = 10;
+}
+
+message Monitor {
+  string manufacturer = 1;
+  string model = 2;
+  string serial_number = 3;
+}
+
+message OSInfo {
+  string name = 1;
+  string version = 2;
+  string build = 3;
+  string arch = 4;
+  string kernel = 5;
+  int64 install_date = 6;   // unix seconds
+  int64 last_boot = 7;      // unix seconds
+  uint64 uptime_sec = 8;
+}
+
+message Program {
+  string name = 1;
+  string version = 2;
+  string publisher = 3;
+  string install_date = 4;
+  string install_location = 5;
+  uint64 size_bytes = 6;
+}
+
+message Service {
+  string name = 1;
+  string display_name = 2;
+  string state = 3;
+  string start_mode = 4;
+  string account = 5;
+}
+
+message UserAccount {
+  string name = 1;
+  bool is_admin = 2;
+  int64 last_logon = 3;   // unix seconds
+}
+
+message Patch {
+  string id = 1;
+  string installed_on = 2;
+}
+
+message Environment {
+  string domain = 1;
+  string workgroup = 2;
+  string timezone = 3;
+  string locale = 4;
+}
+
+message NetworkInterface {
+  string name = 1;
+  string mac = 2;
+  repeated string ip_addresses = 3;
+  string subnet = 4;
+  string gateway = 5;
+  repeated string dns = 6;
+  bool dhcp = 7;
+  uint64 speed_bps = 8;
+  string type = 9;
+  bool up = 10;
+}
+
+message Disk {
+  string model = 1;
+  string serial = 2;
+  uint64 size_bytes = 3;
+  string media_type = 4;
+  string interface = 5;
+  repeated Partition partitions = 6;
+}
+
+message Partition {
+  string mount = 1;
+  string fs = 2;
+  uint64 size_bytes = 3;
+  uint64 free_bytes = 4;
+}
+
+// ---- Change history
+
+// Change is a per-snapshot component change vs the previous snapshot.
+message Change {
+  string id = 1;
+  string tenant_id = 2;
+  string host_id = 3;
+  string snapshot_id = 4;
+  string prev_snapshot_id = 5;
+  int64 detected_at = 6;   // unix seconds
+  string category = 7;
+  ChangeType change_type = 8;
+  string component_key = 9;
+  string before = 10;  // JSON
+  string after = 11;   // JSON
+}
+
+// ---- Statistics
+
+// Stats are per-tenant inventory rollups.
+message Stats {
+  int64 hosts_total = 1;
+  map<string, int64> hosts_by_status = 2;
+  map<string, int64> hosts_by_os = 3;
+  map<string, int64> hosts_by_manufacturer = 4;
+  int64 agents_online = 5;
+  int64 agents_offline = 6;
+  int64 stale_hosts = 7;
+  int64 snapshots_total = 8;
+  uint64 total_memory_bytes = 9;
+  int64 total_cpu_cores = 10;
+  uint64 total_disk_bytes = 11;
+  map<string, int64> top_programs = 12;
+  map<string, int64> os_versions = 13;
+}
+
+// ---- Connected agents (live registry view; no credentials)
+
+// ConnectedAgent is a live agent connection as seen in the shared registry.
+message ConnectedAgent {
+  string agent_id = 1;
+  string host_id = 2;
+  string hostname = 3;
+  string agent_version = 4;
+  bool online = 5;
+  int64 last_seen = 6;   // unix seconds
+  string instance = 7;   // serving instance holding the stream
+}
+
+// ---- InventoryHostService
+
+// InventoryHostService reads and administers hosts for platform services.
+service InventoryHostService {
+  rpc ListHosts(ListHostsRequest) returns (ListHostsResponse);
+  rpc GetHost(GetHostRequest) returns (Host);
+  rpc GetHostByIdentity(GetHostByIdentityRequest) returns (Host);
+  rpc TagHost(TagHostRequest) returns (Host);
+  rpc RetireHost(RetireHostRequest) returns (Host);
+  rpc DeleteHost(DeleteHostRequest) returns (DeleteHostResponse);
+}
+
+message ListHostsRequest {
+  string tenant_id = 1;
+  string hostname = 2;
+  string os_name = 3;
+  string manufacturer = 4;
+  HostStatus status = 5;
+  string tag = 6;  // "key" or "key=value"
+  int64 last_seen_from = 7;  // unix seconds, 0 = unset
+  int64 last_seen_to = 8;    // unix seconds, 0 = unset
+  int64 limit = 9;
+  string cursor_id = 10;
+}
+
+message ListHostsResponse {
+  repeated Host hosts = 1;
+  string next_cursor_id = 2;
+}
+
+message GetHostRequest {
+  string tenant_id = 1;
+  string id = 2;
+}
+
+message GetHostByIdentityRequest {
+  string tenant_id = 1;
+  Identity identity = 2;
+}
+
+message TagHostRequest {
+  string tenant_id = 1;
+  string id = 2;
+  map<string, string> tags = 3;  // replaces the host's tags
+}
+
+message RetireHostRequest {
+  string tenant_id = 1;
+  string id = 2;
+}
+
+message DeleteHostRequest {
+  string tenant_id = 1;
+  string id = 2;
+}
+
+message DeleteHostResponse {}
+
+// ---- InventorySnapshotService
+
+// InventorySnapshotService reads snapshot history, diffs and change records.
+service InventorySnapshotService {
+  rpc GetSnapshot(GetSnapshotRequest) returns (Snapshot);
+  rpc ListSnapshots(ListSnapshotsRequest) returns (ListSnapshotsResponse);
+  rpc GetLatestByHost(GetLatestByHostRequest) returns (Snapshot);
+  rpc DiffSnapshots(DiffSnapshotsRequest) returns (DiffSnapshotsResponse);
+  rpc ListChanges(ListChangesRequest) returns (ListChangesResponse);
+  rpc DeleteSnapshot(DeleteSnapshotRequest) returns (DeleteSnapshotResponse);
+}
+
+message GetSnapshotRequest {
+  string tenant_id = 1;
+  string id = 2;
+}
+
+message ListSnapshotsRequest {
+  string tenant_id = 1;
+  string host_id = 2;
+  int64 limit = 3;
+  string cursor_id = 4;
+}
+
+message ListSnapshotsResponse {
+  repeated SnapshotSummary snapshots = 1;
+  string next_cursor_id = 2;
+}
+
+message GetLatestByHostRequest {
+  string tenant_id = 1;
+  string host_id = 2;
+}
+
+message DiffSnapshotsRequest {
+  string tenant_id = 1;
+  string id = 2;     // base snapshot
+  string other = 3;  // compared snapshot
+}
+
+message DiffSnapshotsResponse {
+  repeated Change changes = 1;
+}
+
+message ListChangesRequest {
+  string tenant_id = 1;
+  string host_id = 2;
+  int64 limit = 3;
+}
+
+message ListChangesResponse {
+  repeated Change changes = 1;
+}
+
+message DeleteSnapshotRequest {
+  string tenant_id = 1;
+  string id = 2;
+}
+
+message DeleteSnapshotResponse {}
+
+// ---- InventoryStatisticsService
+
+// InventoryStatisticsService reports per-tenant inventory rollups.
+service InventoryStatisticsService {
+  rpc GetStatistics(GetStatisticsRequest) returns (Stats);
+}
+
+message GetStatisticsRequest {
+  string tenant_id = 1;
+}
+
+// ---- InventoryAgentService
+
+// InventoryAgentService is the operator surface over agents and enrollment.
+service InventoryAgentService {
+  rpc ListConnectedAgents(ListConnectedAgentsRequest) returns (ListConnectedAgentsResponse);
+  rpc RefreshInventory(RefreshInventoryRequest) returns (RefreshInventoryResponse);
+  rpc MintEnrollmentToken(MintEnrollmentTokenRequest) returns (MintEnrollmentTokenResponse);
+  rpc RevokeAgent(RevokeAgentRequest) returns (RevokeAgentResponse);
+}
+
+message ListConnectedAgentsRequest {
+  string tenant_id = 1;
+}
+
+message ListConnectedAgentsResponse {
+  repeated ConnectedAgent agents = 1;
+}
+
+message RefreshInventoryRequest {
+  string tenant_id = 1;
+  string host_id = 2;
+}
+
+message RefreshInventoryResponse {
+  bool delivered = 1;
+  string command_id = 2;
+}
+
+message MintEnrollmentTokenRequest {
+  string tenant_id = 1;
+  int64 ttl_seconds = 2;
+  string label = 3;
+}
+
+// MintEnrollmentTokenResponse returns the one-time token secret. The secret is
+// never stored plaintext and never returned again; only its metadata persists.
+message MintEnrollmentTokenResponse {
+  string id = 1;
+  string token = 2;        // one-time enrollment secret (returned once)
+  int64 expires_at = 3;    // unix seconds
+  string label = 4;
+}
+
+message RevokeAgentRequest {
+  string tenant_id = 1;
+  string id = 2;
+}
+
+message RevokeAgentResponse {}
+
+// ---- IngestService (off-mesh edge; per-agent credential auth)
+
+// IngestService is the off-mesh edge spoken by endpoint agents. Enroll consumes
+// an enrollment token and issues the sealed per-agent credential; SubmitInventory
+// and StreamCommands authenticate with that credential presented in metadata.
+service IngestService {
+  rpc Enroll(EnrollRequest) returns (EnrollResponse);
+  rpc SubmitInventory(SubmitRequest) returns (SubmitResponse);
+  rpc StreamCommands(StreamRequest) returns (stream Command);
+}
+
+message EnrollRequest {
+  string enrollment_token = 1;  // consumed single-use
+  Identity identity = 2;
+  string agent_version = 3;
+}
+
+// EnrollResponse returns the per-agent credential exactly once; it is sealed at
+// rest and never returned again by any RPC.
+message EnrollResponse {
+  string agent_id = 1;
+  string agent_credential = 2;  // one-time per-agent secret (returned once)
+}
+
+message SubmitRequest {
+  Inventory inventory = 1;  // auth = per-agent credential in call metadata
+}
+
+message SubmitResponse {
+  string snapshot_id = 1;
+  string host_id = 2;
+  int64 received_at = 3;   // unix seconds
+}
+
+message StreamRequest {
+  string agent_id = 1;
+  string agent_version = 2;
+}
+
+// Command is a directive streamed to a connected agent. It carries no secrets.
+message Command {
+  string command_id = 1;
+  CommandType type = 2;
+}
