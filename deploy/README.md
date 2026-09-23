@@ -113,3 +113,11 @@ snapshots (or full history when requested), tags and change history, versioned b
 schema; agent/enrollment secrets are never included. `POST
 /api/inventory/v1/backup/import` recreates them (mode `skip` or `overwrite`),
 preserving ids.
+
+## UI
+
+The remote under `services/inventory/ui` is built on the shared kit `@freya/ui` (FlyonUI + Zod,
+see `docs/frontend.md`): forms validate through Zod schemas in `src/schemas/`, the
+shell provides the theme and shared singletons, and `npm run lint` runs
+`check-no-legacy`. Rebuild the image after UI changes; the Dockerfile builds `ui/kit`
+first.

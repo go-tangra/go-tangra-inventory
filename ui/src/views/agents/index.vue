@@ -1,25 +1,46 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue'
+import { UiPage, UiAlert, UiCard, UiButton, UiDataTable, UiStatusChip, UiLiveIndicator, UiForm, UiInput, UiSecretField, UiCopyButton, UiDrawer, useConfirm, type Column } from '@freya/ui'
+import { useZodForm } from '@freya/ui/forms'
 import { useAgents } from '@/stores/agents'
 import { useLive } from '@/stores/live'
 import { describe } from '@/api/client'
-import EnrollTokenDialog from '@/components/EnrollTokenDialog.vue'
+import { enrollTokenSchema } from '@/schemas'
+import type { ConnectedAgent, MintedToken } from '@/api/types'
 
 const agents = useAgents()
 const live = useLive()
+const confirm = useConfirm()
 
 const enrollOpen = ref(false)
+const minted = ref<MintedToken | null>(null)
 const message = ref('')
 const error = ref('')
 const busyHost = ref<string | null>(null)
 
 let release: (() => void) | null = null
-
 onMounted(() => {
   void agents.listConnected()
   release = live.connect()
 })
 onUnmounted(() => release?.())
+
+// The secret is returned once; it lives only in this component's state while the dialog is open.
+const enrollForm = useZodForm(enrollTokenSchema, {
+  initial: { label: '' },
+  onSubmit: async (v) => {
+    minted.value = await agents.mintEnrollToken(v.label)
+  },
+})
+function openEnroll(): void {
+  minted.value = null
+  enrollForm.reset({ label: '' })
+  enrollOpen.value = true
+}
+function closeEnroll(): void {
+  enrollOpen.value = false
+  minted.value = null
+}
 
 async function refresh(hostId?: string): Promise<void> {
   if (!hostId) return
@@ -35,56 +56,64 @@ async function refresh(hostId?: string): Promise<void> {
     busyHost.value = null
   }
 }
-
-async function revoke(agentId: string): Promise<void> {
+async function revoke(a: ConnectedAgent): Promise<void> {
+  if (!(await confirm.ask({ title: 'Revoke this agent?', text: 'It must enrol again with a new token.', danger: true, confirmLabel: 'Revoke' }))) return
   error.value = ''
   try {
-    await agents.revoke(agentId)
+    await agents.revoke(a.agent_id)
   } catch (e) {
     error.value = describe(e)
   }
 }
-
-function fmt(ts?: string): string {
-  return ts ? new Date(ts).toLocaleString() : '—'
-}
+const fmt = (ts?: string): string => (ts ? new Date(ts).toLocaleString() : '')
+const columns: Column<ConnectedAgent>[] = [
+  { key: 'status', label: 'Status', width: 'sm', format: () => 'online' },
+  { key: 'hostname', label: 'Hostname', sortable: true },
+  { key: 'agent_id', label: 'Agent ID', format: (a) => a.agent_id.slice(0, 12), hideOnStack: true },
+  { key: 'version', label: 'Version', hideOnStack: true },
+  { key: 'connected_at', label: 'Connected', format: (a) => fmt(a.connected_at) },
+]
 </script>
 
 <template>
-  <div>
-    <div class="d-flex align-center mb-4">
-      <h1 class="text-h5">Agents</h1>
-      <v-chip v-if="live.connected" size="x-small" color="success" variant="tonal" class="ms-3">live</v-chip>
-      <v-spacer />
-      <v-btn variant="text" icon="mdi-refresh" class="me-2" @click="agents.listConnected()" />
-      <v-btn color="primary" prepend-icon="mdi-key-plus" data-test="issue-token" @click="enrollOpen = true">Issue enrollment token</v-btn>
-    </div>
+  <UiPage title="Agents">
+    <template #badges><UiLiveIndicator :connected="live.connected" /></template>
+    <template #actions>
+      <UiButton variant="text" icon="mdi-refresh" icon-only label="Refresh" @click="agents.listConnected()" />
+      <UiButton icon="mdi-key-plus" data-test="issue-token" @click="openEnroll">Issue enrollment token</UiButton>
+    </template>
+    <UiAlert v-if="message" kind="success" class="mb-3">{{ message }}</UiAlert>
+    <UiAlert v-if="error || agents.error" kind="error" class="mb-3">{{ error || agents.error }}</UiAlert>
+    <UiCard :padded="false">
+      <UiDataTable :items="agents.connected" :columns="columns" row-key="agent_id" :loading="agents.loading" caption="Connected agents" empty-title="No agents connected" :row-attrs="(a) => ({ 'data-test': 'agent-row-' + a.agent_id })" data-test="agents-table">
+        <template #cell-status><UiStatusChip status="online" /></template>
+        <template #actions="{ row }">
+          <UiButton size="xs" variant="soft" icon="mdi-refresh" :loading="busyHost === row.host_id" :disabled="!row.host_id" :data-test="'agent-refresh-' + row.agent_id" @click="refresh(row.host_id)">Refresh</UiButton>
+          <UiButton size="xs" variant="text" color="error" :data-test="'agent-revoke-' + row.agent_id" @click="revoke(row)">Revoke</UiButton>
+        </template>
+      </UiDataTable>
+    </UiCard>
 
-    <v-alert v-if="message" type="success" variant="tonal" density="compact" class="mb-3">{{ message }}</v-alert>
-    <v-alert v-if="error || agents.error" type="error" variant="tonal" density="compact" class="mb-3">{{ error || agents.error }}</v-alert>
-
-    <v-table data-test="agents-table">
-      <thead>
-        <tr><th>Status</th><th>Hostname</th><th>Agent ID</th><th>Version</th><th>Connected</th><th class="text-right">Actions</th></tr>
-      </thead>
-      <tbody>
-        <tr v-for="a in agents.connected" :key="a.agent_id" :data-test="'agent-row-' + a.agent_id">
-          <td><v-chip size="x-small" color="success" variant="tonal" prepend-icon="mdi-circle">online</v-chip></td>
-          <td>{{ a.hostname || '—' }}</td>
-          <td class="text-medium-emphasis">{{ a.agent_id.slice(0, 12) }}</td>
-          <td class="text-medium-emphasis">{{ a.version || '—' }}</td>
-          <td class="text-medium-emphasis">{{ fmt(a.connected_at) }}</td>
-          <td class="text-right">
-            <v-btn size="x-small" variant="tonal" prepend-icon="mdi-refresh" :loading="busyHost === a.host_id" :disabled="!a.host_id" :data-test="'agent-refresh-' + a.agent_id" @click="refresh(a.host_id)">Refresh</v-btn>
-            <v-btn size="x-small" variant="text" color="error" class="ms-2" :data-test="'agent-revoke-' + a.agent_id" @click="revoke(a.agent_id)">Revoke</v-btn>
-          </td>
-        </tr>
-        <tr v-if="!agents.connected.length && !agents.loading">
-          <td colspan="6" class="text-medium-emphasis">No agents connected.</td>
-        </tr>
-      </tbody>
-    </v-table>
-
-    <EnrollTokenDialog v-model="enrollOpen" />
-  </div>
+    <UiDrawer :model-value="enrollOpen" title="Issue enrollment token" size="md" @update:model-value="closeEnroll">
+      <template v-if="!minted">
+        <p class="mb-3 text-sm text-base-content/70">Mint a single-use, expiring token an agent uses to enroll. The secret is shown once and cannot be recovered.</p>
+        <UiForm :form="enrollForm"><UiInput v-bind="enrollForm.field('label')" label="Label (optional)" data-test="enroll-label" /></UiForm>
+      </template>
+      <template v-else>
+        <UiAlert kind="warning" class="mb-3">Copy this token now. It is shown once and will not be displayed again.</UiAlert>
+        <UiSecretField id="enroll-token" :model-value="minted.token" label="Enrollment token" readonly data-test="enroll-token" />
+        <div class="mt-2 flex items-center justify-between gap-2 text-xs text-base-content/70">
+          <span>Expires {{ new Date(minted.expires_at).toLocaleString() }}</span>
+          <UiCopyButton :value="minted.token" label="Copy token" />
+        </div>
+      </template>
+      <template #actions>
+        <template v-if="!minted">
+          <UiButton variant="text" @click="closeEnroll">Cancel</UiButton>
+          <UiButton :loading="enrollForm.submitting.value" data-test="enroll-mint" @click="enrollForm.submit()">Mint token</UiButton>
+        </template>
+        <UiButton v-else @click="closeEnroll">Done</UiButton>
+      </template>
+    </UiDrawer>
+  </UiPage>
 </template>

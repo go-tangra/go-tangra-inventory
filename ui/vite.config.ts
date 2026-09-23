@@ -1,7 +1,8 @@
 import { fileURLToPath, URL } from 'node:url'
 import { defineConfig } from 'vitest/config'
 import vue from '@vitejs/plugin-vue'
-import vuetify from 'vite-plugin-vuetify'
+import tailwindcss from '@tailwindcss/vite'
+import { breakpointSpecificity } from '@freya/ui/vite'
 import { federation } from '@module-federation/vite'
 import { remoteConfig } from './module-federation.config'
 
@@ -11,7 +12,7 @@ import { remoteConfig } from './module-federation.config'
 export default defineConfig({
   base: '/m/inventory/',
   resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
-  plugins: [vue(), vuetify({ autoImport: true }), federation(remoteConfig)],
+  plugins: [vue(), tailwindcss(), breakpointSpecificity(), federation(remoteConfig)],
   server: { proxy: { '/api': { target: 'https://localhost:8443', secure: false, changeOrigin: false } } },
   build: { outDir: 'dist', emptyOutDir: true, sourcemap: false, target: 'esnext' },
   test: {
@@ -19,6 +20,6 @@ export default defineConfig({
     environmentOptions: { jsdom: { url: 'https://localhost/inventory' } },
     include: ['tests/unit/**/*.spec.ts'],
     setupFiles: ['tests/unit/setup.ts'],
-    server: { deps: { inline: ['vuetify'] } },
+    server: { deps: { inline: ['@freya/ui'] } },
   },
 })

@@ -1,32 +1,23 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { UiPage, UiAlert, UiCard, UiForm, UiInput, UiSelect, UiButton, UiDataTable, UiStatusChip, UiLiveIndicator, type Column, type SelectOption } from '@freya/ui'
+import { useZodForm } from '@freya/ui/forms'
 import { useHosts } from '@/stores/hosts'
 import { useAgents } from '@/stores/agents'
 import { useLive } from '@/stores/live'
-import type { HostFilter } from '@/stores/hosts'
+import { hostFilterSchema, HOST_STATUSES } from '@/schemas'
+import type { Host } from '@/api/types'
 
 const router = useRouter()
 const store = useHosts()
 const agents = useAgents()
 const live = useLive()
 
-const hostname = ref('')
-const os = ref('')
-const manufacturer = ref('')
-const status = ref<string | null>(null)
-const tag = ref('')
-const lastSeen = ref<string | null>(null)
-
-const STATUSES = ['active', 'stale', 'retired']
-const LAST_SEEN = [
-  { title: 'Last 24 hours', value: '24h' },
-  { title: 'Last 7 days', value: '7d' },
-  { title: 'Last 30 days', value: '30d' },
-]
+const statusOptions: SelectOption[] = HOST_STATUSES.map((s) => ({ title: s, value: s }))
+const lastSeenOptions: SelectOption[] = [{ title: 'Last 24 hours', value: '24h' }, { title: 'Last 7 days', value: '7d' }, { title: 'Last 30 days', value: '30d' }]
 
 let release: (() => void) | null = null
-
 onMounted(() => {
   void store.list()
   void agents.listConnected()
@@ -34,103 +25,56 @@ onMounted(() => {
 })
 onUnmounted(() => release?.())
 
-function sinceIso(window: string | null): string | undefined {
+function sinceIso(window?: string): string | undefined {
   if (!window) return undefined
-  const now = Date.now()
   const ms = window === '24h' ? 864e5 : window === '7d' ? 7 * 864e5 : 30 * 864e5
-  return new Date(now - ms).toISOString()
+  return new Date(Date.now() - ms).toISOString()
 }
-
-function reload(): void {
-  const filter: HostFilter = {
-    hostname: hostname.value.trim() || undefined,
-    os: os.value.trim() || undefined,
-    manufacturer: manufacturer.value.trim() || undefined,
-    status: status.value ?? undefined,
-    tag: tag.value.trim() || undefined,
-    last_seen_from: sinceIso(lastSeen.value),
-  }
-  void store.list(filter)
-}
+// The filter is a validated form too: a malformed tag never reaches the API.
+const filter = useZodForm(hostFilterSchema, {
+  initial: { hostname: '', os: '', manufacturer: '', tag: '' },
+  onSubmit: (f) => store.list({ hostname: f.hostname || undefined, os: f.os || undefined, manufacturer: f.manufacturer || undefined, status: f.status, tag: f.tag || undefined, last_seen_from: sinceIso(f.last_seen) }),
+})
+const reload = () => void filter.submit()
 
 const onlineHostIds = computed(() => new Set(agents.connected.map((a) => a.host_id).filter((h): h is string => !!h)))
-
-const statusColor: Record<string, string> = {
-  active: 'success',
-  stale: 'warning',
-  retired: 'grey',
-}
-
-function open(id: string): void {
-  void router.push({ name: 'inventory-host', params: { id } })
-}
-
-function fmt(ts?: string): string {
-  return ts ? new Date(ts).toLocaleString() : '—'
+const fmt = (ts?: string): string => (ts ? new Date(ts).toLocaleString() : '')
+const columns: Column<Host>[] = [
+  { key: 'hostname', label: 'Hostname', sortable: true },
+  { key: 'os_name', label: 'OS', format: (h) => [h.os_name, h.os_version].filter(Boolean).join(' ') },
+  { key: 'manufacturer', label: 'Manufacturer', hideOnStack: true },
+  { key: 'model', label: 'Model', hideOnStack: true },
+  { key: 'status', label: 'Status', width: 'sm' },
+  { key: 'agent', label: 'Agent', width: 'sm', format: (h) => (onlineHostIds.value.has(h.id) ? 'online' : 'offline') },
+  { key: 'last_seen', label: 'Last seen', format: (h) => fmt(h.last_seen), sortable: true },
+]
+function open(h: Host): void {
+  void router.push({ name: 'inventory-host', params: { id: h.id } })
 }
 </script>
 
 <template>
-  <div>
-    <div class="d-flex align-center mb-4">
-      <h1 class="text-h5">Hosts</h1>
-      <v-chip v-if="live.connected" size="x-small" color="success" variant="tonal" class="ms-3">live</v-chip>
-      <v-spacer />
-      <v-btn variant="text" icon="mdi-refresh" @click="reload" />
-    </div>
-
-    <v-card variant="tonal" class="mb-4">
-      <v-card-text>
-        <v-row dense>
-          <v-col cols="12" sm="6" md="3">
-            <v-text-field v-model="hostname" label="Hostname" density="compact" clearable hide-details @keyup.enter="reload" @click:clear="reload" />
-          </v-col>
-          <v-col cols="12" sm="6" md="2">
-            <v-text-field v-model="os" label="OS" density="compact" clearable hide-details @keyup.enter="reload" @click:clear="reload" />
-          </v-col>
-          <v-col cols="12" sm="6" md="2">
-            <v-text-field v-model="manufacturer" label="Manufacturer" density="compact" clearable hide-details @keyup.enter="reload" @click:clear="reload" />
-          </v-col>
-          <v-col cols="12" sm="6" md="2">
-            <v-select v-model="status" :items="STATUSES" label="Status" density="compact" clearable hide-details @update:model-value="reload" />
-          </v-col>
-          <v-col cols="12" sm="6" md="2">
-            <v-select v-model="lastSeen" :items="LAST_SEEN" label="Last seen" density="compact" clearable hide-details @update:model-value="reload" />
-          </v-col>
-          <v-col cols="12" sm="6" md="1">
-            <v-text-field v-model="tag" label="Tag" density="compact" clearable hide-details placeholder="k or k=v" @keyup.enter="reload" @click:clear="reload" />
-          </v-col>
-        </v-row>
-      </v-card-text>
-    </v-card>
-
-    <v-alert v-if="store.error" type="error" variant="tonal" density="compact" class="mb-3">{{ store.error }}</v-alert>
-
-    <v-table data-test="hosts-table">
-      <thead>
-        <tr><th>Hostname</th><th>OS</th><th>Manufacturer</th><th>Model</th><th>Status</th><th>Agent</th><th>Last seen</th></tr>
-      </thead>
-      <tbody>
-        <tr v-for="h in store.items" :key="h.id" class="cursor-pointer" :data-test="'host-row-' + h.id" @click="open(h.id)">
-          <td>{{ h.hostname }}</td>
-          <td class="text-medium-emphasis">{{ h.os_name }} {{ h.os_version }}</td>
-          <td class="text-medium-emphasis">{{ h.manufacturer || '—' }}</td>
-          <td class="text-medium-emphasis">{{ h.model || '—' }}</td>
-          <td><v-chip size="x-small" :color="statusColor[h.status]" variant="flat">{{ h.status }}</v-chip></td>
-          <td>
-            <v-chip v-if="onlineHostIds.has(h.id)" size="x-small" color="success" variant="tonal" prepend-icon="mdi-circle" :data-test="'host-online-' + h.id">online</v-chip>
-            <v-chip v-else size="x-small" color="grey" variant="tonal">offline</v-chip>
-          </td>
-          <td class="text-medium-emphasis">{{ fmt(h.last_seen) }}</td>
-        </tr>
-        <tr v-if="!store.items.length && !store.loading">
-          <td colspan="7" class="text-medium-emphasis">No hosts match.</td>
-        </tr>
-      </tbody>
-    </v-table>
-  </div>
+  <UiPage title="Hosts">
+    <template #badges><UiLiveIndicator :connected="live.connected" /></template>
+    <template #actions><UiButton variant="text" icon="mdi-refresh" icon-only label="Refresh" @click="reload" /></template>
+    <template #filters>
+      <UiForm :form="filter" class="w-full">
+        <div class="grid grid-cols-2 gap-2 md:grid-cols-12 md:items-end">
+          <div class="col-span-2 md:col-span-3"><UiInput v-bind="filter.field('hostname')" label="Hostname" size="sm" @enter="reload" /></div>
+          <div class="md:col-span-2"><UiInput v-bind="filter.field('os')" label="OS" size="sm" @enter="reload" /></div>
+          <div class="md:col-span-2"><UiInput v-bind="filter.field('manufacturer')" label="Manufacturer" size="sm" @enter="reload" /></div>
+          <div class="md:col-span-2"><UiSelect v-bind="filter.field('status')" label="Status" :options="statusOptions" size="sm" @update:model-value="reload" /></div>
+          <div class="md:col-span-2"><UiSelect v-bind="filter.field('last_seen')" label="Last seen" :options="lastSeenOptions" size="sm" @update:model-value="reload" /></div>
+          <div class="md:col-span-1"><UiInput v-bind="filter.field('tag')" label="Tag" placeholder="k or k=v" size="sm" @enter="reload" /></div>
+        </div>
+      </UiForm>
+    </template>
+    <UiAlert v-if="store.error" kind="error" class="mb-3">{{ store.error }}</UiAlert>
+    <UiCard :padded="false">
+      <UiDataTable :items="store.items" :columns="columns" :loading="store.loading" caption="Hosts" empty-title="No hosts match" clickable :row-attrs="(h) => ({ 'data-test': 'host-row-' + h.id })" data-test="hosts-table" @row-click="open">
+        <template #cell-status="{ row }"><UiStatusChip :status="row.status" /></template>
+        <template #cell-agent="{ row }"><UiStatusChip :status="onlineHostIds.has(row.id) ? 'online' : 'offline'" :colors="{ offline: 'neutral' }" :data-test="onlineHostIds.has(row.id) ? 'host-online-' + row.id : undefined" /></template>
+      </UiDataTable>
+    </UiCard>
+  </UiPage>
 </template>
-
-<style scoped>
-.cursor-pointer { cursor: pointer; }
-</style>
