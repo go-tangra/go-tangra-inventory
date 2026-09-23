@@ -20,6 +20,7 @@ COPY services/lcm/ui/package.json services/lcm/ui/
 COPY services/notification/ui/package.json services/notification/ui/
 COPY services/warden/ui/package.json services/warden/ui/
 COPY services/ticket/ui/package.json services/ticket/ui/
+COPY services/dns/ui/package.json services/dns/ui/
 RUN npm ci --no-audit --no-fund
 COPY ui/ ./ui/
 RUN npm run -w ui/kit build
