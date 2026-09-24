@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { base, signIn } from '../../../../gateway/shell/tests/e2e/helpers'
+import { base, signIn } from './helpers'
 
 // Quickstart §4 flow for the inventory remote at the three reference widths.
 // Needs a full platform; skips without operator credentials.

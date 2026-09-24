@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
-import { base, signIn } from '../../../../gateway/shell/tests/e2e/helpers'
+import { base, signIn } from './helpers'
 
 // T070 / SC-006: every inventory view inside the shell, both themes, zero serious or
 // critical axe findings. Needs a full platform; skips without operator credentials.
