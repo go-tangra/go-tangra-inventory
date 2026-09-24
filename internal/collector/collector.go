@@ -1,81 +1,109 @@
+// Package collector gathers a full local endpoint inventory (hardware via
+// SMBIOS, OS/network/disk via gopsutil, and best-effort software/users) and
+// returns it as a store.Inventory. Every sub-collector degrades to empty (never
+// an error) when the data it reads is unavailable on the running platform, so a
+// single privileged or platform-specific gap never fails the whole collect.
 package collector
 
 import (
-	"fmt"
+	"context"
 	"os"
+	"runtime"
 	"time"
 
-	"github.com/siderolabs/go-smbios/smbios"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/store"
 )
 
-// Collect gathers a full hardware inventory from the local host
-// using SMBIOS data.
-func Collect() (*Inventory, error) {
-	hostname, _ := os.Hostname()
+// Version is the agent version stamped into every collected inventory. It is
+// overridden from the agent entrypoint (via ldflags) at build time.
+var Version = "dev"
 
-	inv := &Inventory{
-		CollectedAt: time.Now().UTC(),
-		Hostname:    hostname,
-	}
-	monitorInfo, err := CollectMonitorInfo()
-	if err != nil {
-		fmt.Printf("warning: cannot collect monitor info: %v\n", err)
-	} else {
-		inv.Monitor = monitorInfo
-	}
-	userName, err := GetUserInfo()
-	if err != nil {
-		fmt.Printf("warning: cannot collect user info: %v\n", err)
-	} else {
-		inv.Username = userName
-	}
-	s, err := smbios.New()
-	if err != nil {
-		return inv, fmt.Errorf("opening SMBIOS: %w", err)
+// Collect composes every sub-collector into a single store.Inventory. It never
+// returns a nil-meaning error for a missing platform capability; err is only
+// non-nil for a context cancellation observed before any work is done.
+func Collect(ctx context.Context) (store.Inventory, error) {
+	if err := ctx.Err(); err != nil {
+		return store.Inventory{}, err
 	}
 
-	inv.SMBIOSVersion = VersionInfo{
-		Major:    s.Version.Major,
-		Minor:    s.Version.Minor,
-		Revision: s.Version.Revision,
-	}
-	inv.BIOS = collectBIOSInfo(s)
-	inv.System = collectSystemInfo(s)
-	inv.Baseboard = collectBaseboardInfo(s)
-	inv.Chassis = collectChassisInfo(s)
-	inv.Processors = collectProcessorInfo(s)
-	inv.Memory = collectMemoryInfo(s)
-
-	// Cache (Type 7)
-	for _, c := range s.CacheInformation {
-		inv.Cache = append(inv.Cache, CacheInfo{
-			SocketDesignation: c.SocketDesignation,
-		})
+	inv := store.Inventory{
+		CollectedAt:  time.Now().UTC(),
+		AgentVersion: Version,
 	}
 
-	// Port connectors (Type 8)
-	for _, p := range s.PortConnectorInformation {
-		inv.Ports = append(inv.Ports, PortInfo{
-			InternalDesignator: p.InternalReferenceDesignator,
-			ExternalDesignator: p.ExternalReferenceDesignator,
-		})
+	// Identity: hostname + machine id (hardware uuid is filled from SMBIOS below).
+	inv.Identity = collectIdentity()
+
+	// Hardware via SMBIOS. Empty (not error) when SMBIOS is unavailable.
+	if hw, ok := collectHardware(); ok {
+		applyHardware(&inv, hw)
+		if inv.Identity.HardwareUUID == "" {
+			inv.Identity.HardwareUUID = inv.System.UUID
+		}
 	}
 
-	// System slots (Type 9)
-	for _, sl := range s.SystemSlots {
-		inv.Slots = append(inv.Slots, SlotInfo{
-			Designation: sl.SlotDesignation,
-		})
-	}
+	// OS / network / disks via gopsutil (cross-platform).
+	collectOS(ctx, &inv)
+	collectNetworks(&inv)
+	collectDisks(ctx, &inv)
 
-	// OEM strings (Type 11)
-	inv.OEMStrings = s.OEMStrings.Strings
+	// Software: installed programs, services, local users (build-tagged,
+	// best-effort; empty where not implemented for the platform).
+	inv.Programs = collectPrograms()
+	inv.Services = collectServices()
+	inv.Users = collectUsers()
 
-	// BIOS language (Type 13)
-	inv.BIOSLanguage = BIOSLanguageInfo{
-		CurrentLanguage:      s.BIOSLanguageInformation.CurrentLanguage,
-		InstallableLanguages: s.BIOSLanguageInformation.InstallableLanguages,
+	// Platform extras: monitor EDID and the current interactive user.
+	inv.Monitors = collectMonitors()
+	if u, ok := collectCurrentUser(); ok {
+		inv.Users = mergeUser(inv.Users, u)
 	}
 
 	return inv, nil
+}
+
+// applyHardware copies the SMBIOS-derived hardware pieces onto the inventory.
+func applyHardware(inv *store.Inventory, hw hardware) {
+	inv.BIOS = hw.BIOS
+	inv.System = hw.System
+	inv.Baseboard = hw.Baseboard
+	inv.Chassis = hw.Chassis
+	inv.Processors = hw.Processors
+	inv.Cache = hw.Cache
+	inv.Memory = hw.Memory
+	inv.Ports = hw.Ports
+	inv.Slots = hw.Slots
+	inv.OEMStrings = hw.OEMStrings
+	inv.BIOSLanguage = hw.BIOSLanguage
+}
+
+// mergeUser appends u unless a user with the same name is already present.
+func mergeUser(users []store.UserAccount, u store.UserAccount) []store.UserAccount {
+	if u.Name == "" {
+		return users
+	}
+	for _, e := range users {
+		if e.Name == u.Name {
+			return users
+		}
+	}
+	return append(users, u)
+}
+
+// collectIdentity resolves the stable host identity keys available without
+// SMBIOS. HardwareUUID is filled by the hardware collector when present.
+func collectIdentity() store.Identity {
+	host, _ := os.Hostname()
+	return store.Identity{
+		Hostname:  host,
+		MachineID: machineID(),
+	}
+}
+
+// hostArch returns the OS architecture, falling back to the compiled GOARCH.
+func hostArch(kernelArch string) string {
+	if kernelArch != "" {
+		return kernelArch
+	}
+	return runtime.GOARCH
 }

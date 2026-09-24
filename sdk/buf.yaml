@@ -1,0 +1,13 @@
+version: v2
+modules:
+  - path: api/proto
+lint:
+  use: [STANDARD]
+  # go-tangra keeps its established gRPC names (auth.v1.Sessions,
+  # gateway.v1.Registry, ...): they are the wire API every service calls, so the
+  # naming rules below are part of the platform convention, not lint debt.
+  except:
+    - SERVICE_SUFFIX
+    - RPC_REQUEST_STANDARD_NAME
+    - RPC_RESPONSE_STANDARD_NAME
+    - RPC_REQUEST_RESPONSE_UNIQUE

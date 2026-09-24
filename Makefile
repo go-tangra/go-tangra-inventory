@@ -1,37 +1,61 @@
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
-COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-DATE    ?= $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
-LDFLAGS := -X main.version=$(VERSION) -X main.commitHash=$(COMMIT) -X main.buildDate=$(DATE)
+GO        ?= go
+PKGS      := $(shell $(GO) list ./... | grep -v /ui/)
+COVER_OUT := coverage.out
 
-KRATOS_THIRD_PARTY := $(shell go list -m -f '{{.Dir}}' github.com/go-kratos/kratos/v2 2>/dev/null)/third_party
+.PHONY: lint vuln test test-integration cover generate ui-build build build-ui image agent-windows agent-linux agent
 
-.PHONY: build build-collector build-inventory proto openapi gen clean tidy
+lint:
+	$(GO) vet ./...
+	staticcheck ./...
+	gosec -quiet -exclude-generated -exclude-dir=ui ./...
 
-build: build-collector build-inventory
+vuln:
+	./scripts/vulncheck.sh
+	cd sdk && ../scripts/vulncheck.sh
 
-build-collector:
-	go build -ldflags "$(LDFLAGS)" -o inventory-collector ./cmd/collector
+test:
+	$(GO) test -race -count=1 ./...
 
-build-inventory:
-	go build -ldflags "$(LDFLAGS)" -o inventory ./cmd/inventory
+# Docker-backed suites (testcontainers) carry the integration build tag next to
+# the code they exercise.
+test-integration:
+	$(GO) test -race -count=1 -tags integration ./...
 
-proto:
-	protoc \
-		--go_out=gen/go --go_opt=paths=source_relative \
-		--go-grpc_out=gen/go --go-grpc_opt=paths=source_relative \
-		--go-http_out=gen/go --go-http_opt=paths=source_relative \
-		--proto_path=proto \
-		--proto_path=/usr/include \
-		--proto_path=$(KRATOS_THIRD_PARTY) \
-		proto/inventory/collector/v1/collector.proto
+# Generated protobuf, SQL bindings (internal/store, */*db), wiring (internal/app,
+# cmd) and test packages are exercised by the tagged integration suite and are
+# excluded from the unit gate on purpose.
+COVERPKG := $(shell $(GO) list ./... | grep -v -E '/api/|/internal/store$$|db$$|/internal/app$$|/valkeykv$$|/cmd/|/tests/|/ui|/internal/collector|/internal/sender|/internal/daemon|/internal/winsvc|/internal/stream' | paste -sd, -)
 
-openapi:
-	buf generate --template buf.openapi.gen.yaml
+cover:
+	$(GO) test -count=1 -coverprofile=$(COVER_OUT) -coverpkg=$(COVERPKG) $(PKGS)
+	./scripts/coverage-gate.sh $(COVER_OUT)
 
-gen: proto openapi
+generate:
+	cd sdk && buf generate
 
-clean:
-	rm -f inventory-collector inventory
+# Build the federated UI remote (produces ui/dist consumed by the -tags ui build).
+ui-build:
+	cd ui && npm ci && npm run build
 
-tidy:
-	go mod tidy
+# Build the service binary without the embedded UI.
+build:
+	$(GO) build -o bin/inventorysvc ./cmd/inventorysvc
+
+# Build the service binary with the embedded UI remote (requires ui-build first).
+build-ui: ui-build
+	$(GO) build -tags "ui" -o bin/inventorysvc ./cmd/inventorysvc
+
+# Build the container image (NODE_AUTH_TOKEN: GitHub token with read:packages for @go-tangra/ui).
+image:
+	DOCKER_BUILDKIT=1 docker buildx build --secret id=npm_token,env=NODE_AUTH_TOKEN -t go-tangra-inventory:dev .
+
+# Cross-compile the endpoint agent for the platforms it ships to.
+agent: agent-windows agent-linux
+
+agent-windows:
+	GOOS=windows GOARCH=amd64 $(GO) build -o bin/inventory-agent-windows-amd64.exe ./cmd/inventory-agent
+	GOOS=windows GOARCH=arm64 $(GO) build -o bin/inventory-agent-windows-arm64.exe ./cmd/inventory-agent
+
+agent-linux:
+	GOOS=linux GOARCH=amd64 $(GO) build -o bin/inventory-agent-linux-amd64 ./cmd/inventory-agent
+	GOOS=linux GOARCH=arm64 $(GO) build -o bin/inventory-agent-linux-arm64 ./cmd/inventory-agent

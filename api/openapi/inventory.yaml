@@ -1,0 +1,96 @@
+openapi: 3.1.0
+info:
+  title: Inventory API
+  version: 0.1.0
+  description: >
+    Endpoint inventory: managed hosts, their immutable inventory snapshots
+    (hardware, OS, software and network), detected change history, per-tenant
+    statistics, operator agent enrollment and control, and tenant backup.
+    Gateway-proxied under /api/inventory. Every route declares an
+    x-freya-permission; agent and enrollment credentials and sealed fields are
+    never returned in listings or logs.
+servers:
+  - url: /
+components:
+  parameters:
+    csrf:
+      name: X-CSRF-Token
+      in: header
+      required: true
+      schema: { type: string, maxLength: 128 }
+    id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, maxLength: 64 }
+      example: '018f3a2b-0000-7000-8000-000000000001'
+    hostId:
+      name: host_id
+      in: path
+      required: true
+      schema: { type: string, maxLength: 64 }
+      example: '018f3a2b-0000-7000-8000-0000000000aa'
+    other:
+      name: other
+      in: path
+      required: true
+      schema: { type: string, maxLength: 64 }
+      example: '018f3a2b-0000-7000-8000-000000000002'
+    cursor:
+      name: cursor
+      in: query
+      required: false
+      schema: { type: string, maxLength: 64 }
+    limit:
+      name: limit
+      in: query
+      required: false
+      schema: { type: integer, minimum: 1, maximum: 500 }
+  schemas:
+    Error:
+      type: object
+      properties:
+        reason: { type: string }
+        detail: { type: object }
+      example:
+        reason: not_found
+        detail: {}
+paths:
+  /api/inventory/v1/hosts:
+    get: { operationId: listHosts, x-freya-permission: 'inventory:read', parameters: [{ $ref: '#/components/parameters/cursor' }, { $ref: '#/components/parameters/limit' }], responses: { '200': { description: list } } }
+  /api/inventory/v1/hosts/{id}:
+    get: { operationId: getHost, x-freya-permission: 'inventory:read', parameters: [{ $ref: '#/components/parameters/id' }], responses: { '200': { description: host }, '404': { description: not_found } } }
+    delete: { operationId: deleteHost, x-freya-permission: 'hosts:manage', parameters: [{ $ref: '#/components/parameters/csrf' }, { $ref: '#/components/parameters/id' }], responses: { '204': { description: deleted } } }
+  /api/inventory/v1/hosts/{id}/latest:
+    get: { operationId: getHostLatestSnapshot, x-freya-permission: 'inventory:read', parameters: [{ $ref: '#/components/parameters/id' }], responses: { '200': { description: snapshot }, '404': { description: not_found } } }
+  /api/inventory/v1/hosts/{id}/tags:
+    post: { operationId: setHostTags, x-freya-permission: 'hosts:manage', x-freya-max-body-bytes: 65536, parameters: [{ $ref: '#/components/parameters/csrf' }, { $ref: '#/components/parameters/id' }], responses: { '200': { description: tagged } } }
+  /api/inventory/v1/hosts/{id}/retire:
+    post: { operationId: retireHost, x-freya-permission: 'hosts:manage', parameters: [{ $ref: '#/components/parameters/csrf' }, { $ref: '#/components/parameters/id' }], responses: { '200': { description: retired } } }
+  /api/inventory/v1/hosts/{id}/snapshots:
+    get: { operationId: listHostSnapshots, x-freya-permission: 'snapshots:read', parameters: [{ $ref: '#/components/parameters/id' }, { $ref: '#/components/parameters/cursor' }, { $ref: '#/components/parameters/limit' }], responses: { '200': { description: history } } }
+  /api/inventory/v1/hosts/{id}/changes:
+    get: { operationId: listHostChanges, x-freya-permission: 'snapshots:read', parameters: [{ $ref: '#/components/parameters/id' }, { $ref: '#/components/parameters/limit' }], responses: { '200': { description: changes } } }
+  /api/inventory/v1/snapshots/{id}:
+    get: { operationId: getSnapshot, x-freya-permission: 'snapshots:read', parameters: [{ $ref: '#/components/parameters/id' }], responses: { '200': { description: snapshot }, '404': { description: not_found } } }
+    delete: { operationId: deleteSnapshot, x-freya-permission: 'snapshots:manage', parameters: [{ $ref: '#/components/parameters/csrf' }, { $ref: '#/components/parameters/id' }], responses: { '204': { description: deleted } } }
+  /api/inventory/v1/snapshots/{id}/diff/{other}:
+    get: { operationId: diffSnapshots, x-freya-permission: 'snapshots:read', parameters: [{ $ref: '#/components/parameters/id' }, { $ref: '#/components/parameters/other' }], responses: { '200': { description: diff } } }
+  /api/inventory/v1/agents:
+    get: { operationId: listConnectedAgents, x-freya-permission: 'agents:manage', responses: { '200': { description: 'connected agents' } } }
+  /api/inventory/v1/agents/enroll-token:
+    post: { operationId: mintEnrollmentToken, x-freya-permission: 'agents:manage', x-freya-max-body-bytes: 65536, parameters: [{ $ref: '#/components/parameters/csrf' }], responses: { '201': { description: 'token minted (secret returned once)' } } }
+  /api/inventory/v1/agents/{host_id}/refresh:
+    post: { operationId: refreshInventory, x-freya-permission: 'agents:manage', parameters: [{ $ref: '#/components/parameters/csrf' }, { $ref: '#/components/parameters/hostId' }], responses: { '200': { description: 'refresh requested' } } }
+  /api/inventory/v1/agents/{id}/revoke:
+    post: { operationId: revokeAgent, x-freya-permission: 'agents:manage', parameters: [{ $ref: '#/components/parameters/csrf' }, { $ref: '#/components/parameters/id' }], responses: { '200': { description: revoked } } }
+  /api/inventory/v1/statistics/tenant:
+    get: { operationId: getTenantStatistics, x-freya-permission: 'stats:read', responses: { '200': { description: 'tenant statistics' } } }
+  /api/inventory/v1/statistics/system:
+    get: { operationId: getSystemStatistics, x-freya-permission: 'stats:read', responses: { '200': { description: 'system statistics (admin)' } } }
+  /api/inventory/v1/backup/export:
+    post: { operationId: exportBackup, x-freya-permission: 'backup:manage', x-freya-max-body-bytes: 65536, parameters: [{ $ref: '#/components/parameters/csrf' }], responses: { '200': { description: export } } }
+  /api/inventory/v1/backup/import:
+    post: { operationId: importBackup, x-freya-permission: 'backup:manage', x-freya-max-body-bytes: 268435456, parameters: [{ $ref: '#/components/parameters/csrf' }], responses: { '200': { description: imported } } }
+  /api/inventory/v1/stream:
+    get: { operationId: streamEvents, x-freya-permission: 'inventory:read', responses: { '200': { description: 'SSE event stream (agent-online/offline, snapshot-received)' } } }

@@ -1,0 +1,17 @@
+# Freya service-to-service policy for inventory: the gateway forwards browser
+# traffic and probes health; the inventory.v1 gRPC surface (host/snapshot/
+# statistics/agent) is called by other modules directly. The off-mesh ingest
+# edge authenticates agents by per-agent credential (not mesh policy) on a
+# separate listener. Inventory itself calls auth/lcm as a client.
+version: inventory-dev-1
+rules:
+  - id: gateway-forwards
+    from: ["spiffe://example.org/svc/gateway"]
+    to: ["inventory"]
+    operations: ["*"]
+    effect: allow
+  - id: asset-sync
+    from: ["spiffe://example.org/svc/asset"]
+    to: ["inventory"]
+    operations: ["/inventory.v1.InventoryHostService/ListHosts", "/inventory.v1.InventoryHostService/GetHost", "/grpc.health.v1.Health/Check"]
+    effect: allow

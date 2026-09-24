@@ -1,0 +1,21 @@
+# Generated from go-freya tools/split/templates/dockerignore.tmpl.
+.git
+.github
+**/node_modules
+**/dist
+**/dist-remote
+**/coverage
+**/test-results
+**/playwright-report
+**/*.test
+**/coverage.out
+bin/
+go.work
+go.work.sum
+/inventorysvc
+/inventory-agent
+/inventory-agent.exe
+# Key material never goes into an image; the stack mounts development keys.
+deploy/kek.dev
+deploy/*.kek
+deploy/dev-kek.b64

@@ -1,5 +1,8 @@
 //go:build windows
 
+// Package winsvc integrates the endpoint agent with the Windows Service Control
+// Manager: install/uninstall, running under the SCM, and routing the standard
+// logger to the Windows Event Log.
 package winsvc
 
 import (
@@ -15,38 +18,31 @@ import (
 	"golang.org/x/sys/windows/svc/mgr"
 )
 
-// eventLogWriter wraps an eventlog.Log so standard log.Printf calls
-// are written to the Windows Event Log as informational messages.
+// eventLogWriter routes standard log output to the Windows Event Log.
 type eventLogWriter struct {
 	elog *eventlog.Log
 }
 
 func (w *eventLogWriter) Write(p []byte) (int, error) {
-	err := w.elog.Info(1, string(p))
-	if err != nil {
+	if err := w.elog.Info(1, string(p)); err != nil {
 		return 0, err
 	}
 	return len(p), nil
 }
 
-// SetupEventLog ensures the named event log source is registered, then
-// opens it and redirects the standard logger output to it.  Event log
-// entries carry their own timestamps, so log flags are cleared.
+// SetupEventLog registers (idempotently) and opens the named event source, then
+// redirects the standard logger to it. Falls back to stderr on failure.
 func SetupEventLog(name string) {
-	// Ensure the event source is registered (idempotent — ignores "already exists").
-	// This covers the MSI install path where ServiceInstall doesn't create the source.
 	_ = eventlog.InstallAsEventCreate(name, eventlog.Error|eventlog.Warning|eventlog.Info)
-
 	elog, err := eventlog.Open(name)
 	if err != nil {
-		return // fall back to default stderr logging
+		return
 	}
 	log.SetOutput(&eventLogWriter{elog: elog})
 	log.SetFlags(0)
 }
 
-// IsWindowsService reports whether the process is running as a
-// Windows service.
+// IsWindowsService reports whether the process is running under the SCM.
 func IsWindowsService() bool {
 	ok, err := svc.IsWindowsService()
 	if err != nil {
@@ -55,13 +51,13 @@ func IsWindowsService() bool {
 	return ok
 }
 
-// serviceHandler implements svc.Handler for a long-running function.
+// serviceHandler adapts a long-running function to svc.Handler.
 type serviceHandler struct {
 	name string
 	run  func(ctx context.Context) error
 }
 
-func (h *serviceHandler) Execute(args []string, req <-chan svc.ChangeRequest, status chan<- svc.Status) (bool, uint32) {
+func (h *serviceHandler) Execute(_ []string, req <-chan svc.ChangeRequest, status chan<- svc.Status) (bool, uint32) {
 	const accepted = svc.AcceptStop | svc.AcceptShutdown
 	status <- svc.Status{State: svc.StartPending}
 
@@ -69,23 +65,19 @@ func (h *serviceHandler) Execute(args []string, req <-chan svc.ChangeRequest, st
 	defer cancel()
 
 	errCh := make(chan error, 1)
-	go func() {
-		errCh <- h.run(ctx)
-	}()
+	go func() { errCh <- h.run(ctx) }()
 
 	status <- svc.Status{State: svc.Running, Accepts: accepted}
 
 	for {
 		select {
 		case err := <-errCh:
-			// run function returned on its own.
 			status <- svc.Status{State: svc.StopPending}
 			if err != nil {
-				log.Printf("Service %s stopped with error: %v", h.name, err)
+				log.Printf("service %s stopped with error: %v", h.name, err)
 				return false, 1
 			}
 			return false, 0
-
 		case cr := <-req:
 			switch cr.Cmd {
 			case svc.Interrogate:
@@ -93,11 +85,10 @@ func (h *serviceHandler) Execute(args []string, req <-chan svc.ChangeRequest, st
 			case svc.Stop, svc.Shutdown:
 				status <- svc.Status{State: svc.StopPending}
 				cancel()
-				// Wait for run to finish (with a generous timeout).
 				select {
 				case <-errCh:
 				case <-time.After(30 * time.Second):
-					log.Printf("Service %s: timed out waiting for graceful shutdown", h.name)
+					log.Printf("service %s: timed out waiting for graceful shutdown", h.name)
 				}
 				return false, 0
 			}
@@ -105,15 +96,13 @@ func (h *serviceHandler) Execute(args []string, req <-chan svc.ChangeRequest, st
 	}
 }
 
-// RunService runs the named Windows service, blocking until the
-// service stops.  The run function receives a context that is
-// cancelled when the SCM requests a stop.
+// RunService runs the named service, blocking until it stops. The run function
+// receives a context canceled when the SCM requests a stop.
 func RunService(name string, run func(ctx context.Context) error) error {
 	return svc.Run(name, &serviceHandler{name: name, run: run})
 }
 
-// Install registers a Windows service with the Service Control
-// Manager and creates an event log source.
+// Install registers the service with the SCM and creates an event log source.
 func Install(name, displayName, description, exePath string, args []string) error {
 	m, err := mgr.Connect()
 	if err != nil {
@@ -121,42 +110,34 @@ func Install(name, displayName, description, exePath string, args []string) erro
 	}
 	defer m.Disconnect()
 
-	// Check if service already exists.
-	s, err := m.OpenService(name)
-	if err == nil {
+	if s, err := m.OpenService(name); err == nil {
 		s.Close()
 		return fmt.Errorf("service %s already exists", name)
 	}
 
-	cfg := mgr.Config{
+	s, err := m.CreateService(name, exePath, mgr.Config{
 		DisplayName: displayName,
 		Description: description,
 		StartType:   mgr.StartAutomatic,
-	}
-
-	s, err = m.CreateService(name, exePath, cfg, args...)
+	}, args...)
 	if err != nil {
 		return fmt.Errorf("create service: %w", err)
 	}
 	defer s.Close()
 
-	// Best-effort: set recovery to restart on first two failures.
 	_ = s.SetRecoveryActions([]mgr.RecoveryAction{
 		{Type: mgr.ServiceRestart, Delay: 10 * time.Second},
 		{Type: mgr.ServiceRestart, Delay: 30 * time.Second},
 		{Type: mgr.NoAction},
-	}, 86400) // reset period: 1 day
+	}, 86400)
 
-	// Register event log source.
 	if err := eventlog.InstallAsEventCreate(name, eventlog.Error|eventlog.Warning|eventlog.Info); err != nil {
-		// Non-fatal: the service itself is installed.
-		log.Printf("Warning: could not install event log source: %v", err)
+		log.Printf("warning: could not install event log source: %v", err)
 	}
-
 	return nil
 }
 
-// Uninstall removes the named Windows service and its event log
+// Uninstall stops (if running) and removes the named service and its event log
 // source.
 func Uninstall(name string) error {
 	m, err := mgr.Connect()
@@ -171,15 +152,11 @@ func Uninstall(name string) error {
 	}
 	defer s.Close()
 
-	// Stop the service if it is running.
-	status, err := s.Query()
-	if err == nil && status.State != svc.Stopped {
+	if status, err := s.Query(); err == nil && status.State != svc.Stopped {
 		_, _ = s.Control(svc.Stop)
-		// Give it a moment to stop.
 		for range 10 {
 			time.Sleep(500 * time.Millisecond)
-			status, err = s.Query()
-			if err != nil || status.State == svc.Stopped {
+			if status, err = s.Query(); err != nil || status.State == svc.Stopped {
 				break
 			}
 		}
@@ -188,10 +165,7 @@ func Uninstall(name string) error {
 	if err := s.Delete(); err != nil {
 		return fmt.Errorf("delete service: %w", err)
 	}
-
-	// Best-effort: remove event log source.
 	_ = eventlog.Remove(name)
-
 	return nil
 }
 
