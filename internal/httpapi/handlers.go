@@ -5,9 +5,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/go-freya/freya/services/inventory/internal/backup"
-	"github.com/go-freya/freya/services/inventory/internal/registry"
-	"github.com/go-freya/freya/services/inventory/internal/store"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/backup"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/registry"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/store"
 )
 
 // Register mounts the inventory HTTP routes declared in the OpenAPI document.

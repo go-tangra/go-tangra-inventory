@@ -7,7 +7,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/go-freya/freya/services/inventory/internal/store"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/store"
 )
 
 // Sentinel errors.

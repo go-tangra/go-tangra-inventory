@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/go-freya/freya/services/inventory/internal/diff"
-	"github.com/go-freya/freya/services/inventory/internal/store"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/diff"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/store"
 )
 
 // FuzzDiff feeds arbitrary bytes as two inventory payloads (parsed leniently)

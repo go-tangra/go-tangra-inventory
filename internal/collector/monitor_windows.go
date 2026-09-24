@@ -9,7 +9,7 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/go-freya/freya/services/inventory/internal/store"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/store"
 )
 
 type psMonitor struct {

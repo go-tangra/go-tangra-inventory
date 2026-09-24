@@ -2,7 +2,7 @@
 
 package collector
 
-import "github.com/go-freya/freya/services/inventory/internal/store"
+import "github.com/go-tangra/go-tangra-inventory/v4/internal/store"
 
 // collectCurrentUser (token-based) is a Windows-only extra.
 func collectCurrentUser() (store.UserAccount, bool) { return store.UserAccount{}, false }

@@ -11,8 +11,8 @@ import (
 	"fmt"
 	"time"
 
-	invv1 "github.com/go-freya/freya/services/inventory/api/proto/inventory/v1"
-	"github.com/go-freya/freya/services/inventory/internal/store"
+	invv1 "github.com/go-tangra/go-tangra-inventory/sdk/v4/api/proto/inventory/v1"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/store"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"

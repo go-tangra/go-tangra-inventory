@@ -1,8 +1,8 @@
 package sender
 
 import (
-	invv1 "github.com/go-freya/freya/services/inventory/api/proto/inventory/v1"
-	"github.com/go-freya/freya/services/inventory/internal/store"
+	invv1 "github.com/go-tangra/go-tangra-inventory/sdk/v4/api/proto/inventory/v1"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/store"
 )
 
 // identityToProto maps a store.Identity to its proto message.

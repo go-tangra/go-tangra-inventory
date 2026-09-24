@@ -15,7 +15,7 @@ import (
 
 	"github.com/valkey-io/valkey-go"
 
-	"github.com/go-freya/freya/services/inventory/internal/stream"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/stream"
 )
 
 // Config connects to Valkey. TLS is required unless AllowPlaintext.

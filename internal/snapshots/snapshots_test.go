@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-freya/freya/services/inventory/internal/authz"
-	"github.com/go-freya/freya/services/inventory/internal/hosts"
-	"github.com/go-freya/freya/services/inventory/internal/memstore"
-	"github.com/go-freya/freya/services/inventory/internal/snapshots"
-	"github.com/go-freya/freya/services/inventory/internal/store"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/authz"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/hosts"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/memstore"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/snapshots"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/store"
 )
 
 // recPub records published events for assertions.

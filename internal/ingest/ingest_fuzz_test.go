@@ -9,15 +9,15 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
-	inventoryv1 "github.com/go-freya/freya/services/inventory/api/proto/inventory/v1"
-	"github.com/go-freya/freya/services/inventory/internal/enroll"
-	"github.com/go-freya/freya/services/inventory/internal/events"
-	"github.com/go-freya/freya/services/inventory/internal/hosts"
-	"github.com/go-freya/freya/services/inventory/internal/memstore"
-	"github.com/go-freya/freya/services/inventory/internal/registry"
-	"github.com/go-freya/freya/services/inventory/internal/sealed"
-	"github.com/go-freya/freya/services/inventory/internal/snapshots"
-	"github.com/go-freya/freya/services/inventory/internal/store"
+	inventoryv1 "github.com/go-tangra/go-tangra-inventory/sdk/v4/api/proto/inventory/v1"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/enroll"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/events"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/hosts"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/memstore"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/registry"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/sealed"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/snapshots"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/store"
 )
 
 // fuzzServer builds an ingest Server plus a pre-enrolled agent and returns a

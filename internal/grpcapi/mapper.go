@@ -3,12 +3,12 @@ package grpcapi
 import (
 	"time"
 
-	invv1 "github.com/go-freya/freya/services/inventory/api/proto/inventory/v1"
-	"github.com/go-freya/freya/services/inventory/internal/hosts"
-	"github.com/go-freya/freya/services/inventory/internal/registry"
-	"github.com/go-freya/freya/services/inventory/internal/repo"
-	"github.com/go-freya/freya/services/inventory/internal/snapshots"
-	"github.com/go-freya/freya/services/inventory/internal/store"
+	invv1 "github.com/go-tangra/go-tangra-inventory/sdk/v4/api/proto/inventory/v1"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/hosts"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/registry"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/repo"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/snapshots"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/store"
 )
 
 // unix returns t as unix seconds, or 0 for the zero time.

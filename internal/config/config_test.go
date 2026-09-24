@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	fconfig "github.com/go-freya/freya/config"
+	fconfig "github.com/go-tangra/go-tangra/v4/config"
 )
 
 // valid returns a Config that passes both the framework and module Validate.

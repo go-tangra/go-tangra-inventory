@@ -8,8 +8,8 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	inventoryv1 "github.com/go-freya/freya/services/inventory/api/proto/inventory/v1"
-	"github.com/go-freya/freya/services/inventory/internal/store"
+	inventoryv1 "github.com/go-tangra/go-tangra-inventory/sdk/v4/api/proto/inventory/v1"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/store"
 )
 
 // Metadata keys carrying the per-agent credential. They mirror the keys the

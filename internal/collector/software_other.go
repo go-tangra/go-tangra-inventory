@@ -2,7 +2,7 @@
 
 package collector
 
-import "github.com/go-freya/freya/services/inventory/internal/store"
+import "github.com/go-tangra/go-tangra-inventory/v4/internal/store"
 
 // collectPrograms is not implemented outside Linux and Windows.
 func collectPrograms() []store.Program { return nil }

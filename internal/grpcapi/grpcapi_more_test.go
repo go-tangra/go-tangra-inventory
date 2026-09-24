@@ -10,15 +10,15 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	invv1 "github.com/go-freya/freya/services/inventory/api/proto/inventory/v1"
-	"github.com/go-freya/freya/services/inventory/internal/authz"
-	"github.com/go-freya/freya/services/inventory/internal/backup"
-	"github.com/go-freya/freya/services/inventory/internal/enroll"
-	"github.com/go-freya/freya/services/inventory/internal/hosts"
-	"github.com/go-freya/freya/services/inventory/internal/registry"
-	"github.com/go-freya/freya/services/inventory/internal/repo"
-	"github.com/go-freya/freya/services/inventory/internal/snapshots"
-	"github.com/go-freya/freya/services/inventory/internal/store"
+	invv1 "github.com/go-tangra/go-tangra-inventory/sdk/v4/api/proto/inventory/v1"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/authz"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/backup"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/enroll"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/hosts"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/registry"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/repo"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/snapshots"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/store"
 )
 
 func TestGrpcErrorMappings(t *testing.T) {

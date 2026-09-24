@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 
-	"github.com/go-freya/freya/services/inventory/internal/diff"
-	"github.com/go-freya/freya/services/inventory/internal/events"
-	"github.com/go-freya/freya/services/inventory/internal/repo"
-	"github.com/go-freya/freya/services/inventory/internal/store"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/diff"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/events"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/repo"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/store"
 )
 
 // Ingest is the agent/import write path. It resolves (or creates) the host from

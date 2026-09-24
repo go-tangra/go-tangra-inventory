@@ -15,9 +15,9 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 	"google.golang.org/grpc"
 
-	authv1 "github.com/go-freya/freya/services/auth/api/proto/auth/v1"
-	"github.com/go-freya/freya/services/gateway/pkg/gatewayclient"
-	"github.com/go-freya/freya/services/inventory/api/openapi"
+	authv1 "github.com/go-tangra/go-tangra-auth/sdk/v4/api/proto/auth/v1"
+	"github.com/go-tangra/go-tangra-inventory/v4/api/openapi"
+	"github.com/go-tangra/go-tangra-portal/sdk/v4/pkg/gatewayclient"
 )
 
 // Module identity.

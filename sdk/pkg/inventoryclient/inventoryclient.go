@@ -15,7 +15,7 @@ import (
 
 	"google.golang.org/grpc"
 
-	invv1 "github.com/go-freya/freya/services/inventory/api/proto/inventory/v1"
+	invv1 "github.com/go-tangra/go-tangra-inventory/sdk/v4/api/proto/inventory/v1"
 )
 
 // Client calls the inventory.v1 API over a caller-provided gRPC connection.

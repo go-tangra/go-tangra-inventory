@@ -4,15 +4,15 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/go-freya/freya/services/inventory/internal/authz"
-	"github.com/go-freya/freya/services/inventory/internal/backup"
-	"github.com/go-freya/freya/services/inventory/internal/enroll"
-	"github.com/go-freya/freya/services/inventory/internal/hosts"
-	"github.com/go-freya/freya/services/inventory/internal/registry"
-	"github.com/go-freya/freya/services/inventory/internal/repo"
-	"github.com/go-freya/freya/services/inventory/internal/snapshots"
-	"github.com/go-freya/freya/services/inventory/internal/stats"
-	"github.com/go-freya/freya/services/inventory/internal/stream"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/authz"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/backup"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/enroll"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/hosts"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/registry"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/repo"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/snapshots"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/stats"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/stream"
 )
 
 // Deps wire the inventory HTTP handlers. Every field is required except Hub,

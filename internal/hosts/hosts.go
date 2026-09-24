@@ -10,9 +10,9 @@ import (
 	"errors"
 	"time"
 
-	"github.com/go-freya/freya/services/inventory/internal/authz"
-	"github.com/go-freya/freya/services/inventory/internal/repo"
-	"github.com/go-freya/freya/services/inventory/internal/store"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/authz"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/repo"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/store"
 )
 
 // ErrNotFound is returned when a host does not exist within the caller's tenant.

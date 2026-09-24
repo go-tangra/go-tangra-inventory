@@ -14,10 +14,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-freya/freya/services/inventory/internal/collector"
-	"github.com/go-freya/freya/services/inventory/internal/config"
-	"github.com/go-freya/freya/services/inventory/internal/daemon"
-	"github.com/go-freya/freya/services/inventory/internal/winsvc"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/collector"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/config"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/daemon"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/winsvc"
 )
 
 // version is stamped via -ldflags "-X main.version=...".

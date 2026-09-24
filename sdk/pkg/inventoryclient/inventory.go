@@ -3,7 +3,7 @@ package inventoryclient
 import (
 	"time"
 
-	invv1 "github.com/go-freya/freya/services/inventory/api/proto/inventory/v1"
+	invv1 "github.com/go-tangra/go-tangra-inventory/sdk/v4/api/proto/inventory/v1"
 )
 
 // Inventory is a snapshot's full collected payload as plain Go values.

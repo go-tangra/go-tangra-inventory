@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/go-freya/freya/services/inventory/pkg/inventorymanifest"
+	"github.com/go-tangra/go-tangra-inventory/v4/pkg/inventorymanifest"
 )
 
 // SeedPermissions registers the module's permissions + built-in role grants with

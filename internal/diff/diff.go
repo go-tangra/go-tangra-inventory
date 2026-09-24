@@ -12,7 +12,7 @@ import (
 	"reflect"
 	"sort"
 
-	"github.com/go-freya/freya/services/inventory/internal/store"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/store"
 )
 
 // Component category names used for the Change.Category field. Singleton

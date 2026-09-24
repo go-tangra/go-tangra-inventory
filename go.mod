@@ -1,4 +1,4 @@
-module github.com/go-freya/freya/services/inventory
+module github.com/go-tangra/go-tangra-inventory/v4
 
 go 1.26.3
 
@@ -6,10 +6,11 @@ toolchain go1.26.8
 
 require (
 	github.com/getkin/kin-openapi v0.149.0
-	github.com/go-freya/freya v0.0.0-00010101000000-000000000000
-	github.com/go-freya/freya/services/auth v0.0.0-00010101000000-000000000000
-	github.com/go-freya/freya/services/gateway v0.0.0-00010101000000-000000000000
-	github.com/go-freya/freya/services/lcm v0.0.0-00010101000000-000000000000
+	github.com/go-tangra/go-tangra-auth/sdk/v4 v4.0.0
+	github.com/go-tangra/go-tangra-inventory/sdk/v4 v4.0.0
+	github.com/go-tangra/go-tangra-lcm/sdk/v4 v4.0.0
+	github.com/go-tangra/go-tangra-portal/sdk/v4 v4.0.0
+	github.com/go-tangra/go-tangra/v4 v4.0.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/pressly/goose/v3 v3.28.0
 	github.com/shirou/gopsutil/v4 v4.26.8
@@ -72,6 +73,7 @@ require (
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/power-devops/perfstat v0.0.0-20240221224432-82ca36839d55 // indirect
+	github.com/rogpeppe/go-internal v1.16.0 // indirect
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3 // indirect
 	github.com/sethvargo/go-retry v0.4.0 // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect
@@ -96,11 +98,3 @@ require (
 	google.golang.org/genproto/googleapis/api v0.0.0-20260526163538-3dc84a4a5aaa // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260831171406-18b4a7587f8a // indirect
 )
-
-replace github.com/go-freya/freya => ../..
-
-replace github.com/go-freya/freya/services/auth => ../auth
-
-replace github.com/go-freya/freya/services/gateway => ../gateway
-
-replace github.com/go-freya/freya/services/lcm => ../lcm

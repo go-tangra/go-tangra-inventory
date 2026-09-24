@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/go-freya/freya/services/inventory/internal/store"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/store"
 	"github.com/siderolabs/go-smbios/smbios"
 )
 

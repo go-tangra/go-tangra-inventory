@@ -16,11 +16,11 @@ import (
 	"strings"
 	"time"
 
-	invv1 "github.com/go-freya/freya/services/inventory/api/proto/inventory/v1"
-	"github.com/go-freya/freya/services/inventory/internal/collector"
-	"github.com/go-freya/freya/services/inventory/internal/config"
-	"github.com/go-freya/freya/services/inventory/internal/sender"
-	"github.com/go-freya/freya/services/inventory/internal/store"
+	invv1 "github.com/go-tangra/go-tangra-inventory/sdk/v4/api/proto/inventory/v1"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/collector"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/config"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/sender"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/store"
 )
 
 const (

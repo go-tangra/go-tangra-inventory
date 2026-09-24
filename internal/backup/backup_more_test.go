@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-freya/freya/services/inventory/internal/authz"
-	"github.com/go-freya/freya/services/inventory/internal/backup"
-	"github.com/go-freya/freya/services/inventory/internal/memstore"
-	"github.com/go-freya/freya/services/inventory/internal/store"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/authz"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/backup"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/memstore"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/store"
 )
 
 func TestSetClock_UsedInExportTimestamp(t *testing.T) {

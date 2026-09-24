@@ -28,7 +28,7 @@ cover:
 	./scripts/coverage-gate.sh $(COVER_OUT)
 
 generate:
-	buf generate
+	cd sdk && buf generate
 
 # Build the federated UI remote (produces ui/dist consumed by the -tags ui build).
 ui-build:

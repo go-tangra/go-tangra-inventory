@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-freya/freya/services/inventory/internal/repo"
-	"github.com/go-freya/freya/services/inventory/internal/store"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/repo"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/store"
 )
 
 // injected is the error FailNext arms for a given method.

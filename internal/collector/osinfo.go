@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-freya/freya/services/inventory/internal/store"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/store"
 	"github.com/shirou/gopsutil/v4/disk"
 	"github.com/shirou/gopsutil/v4/host"
 	gnet "github.com/shirou/gopsutil/v4/net"

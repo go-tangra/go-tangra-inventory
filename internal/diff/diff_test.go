@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-freya/freya/services/inventory/internal/diff"
-	"github.com/go-freya/freya/services/inventory/internal/store"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/diff"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/store"
 )
 
 // find returns the change for a category+key, if present.

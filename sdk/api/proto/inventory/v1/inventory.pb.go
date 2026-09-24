@@ -5019,7 +5019,7 @@ const file_inventory_v1_inventory_proto_rawDesc = "" +
 	"\rIngestService\x12C\n" +
 	"\x06Enroll\x12\x1b.inventory.v1.EnrollRequest\x1a\x1c.inventory.v1.EnrollResponse\x12L\n" +
 	"\x0fSubmitInventory\x12\x1b.inventory.v1.SubmitRequest\x1a\x1c.inventory.v1.SubmitResponse\x12F\n" +
-	"\x0eStreamCommands\x12\x1b.inventory.v1.StreamRequest\x1a\x15.inventory.v1.Command0\x01BQZOgithub.com/go-freya/freya/services/inventory/api/proto/inventory/v1;inventoryv1b\x06proto3"
+	"\x0eStreamCommands\x12\x1b.inventory.v1.StreamRequest\x1a\x15.inventory.v1.Command0\x01BTZRgithub.com/go-tangra/go-tangra-inventory/sdk/v4/api/proto/inventory/v1;inventoryv1b\x06proto3"
 
 var (
 	file_inventory_v1_inventory_proto_rawDescOnce sync.Once

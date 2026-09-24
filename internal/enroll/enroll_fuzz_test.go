@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-freya/freya/services/inventory/internal/memstore"
-	"github.com/go-freya/freya/services/inventory/internal/sealed"
-	"github.com/go-freya/freya/services/inventory/internal/store"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/memstore"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/sealed"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/store"
 )
 
 // FuzzEnrollToken feeds arbitrary secrets to Enroll and arbitrary credentials to

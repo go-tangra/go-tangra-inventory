@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-freya/freya/services/inventory/internal/authz"
-	"github.com/go-freya/freya/services/inventory/internal/memstore"
-	"github.com/go-freya/freya/services/inventory/internal/stats"
-	"github.com/go-freya/freya/services/inventory/internal/store"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/authz"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/memstore"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/stats"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/store"
 )
 
 func seedHost(t *testing.T, m *memstore.Mem, tenant, hostname, hwUUID string, lastSeen time.Time) store.Host {

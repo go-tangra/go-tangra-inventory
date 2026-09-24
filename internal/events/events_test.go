@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-freya/freya/services/inventory/internal/stream"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/stream"
 )
 
 func TestNilHubPublisherIsNoOp(t *testing.T) {

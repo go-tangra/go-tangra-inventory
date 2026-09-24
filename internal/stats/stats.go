@@ -10,8 +10,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/go-freya/freya/services/inventory/internal/authz"
-	"github.com/go-freya/freya/services/inventory/internal/repo"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/authz"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/repo"
 )
 
 // DefaultStaleAfter is the age past a host's last_seen after which it counts as
