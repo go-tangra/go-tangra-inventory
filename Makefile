@@ -2,7 +2,7 @@ GO        ?= go
 PKGS      := $(shell $(GO) list ./... | grep -v /ui/)
 COVER_OUT := coverage.out
 
-.PHONY: lint vuln test test-integration cover generate ui-build build build-ui image compose-up compose-down agent-windows agent-linux agent
+.PHONY: lint vuln test test-integration cover generate ui-build build build-ui image agent-windows agent-linux agent
 
 lint:
 	$(GO) vet ./...
@@ -16,8 +16,10 @@ vuln:
 test:
 	$(GO) test -race -count=1 ./...
 
+# Docker-backed suites (testcontainers) carry the integration build tag next to
+# the code they exercise.
 test-integration:
-	$(GO) test -race -count=1 -tags integration ./tests/integration/...
+	$(GO) test -race -count=1 -tags integration ./...
 
 # Generated protobuf, SQL bindings (internal/store, */*db), wiring (internal/app,
 # cmd) and test packages are exercised by the tagged integration suite and are
@@ -46,12 +48,6 @@ build-ui: ui-build
 # Build the container image (NODE_AUTH_TOKEN: GitHub token with read:packages for @go-tangra/ui).
 image:
 	DOCKER_BUILDKIT=1 docker buildx build --secret id=npm_token,env=NODE_AUTH_TOKEN -t go-tangra-inventory:dev .
-
-compose-up:
-	docker compose -p inventory -f deploy/compose.yaml up -d
-
-compose-down:
-	docker compose -p inventory -f deploy/compose.yaml down -v
 
 # Cross-compile the endpoint agent for the platforms it ships to.
 agent: agent-windows agent-linux
