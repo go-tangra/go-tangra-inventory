@@ -42,9 +42,9 @@ build:
 build-ui: ui-build
 	$(GO) build -tags "ui" -o bin/inventorysvc ./cmd/inventorysvc
 
-# Build the container image (context is the repo root so replace directives resolve).
+# Build the container image (NODE_AUTH_TOKEN: GitHub token with read:packages for @go-tangra/ui).
 image:
-	docker build -f Dockerfile -t inventorysvc ../..
+	DOCKER_BUILDKIT=1 docker buildx build --secret id=npm_token,env=NODE_AUTH_TOKEN -t go-tangra-inventory:dev .
 
 compose-up:
 	docker compose -p inventory -f deploy/compose.yaml up -d
