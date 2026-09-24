@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { UiPage, UiAlert, UiCard, UiForm, UiInput, UiSelect, UiButton, UiDataTable, UiStatusChip, UiLiveIndicator, type Column, type SelectOption } from '@freya/ui'
-import { useZodForm } from '@freya/ui/forms'
+import { UiPage, UiAlert, UiCard, UiForm, UiInput, UiSelect, UiButton, UiDataTable, UiStatusChip, UiLiveIndicator, type Column, type SelectOption } from '@go-tangra/ui'
+import { useZodForm } from '@go-tangra/ui/forms'
 import { useHosts } from '@/stores/hosts'
 import { useAgents } from '@/stores/agents'
 import { useLive } from '@/stores/live'

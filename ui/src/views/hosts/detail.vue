@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { UiPage, UiAlert, UiCard, UiButton, UiBadge, UiStatusChip, UiLiveIndicator, UiKeyValueTable, UiDataTable, UiTabs, UiSelect, UiEmptyState, useConfirm, type Column, type KeyValue, type TabItem } from '@freya/ui'
+import { UiPage, UiAlert, UiCard, UiButton, UiBadge, UiStatusChip, UiLiveIndicator, UiKeyValueTable, UiDataTable, UiTabs, UiSelect, UiEmptyState, useConfirm, type Column, type KeyValue, type TabItem } from '@go-tangra/ui'
 import { useHosts } from '@/stores/hosts'
 import { useAgents } from '@/stores/agents'
 import { useSnapshots } from '@/stores/snapshots'

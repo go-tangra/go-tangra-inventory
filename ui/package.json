@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vue-tsc --noEmit -p tsconfig.app.json && vite build",
     "preview": "vite preview",
-    "lint": "eslint . && vue-tsc --noEmit -p tsconfig.app.json && node ../../../ui/scripts/check-no-legacy.mjs --frontends services/inventory/ui",
+    "lint": "eslint . && vue-tsc --noEmit -p tsconfig.app.json && go-tangra-ui-check-no-legacy",
     "test:unit": "vitest run",
     "gen:api": "openapi-typescript ../api/openapi/inventory.yaml -o src/api/schema.d.ts",
     "test:e2e": "playwright test"
@@ -15,7 +15,7 @@
   "dependencies": {
     "@casl/ability": "^7.0.1",
     "@casl/vue": "^3.0.1",
-    "@freya/ui": "1.0.0",
+    "@go-tangra/ui": "^4.0.0",
     "pinia": "^4.0.3",
     "vue": "^3.5.42",
     "vue-router": "^5.3.1",

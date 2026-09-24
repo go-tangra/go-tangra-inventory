@@ -6,7 +6,7 @@ import { createPinia } from 'pinia'
 import { createRouter, createWebHistory, RouterView } from 'vue-router'
 import { abilitiesPlugin } from '@casl/vue'
 import { createMongoAbility } from '@casl/ability'
-import { UiAppShell } from '@freya/ui'
+import { UiAppShell } from '@go-tangra/ui'
 import './dev.css'
 import { routes } from '@/remote/routes'
 

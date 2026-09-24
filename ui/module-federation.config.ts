@@ -11,9 +11,9 @@ export const shared = {
   '@casl/ability': { singleton: true, requiredVersion: '^7.0.0', ...hostOnly },
   '@casl/vue': { singleton: true, requiredVersion: '^3.0.0', ...hostOnly },
   zod: { singleton: true, requiredVersion: '^4.0.0', strictVersion: true, ...hostOnly },
-  '@freya/ui': { singleton: true, requiredVersion: '^1.0.0', strictVersion: true, ...hostOnly },
-  '@freya/ui/forms': { singleton: true, requiredVersion: '^1.0.0', strictVersion: true, ...hostOnly },
-  '@freya/ui/api': { singleton: true, requiredVersion: '^1.0.0', strictVersion: true, ...hostOnly },
+  '@go-tangra/ui': { singleton: true, requiredVersion: '^4.0.0', strictVersion: true, ...hostOnly },
+  '@go-tangra/ui/forms': { singleton: true, requiredVersion: '^4.0.0', strictVersion: true, ...hostOnly },
+  '@go-tangra/ui/api': { singleton: true, requiredVersion: '^4.0.0', strictVersion: true, ...hostOnly },
 }
 
 export const remoteConfig = {

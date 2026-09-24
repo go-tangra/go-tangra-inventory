@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { tagMap } from '@freya/ui/forms'
+import { tagMap } from '@go-tangra/ui/forms'
 
 /** Tag filter: "key" or "key=value". */
 export const tagFilter = z.string().trim().max(200).regex(/^[^=\s]+(=[^=]*)?$/, 'Use key or key=value.').optional()

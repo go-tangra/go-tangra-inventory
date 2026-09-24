@@ -1,5 +1,4 @@
 /* Standalone development only (npm run dev): the full platform theme the shell normally provides. */
 @import "tailwindcss";
-@import "@freya/ui/theme.css";
-@source "../node_modules/@freya/ui/dist";
-@source "../../../../ui/kit/dist";
+@import "@go-tangra/ui/theme.css";
+@import "@go-tangra/ui/sources.css";

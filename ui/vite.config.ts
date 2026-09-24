@@ -2,7 +2,7 @@ import { fileURLToPath, URL } from 'node:url'
 import { defineConfig } from 'vitest/config'
 import vue from '@vitejs/plugin-vue'
 import tailwindcss from '@tailwindcss/vite'
-import { breakpointSpecificity } from '@freya/ui/vite'
+import { breakpointSpecificity } from '@go-tangra/ui/vite'
 import { federation } from '@module-federation/vite'
 import { remoteConfig } from './module-federation.config'
 
@@ -20,6 +20,6 @@ export default defineConfig({
     environmentOptions: { jsdom: { url: 'https://localhost/inventory' } },
     include: ['tests/unit/**/*.spec.ts'],
     setupFiles: ['tests/unit/setup.ts'],
-    server: { deps: { inline: ['@freya/ui'] } },
+    server: { deps: { inline: ['@go-tangra/ui'] } },
   },
 })
