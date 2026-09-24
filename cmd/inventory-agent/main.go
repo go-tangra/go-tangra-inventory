@@ -34,19 +34,22 @@ func main() {
 		daemonMode = flag.Bool("daemon", false, "run as a long-lived daemon (periodic submit + command stream)")
 		service    = flag.String("service", "", "OS service action: install or uninstall")
 		insecure   = flag.Bool("insecure", false, "use a plaintext connection to the ingest edge (development only)")
+		caFile     = flag.String("ca-file", "", "PEM CA bundle that signs the ingest server certificate; pins trust to it (overrides config; default: system roots)")
+		serverName = flag.String("server-name", "", "name to verify in the ingest server certificate (overrides config; default: the endpoint host)")
 	)
 	flag.Parse()
 
 	collector.Version = version
 
-	cfg, err := resolveConfig(*configPath, *ingest, *token, *insecure)
+	fl := flags{ingest: *ingest, token: *token, insecure: *insecure, caFile: *caFile, serverName: *serverName}
+	cfg, err := resolveConfig(*configPath, fl)
 	if err != nil {
 		fatalf("config: %v", err)
 	}
 
 	switch {
 	case *service != "":
-		if err := handleService(*service, *configPath, *ingest, *token, *insecure); err != nil {
+		if err := handleService(*service, *configPath, fl); err != nil {
 			fatalf("service %s: %v", *service, err)
 		}
 	case *daemonMode:
@@ -60,8 +63,15 @@ func main() {
 	}
 }
 
+// flags are the command-line overrides of the agent config file.
+type flags struct {
+	ingest, token      string
+	insecure           bool
+	caFile, serverName string
+}
+
 // resolveConfig loads the optional config file and applies flag overrides.
-func resolveConfig(configPath, ingest, token string, insecure bool) (config.AgentConfig, error) {
+func resolveConfig(configPath string, f flags) (config.AgentConfig, error) {
 	cfg := config.DefaultAgent()
 	if configPath != "" {
 		loaded, err := config.LoadAgent(configPath)
@@ -70,14 +80,20 @@ func resolveConfig(configPath, ingest, token string, insecure bool) (config.Agen
 		}
 		cfg = loaded
 	}
-	if ingest != "" {
-		cfg.IngestEndpoint = ingest
+	if f.ingest != "" {
+		cfg.IngestEndpoint = f.ingest
 	}
-	if token != "" {
-		cfg.TokenFile = token
+	if f.token != "" {
+		cfg.TokenFile = f.token
 	}
-	if insecure {
+	if f.insecure {
 		cfg.Insecure = true
+	}
+	if f.caFile != "" {
+		cfg.CAFile = f.caFile
+	}
+	if f.serverName != "" {
+		cfg.ServerName = f.serverName
 	}
 	return cfg, nil
 }
@@ -144,7 +160,7 @@ func runDaemon(cfg config.AgentConfig) error {
 
 // handleService installs or uninstalls the agent as an OS service. Install
 // records the flags needed to run the daemon.
-func handleService(action, configPath, ingest, token string, insecure bool) error {
+func handleService(action, configPath string, f flags) error {
 	switch action {
 	case "install":
 		exe, err := winsvc.ExePath()
@@ -156,15 +172,22 @@ func handleService(action, configPath, ingest, token string, insecure bool) erro
 			abs, _ := filepath.Abs(configPath)
 			args = append(args, "-config", abs)
 		}
-		if ingest != "" {
-			args = append(args, "-ingest", ingest)
+		if f.ingest != "" {
+			args = append(args, "-ingest", f.ingest)
 		}
-		if token != "" {
-			abs, _ := filepath.Abs(token)
+		if f.token != "" {
+			abs, _ := filepath.Abs(f.token)
 			args = append(args, "-token", abs)
 		}
-		if insecure {
+		if f.insecure {
 			args = append(args, "-insecure")
+		}
+		if f.caFile != "" {
+			abs, _ := filepath.Abs(f.caFile)
+			args = append(args, "-ca-file", abs)
+		}
+		if f.serverName != "" {
+			args = append(args, "-server-name", f.serverName)
 		}
 		if err := winsvc.Install(serviceName, "Freya Inventory Agent",
 			"Collects endpoint inventory and submits it to the Freya inventory service.",

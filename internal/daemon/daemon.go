@@ -47,8 +47,10 @@ type Daemon struct {
 // New builds a Daemon for the given agent configuration and version.
 func New(cfg config.AgentConfig, version string) *Daemon {
 	return &Daemon{
-		cfg:     cfg,
-		sender:  sender.New(cfg.IngestEndpoint, cfg.Insecure),
+		cfg: cfg,
+		sender: sender.New(cfg.IngestEndpoint, sender.Options{
+			Insecure: cfg.Insecure, CAFile: cfg.CAFile, ServerName: cfg.ServerName,
+		}),
 		version: version,
 	}
 }
