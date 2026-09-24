@@ -10,7 +10,8 @@ lint:
 	gosec -quiet -exclude-generated -exclude-dir=ui ./...
 
 vuln:
-	../../scripts/vulncheck.sh
+	./scripts/vulncheck.sh
+	cd sdk && ../scripts/vulncheck.sh
 
 test:
 	$(GO) test -race -count=1 ./...
