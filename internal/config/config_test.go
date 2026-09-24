@@ -1,6 +1,13 @@
 package config
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,6 +27,8 @@ func valid() Config {
 	c.Valkey.Addresses = []string{"valkey:6379"}
 	c.KEK = KEK{Source: "file", Path: "/etc/inventory/kek"}
 	c.Ingest.Addr = ":9500"
+	c.Ingest.TLSCertFile = "/etc/inventory/ingest/tls.crt"
+	c.Ingest.TLSKeyFile = "/etc/inventory/ingest/tls.key"
 	c.Gateway.Issuer = "https://gw.example.org"
 	return c
 }
@@ -98,6 +107,27 @@ func TestValidateRejects(t *testing.T) {
 			c.DB.DSN = "postgres://h/db?sslmode=verify-ca"
 			c.Ingest.Insecure = true
 		}, "ingest.insecure"},
+		{"ingest prod insecure without cert", func(c *Config) {
+			c.Env = "production"
+			c.DB.DSN = "postgres://h/db?sslmode=verify-full"
+			c.Ingest = Ingest{Addr: ":9977", Insecure: true}
+		}, "ingest.insecure"},
+		{"ingest prod tls without cert", func(c *Config) {
+			c.Env = "production"
+			c.DB.DSN = "postgres://h/db?sslmode=verify-full"
+			c.Ingest = Ingest{Addr: ":9977"}
+		}, "ingest.tls_cert_file"},
+		{"ingest prod tls without key", func(c *Config) {
+			c.Env = "production"
+			c.DB.DSN = "postgres://h/db?sslmode=verify-full"
+			c.Ingest.TLSKeyFile = ""
+		}, "ingest.tls_key_file"},
+		{"ingest dev tls without cert", func(c *Config) { c.Ingest = Ingest{Addr: ":9977"} }, "ingest.tls_cert_file"},
+		{"ingest dev cert without key", func(c *Config) { c.Ingest.TLSKeyFile = "" }, "ingest.tls_key_file"},
+		{"ingest dev key without cert", func(c *Config) { c.Ingest.TLSCertFile = "" }, "ingest.tls_cert_file"},
+		{"ingest insecure with cert", func(c *Config) { c.Ingest.Insecure = true }, "contradict"},
+		{"ingest reload negative", func(c *Config) { c.Ingest.TLSReloadSeconds = -1 }, "tls_reload_seconds"},
+		{"ingest reload too long", func(c *Config) { c.Ingest.TLSReloadSeconds = 86401 }, "tls_reload_seconds"},
 		{"heartbeat range", func(c *Config) { c.Registry.HeartbeatSeconds = 0 }, "heartbeat_seconds"},
 		{"retention range", func(c *Config) { c.Retention.Days = 0 }, "retention.days"},
 		{"stale range", func(c *Config) { c.Stale.AfterSeconds = 1 }, "stale.after_seconds"},
@@ -134,13 +164,37 @@ func TestValidateProdOK(t *testing.T) {
 	}
 }
 
+func TestValidateIngestModes(t *testing.T) {
+	// Development stack: plaintext ingest is an accepted, warned opt-out.
+	c := valid()
+	c.Ingest = Ingest{Addr: ":9977", Insecure: true}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("dev insecure ingest rejected: %v", err)
+	}
+	// Production with a certificate and key is accepted.
+	c = valid()
+	c.Env = "production"
+	c.DB.DSN = "postgres://h/db?sslmode=verify-full"
+	c.Ingest.TLSReloadSeconds = 300
+	if err := c.Validate(); err != nil {
+		t.Fatalf("production TLS ingest rejected: %v", err)
+	}
+	if c.IngestTLSReload() != 5*time.Minute {
+		t.Errorf("IngestTLSReload=%v", c.IngestTLSReload())
+	}
+	c.Ingest.TLSReloadSeconds = 0
+	if c.IngestTLSReload() != time.Minute {
+		t.Errorf("default IngestTLSReload=%v, want 1m", c.IngestTLSReload())
+	}
+}
+
 func TestWarnings(t *testing.T) {
 	c := valid()
 	if w := c.Warnings(); len(w) != 0 {
 		t.Fatalf("secure config produced warnings: %v", w)
 	}
 	c.Valkey.AllowPlaintext = true
-	c.Ingest.Insecure = true
+	c.Ingest = Ingest{Addr: ":9977", Insecure: true}
 	c.Admin.EnablePprof = true // framework warning path
 	w := c.Warnings()
 	joined := strings.Join(w, "\n")
@@ -213,7 +267,9 @@ kek:
   env: INV_KEK
 ingest:
   addr: ":9500"
-  insecure: true
+  tls_cert_file: /etc/inventory/ingest/tls.crt
+  tls_key_file: /etc/inventory/ingest/tls.key
+  tls_reload_seconds: 120
 registry:
   instance_id: inv-1
   heartbeat_seconds: 10
@@ -246,7 +302,10 @@ limits_inventory:
 	if c.DB.MaxConns != 8 || c.Registry.InstanceID != "inv-1" || c.Jobs.Workers != 8 {
 		t.Errorf("unexpected loaded values: %+v %+v %+v", c.DB, c.Registry, c.Jobs)
 	}
-	if !c.Valkey.AllowPlaintext || !c.Ingest.Insecure || c.Events.Enabled {
+	if c.Ingest.TLSCertFile != "/etc/inventory/ingest/tls.crt" || c.Ingest.TLSKeyFile != "/etc/inventory/ingest/tls.key" || c.IngestTLSReload() != 2*time.Minute {
+		t.Errorf("ingest tls fields not loaded: %+v", c.Ingest)
+	}
+	if !c.Valkey.AllowPlaintext || c.Ingest.Insecure || c.Events.Enabled {
 		t.Errorf("bool fields not loaded: %+v %+v %+v", c.Valkey, c.Ingest, c.Events)
 	}
 	if err := c.Validate(); err != nil {
@@ -318,6 +377,56 @@ insecure: true
 	}
 }
 
+func TestAgentConfigTLS(t *testing.T) {
+	dir := t.TempDir()
+	caFile := filepath.Join(dir, "ca.pem")
+	// Any well-formed PEM CERTIFICATE block is enough for Validate's parse check;
+	// generate one in-test rather than committing a certificate.
+	if err := os.WriteFile(caFile, selfSignedPEM(t), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	notPEM := filepath.Join(dir, "junk.pem")
+	if err := os.WriteFile(notPEM, []byte("junk"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	path := filepath.Join(dir, "agent.yaml")
+	yaml := "ingest_endpoint: inv.example.org:9977\ntoken_file: /t\nca_file: " + caFile + "\nserver_name: inv.example.org\n"
+	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a, err := LoadAgent(path)
+	if err != nil {
+		t.Fatalf("LoadAgent: %v", err)
+	}
+	if a.CAFile != caFile || a.ServerName != "inv.example.org" {
+		t.Fatalf("tls fields not loaded: %+v", a)
+	}
+	if err := a.Validate(); err != nil {
+		t.Fatalf("pinned-CA agent config rejected: %v", err)
+	}
+
+	cases := []struct {
+		name string
+		mut  func(*AgentConfig)
+		want string
+	}{
+		{"ca_file missing", func(a *AgentConfig) { a.CAFile = filepath.Join(dir, "missing.pem") }, "ca_file"},
+		{"ca_file not pem", func(a *AgentConfig) { a.CAFile = notPEM }, "ca_file"},
+		{"insecure with ca_file", func(a *AgentConfig) { a.Insecure = true }, "insecure"},
+		{"insecure with server_name", func(a *AgentConfig) { a.Insecure = true; a.CAFile = "" }, "insecure"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			b := a
+			tc.mut(&b)
+			if err := b.Validate(); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want containing %q", err, tc.want)
+			}
+		})
+	}
+}
+
 func TestLoadAgentErrors(t *testing.T) {
 	if _, err := LoadAgent(filepath.Join(t.TempDir(), "missing.yaml")); err == nil {
 		t.Error("LoadAgent of missing file must error")
@@ -330,4 +439,27 @@ func TestLoadAgentErrors(t *testing.T) {
 	if _, err := LoadAgent(bad); err == nil {
 		t.Error("LoadAgent with unknown field must error")
 	}
+}
+
+// selfSignedPEM returns a freshly generated self-signed CA certificate as PEM.
+func selfSignedPEM(t *testing.T) []byte {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "agent test CA"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageCertSign,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 }

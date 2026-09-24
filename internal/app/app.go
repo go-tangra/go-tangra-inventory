@@ -17,6 +17,7 @@ import (
 	"github.com/go-tangra/go-tangra-lcm/sdk/v4/pkg/lcmidentity"
 	"github.com/go-tangra/go-tangra/v4"
 	"github.com/valkey-io/valkey-go"
+	"google.golang.org/grpc"
 
 	authv1 "github.com/go-tangra/go-tangra-auth/sdk/v4/api/proto/auth/v1"
 	"github.com/go-tangra/go-tangra-auth/sdk/v4/pkg/authclient"
@@ -205,16 +206,27 @@ func Build(ctx context.Context, cfg config.Config, o Options) (a *App, err error
 
 	// Off-mesh INGEST EDGE: a separate, network-isolated gRPC listener that
 	// authenticates untrusted endpoint agents by their per-agent credential.
+	// It serves TLS from ingest.tls_cert_file/tls_key_file (hot-reloaded); only
+	// the development opt-out ingest.insecure serves plaintext. A missing or
+	// unloadable certificate refuses start.
 	ingestSrv := ingest.New(a.Enroll, snapsSvc, a.Registry, a.Repo, cfg.Limits.MaxSnapshotBytes, instanceID)
-	a.workers = append(a.workers, func(c context.Context) { a.serveIngest(c, ingestSrv) })
+	var ingestTLS *ingest.CertLoader
+	if !cfg.Ingest.Insecure {
+		if ingestTLS, err = ingest.NewCertLoader(cfg.Ingest.TLSCertFile, cfg.Ingest.TLSKeyFile); err != nil {
+			return nil, err
+		}
+	}
+	a.workers = append(a.workers, func(c context.Context) { a.serveIngest(c, ingestSrv, ingestTLS) })
 
 	// Maintenance: mark stale hosts + purge old snapshots on an interval.
 	a.workers = append(a.workers, a.maintenance)
 	return a, nil
 }
 
-// serveIngest runs the off-mesh ingest gRPC listener until ctx is cancelled.
-func (a *App) serveIngest(ctx context.Context, s *ingest.Server) {
+// serveIngest runs the off-mesh ingest gRPC listener until ctx is cancelled:
+// TLS with the hot-reloaded certificate when tlsCert is set, plaintext only for
+// the development opt-out (nil).
+func (a *App) serveIngest(ctx context.Context, s *ingest.Server, tlsCert *ingest.CertLoader) {
 	addr := a.Cfg.IngestAddr()
 	if addr == "" {
 		a.Log.Error("ingest edge: no ingest.addr configured; ingest disabled")
@@ -225,9 +237,18 @@ func (a *App) serveIngest(ctx context.Context, s *ingest.Server) {
 		a.Log.Error("ingest edge: listen", "addr", addr, "err", err)
 		return
 	}
-	gs := ingest.NewGRPCServer(s)
+	var opts []grpc.ServerOption
+	mode := "plaintext (ingest.insecure, development only)"
+	if tlsCert != nil {
+		opts = append(opts, tlsCert.TransportOption())
+		tlsCert.Watch(ctx, a.Cfg.IngestTLSReload(), func(err error) {
+			a.Log.Error("ingest edge: certificate reload failed; keeping the current certificate", "err", err)
+		})
+		mode = "tls"
+	}
+	gs := ingest.NewGRPCServer(s, opts...)
 	go func() { <-ctx.Done(); gs.GracefulStop() }()
-	a.Log.Info("ingest edge listening", "addr", addr)
+	a.Log.Info("ingest edge listening", "addr", addr, "transport", mode)
 	if err := gs.Serve(lis); err != nil && ctx.Err() == nil {
 		a.Log.Error("ingest edge: serve", "err", err)
 	}
