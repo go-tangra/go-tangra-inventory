@@ -1,23 +1,27 @@
+//go:build windows
+
 package collector
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
-	"fmt"
 	"os/exec"
+	"time"
+
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/store"
 )
 
-type psMonitorResult struct {
+type psMonitor struct {
 	Manufacturer string `json:"Manufacturer"`
 	Model        string `json:"Model"`
 	Serial       string `json:"Serial"`
 }
 
-// collectMonitorInfo uses PowerShell to query WmiMonitorID from the root\wmi
-// namespace. WmiMonitorID stores manufacturer, model, and serial as uint16
-// arrays which PowerShell decodes natively into strings.
-func CollectMonitorInfo() ([]MonitorInfo, error) {
-	script := `
+// collectMonitors queries WmiMonitorID from root\wmi via PowerShell. The EDID
+// strings are stored as uint16 arrays which PowerShell decodes into ASCII.
+func collectMonitors() []store.Monitor {
+	const script = `
 $monitors = @(Get-CimInstance -Namespace root\wmi -ClassName WmiMonitorID -ErrorAction SilentlyContinue | ForEach-Object {
     [PSCustomObject]@{
         Manufacturer = [System.Text.Encoding]::ASCII.GetString($_.ManufacturerName -ne 0)
@@ -33,29 +37,29 @@ if ($monitors.Count -eq 0) {
     $monitors | ConvertTo-Json -Compress
 }
 `
-	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script)
-	output, err := cmd.Output()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", script).Output() // #nosec G204 -- fixed script, no user input
 	if err != nil {
-		return nil, fmt.Errorf("powershell WmiMonitorID query failed: %w", err)
+		return nil
+	}
+	out = bytes.TrimSpace(out)
+	if len(out) == 0 || string(out) == "[]" {
+		return nil
 	}
 
-	output = bytes.TrimSpace(output)
-	if len(output) == 0 || string(output) == "[]" {
-		return nil, nil
+	var raw []psMonitor
+	if err := json.Unmarshal(out, &raw); err != nil {
+		return nil
 	}
-
-	var monitors []psMonitorResult
-	if err := json.Unmarshal(output, &monitors); err != nil {
-		return nil, fmt.Errorf("parsing monitor JSON: %w (raw: %s)", err, string(output))
-	}
-
-	result := make([]MonitorInfo, len(monitors))
-	for i, m := range monitors {
-		result[i] = MonitorInfo{
+	monitors := make([]store.Monitor, 0, len(raw))
+	for _, m := range raw {
+		monitors = append(monitors, store.Monitor{
 			Manufacturer: m.Manufacturer,
 			Model:        m.Model,
 			SerialNumber: m.Serial,
-		}
+		})
 	}
-	return result, nil
+	return monitors
 }

@@ -1,183 +1,170 @@
+// Package sender speaks the off-mesh IngestService edge on behalf of the
+// endpoint agent: it enrolls (consuming a one-time token for a per-agent
+// credential) and submits collected inventory, presenting the credential in
+// call metadata. Transient failures are retried with exponential backoff.
 package sender
 
 import (
 	"context"
+	"crypto/tls"
+	"errors"
 	"fmt"
 	"time"
 
-	"github.com/go-tangra/go-tangra-inventory/internal/collector"
-
-	collectorv1 "github.com/go-tangra/go-tangra-inventory/gen/go/inventory/collector/v1"
-
+	invv1 "github.com/go-tangra/go-tangra-inventory/sdk/v4/api/proto/inventory/v1"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/store"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
-	"google.golang.org/protobuf/types/known/timestamppb"
+	"google.golang.org/grpc/status"
 )
 
-// Send connects to the collector at addr and submits the inventory.
-// When secret is non-empty, it is sent as the x-client-secret gRPC metadata header.
-// Returns the assigned record ID.
-func Send(ctx context.Context, addr string, secret string, inv *collector.Inventory) (int64, error) {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
+const (
+	// MetaAgentIDKey carries the agent id on SubmitInventory/StreamCommands.
+	MetaAgentIDKey = "x-agent-id"
+	// MetaCredentialKey carries the per-agent credential on authenticated calls.
+	MetaCredentialKey = "x-agent-credential"
 
-	if secret != "" {
-		ctx = metadata.AppendToOutgoingContext(ctx, "x-client-secret", secret)
+	defaultCallTimeout = 30 * time.Second
+	baseBackoff        = 1 * time.Second
+	maxBackoff         = 30 * time.Second
+	maxAttempts        = 5
+)
+
+// Sender dials the ingest edge and performs enroll/submit. It is safe to reuse
+// across calls; each call dials a fresh connection (the ingest edge is contacted
+// infrequently, on the agent's collection interval).
+type Sender struct {
+	endpoint string
+	insecure bool
+	timeout  time.Duration
+}
+
+// New returns a Sender for the given ingest endpoint. When insecure is true the
+// connection uses plaintext (development only); otherwise TLS with system roots.
+func New(endpoint string, insecureConn bool) *Sender {
+	return &Sender{endpoint: endpoint, insecure: insecureConn, timeout: defaultCallTimeout}
+}
+
+// Dial opens a gRPC connection and returns an IngestService client. Callers own
+// the returned connection and must Close it (used by the daemon for streaming).
+func (s *Sender) Dial() (invv1.IngestServiceClient, *grpc.ClientConn, error) {
+	var creds credentials.TransportCredentials
+	if s.insecure {
+		creds = insecure.NewCredentials()
+	} else {
+		creds = credentials.NewTLS(&tls.Config{MinVersion: tls.VersionTLS12})
 	}
-
-	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(s.endpoint, grpc.WithTransportCredentials(creds))
 	if err != nil {
-		return 0, fmt.Errorf("connect to collector: %w", err)
+		return nil, nil, fmt.Errorf("sender: dial %s: %w", s.endpoint, err)
+	}
+	return invv1.NewIngestServiceClient(conn), conn, nil
+}
+
+// AuthContext returns ctx with the agent id and credential attached as metadata.
+func AuthContext(ctx context.Context, agentID, credential string) context.Context {
+	return metadata.AppendToOutgoingContext(ctx, MetaAgentIDKey, agentID, MetaCredentialKey, credential)
+}
+
+// Enroll consumes a one-time enrollment token and returns the issued agent id
+// and per-agent credential (the credential is returned exactly once).
+func (s *Sender) Enroll(ctx context.Context, token string, ident store.Identity, version string) (agentID, credential string, err error) {
+	client, conn, err := s.Dial()
+	if err != nil {
+		return "", "", err
 	}
 	defer conn.Close()
 
-	client := collectorv1.NewInventoryCollectorServiceClient(conn)
-
-	pbInv := toProto(inv)
-
-	resp, err := client.SubmitInventory(ctx, &collectorv1.SubmitInventoryRequest{
-		Inventory: pbInv,
+	req := &invv1.EnrollRequest{
+		EnrollmentToken: token,
+		Identity:        identityToProto(ident),
+		AgentVersion:    version,
+	}
+	err = s.retry(ctx, func(cctx context.Context) error {
+		resp, e := client.Enroll(cctx, req)
+		if e != nil {
+			return e
+		}
+		agentID, credential = resp.GetAgentId(), resp.GetAgentCredential()
+		return nil
 	})
 	if err != nil {
-		return 0, fmt.Errorf("submit inventory: %w", err)
+		return "", "", fmt.Errorf("sender: enroll: %w", err)
 	}
-
-	return resp.Id, nil
+	if agentID == "" || credential == "" {
+		return "", "", errors.New("sender: enroll returned empty agent id or credential")
+	}
+	return agentID, credential, nil
 }
 
-func toProto(inv *collector.Inventory) *collectorv1.Inventory {
-	pb := &collectorv1.Inventory{
-		CollectedAt: timestamppb.New(inv.CollectedAt),
-		Hostname:    inv.Hostname,
-		Username:    inv.Username,
-		SmbiosVersion: &collectorv1.VersionInfo{
-			Major:    int32(inv.SMBIOSVersion.Major),
-			Minor:    int32(inv.SMBIOSVersion.Minor),
-			Revision: int32(inv.SMBIOSVersion.Revision),
-		},
-		Bios: &collectorv1.BIOSInfo{
-			Vendor:      inv.BIOS.Vendor,
-			Version:     inv.BIOS.Version,
-			ReleaseDate: inv.BIOS.ReleaseDate,
-		},
-		System: &collectorv1.SystemInfo{
-			Manufacturer: inv.System.Manufacturer,
-			ProductName:  inv.System.ProductName,
-			Version:      inv.System.Version,
-			SerialNumber: inv.System.SerialNumber,
-			Uuid:         inv.System.UUID,
-			WakeUpType:   inv.System.WakeUpType,
-			SkuNumber:    inv.System.SKUNumber,
-			Family:       inv.System.Family,
-		},
-		Baseboard: &collectorv1.BaseboardInfo{
-			Manufacturer:    inv.Baseboard.Manufacturer,
-			Product:         inv.Baseboard.Product,
-			Version:         inv.Baseboard.Version,
-			SerialNumber:    inv.Baseboard.SerialNumber,
-			AssetTag:        inv.Baseboard.AssetTag,
-			LocationInChassis: inv.Baseboard.LocationInChassis,
-			BoardType:       inv.Baseboard.BoardType,
-		},
-		Chassis: &collectorv1.ChassisInfo{
-			Manufacturer:   inv.Chassis.Manufacturer,
-			Version:        inv.Chassis.Version,
-			SerialNumber:   inv.Chassis.SerialNumber,
-			AssetTagNumber: inv.Chassis.AssetTagNumber,
-			SkuNumber:      inv.Chassis.SKUNumber,
-		},
-		OemStrings: inv.OEMStrings,
+// Submit posts an inventory snapshot authenticated by the per-agent credential
+// and returns the assigned snapshot id.
+func (s *Sender) Submit(ctx context.Context, agentID, credential string, inv store.Inventory) (snapshotID string, err error) {
+	client, conn, err := s.Dial()
+	if err != nil {
+		return "", err
 	}
+	defer conn.Close()
 
-	// Processors
-	for _, p := range inv.Processors {
-		pb.Processors = append(pb.Processors, &collectorv1.ProcessorInfo{
-			SocketDesignation: p.SocketDesignation,
-			Manufacturer:      p.Manufacturer,
-			Version:           p.Version,
-			MaxSpeedMhz:       uint32(p.MaxSpeedMHz),
-			CurrentSpeedMhz:   uint32(p.CurrentSpeedMHz),
-			SocketPopulated:   p.SocketPopulated,
-			SerialNumber:      p.SerialNumber,
-			AssetTag:          p.AssetTag,
-			PartNumber:        p.PartNumber,
-			CoreCount:         uint32(p.CoreCount),
-			CoreEnabled:       uint32(p.CoreEnabled),
-			ThreadCount:       uint32(p.ThreadCount),
-		})
+	req := &invv1.SubmitRequest{Inventory: toProto(inv)}
+	err = s.retry(ctx, func(cctx context.Context) error {
+		resp, e := client.SubmitInventory(AuthContext(cctx, agentID, credential), req)
+		if e != nil {
+			return e
+		}
+		snapshotID = resp.GetSnapshotId()
+		return nil
+	})
+	if err != nil {
+		return "", fmt.Errorf("sender: submit: %w", err)
 	}
+	return snapshotID, nil
+}
 
-	// Cache
-	for _, c := range inv.Cache {
-		pb.Cache = append(pb.Cache, &collectorv1.CacheInfo{
-			SocketDesignation: c.SocketDesignation,
-		})
+// retry runs fn with a per-attempt timeout, backing off exponentially on
+// transient errors and giving up on permanent ones (e.g. Unauthenticated).
+func (s *Sender) retry(ctx context.Context, fn func(context.Context) error) error {
+	backoff := baseBackoff
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		cctx, cancel := context.WithTimeout(ctx, s.timeout)
+		err := fn(cctx)
+		cancel()
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if !retryable(err) {
+			return err
+		}
+		if attempt == maxAttempts {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(backoff):
+		}
+		if backoff *= 2; backoff > maxBackoff {
+			backoff = maxBackoff
+		}
 	}
+	return lastErr
+}
 
-	// Memory
-	pb.Memory = &collectorv1.MemoryInfo{
-		TotalPhysicalBytes: inv.Memory.TotalPhysicalBytes,
-		TotalPhysicalGb:    inv.Memory.TotalPhysicalGB,
-		Array: &collectorv1.PhysicalMemoryArray{
-			Location:              inv.Memory.Array.Location,
-			Use:                   inv.Memory.Array.Use,
-			ErrorCorrection:       inv.Memory.Array.ErrorCorrection,
-			MaximumCapacity:       inv.Memory.Array.MaximumCapacity,
-			NumberOfMemoryDevices: uint32(inv.Memory.Array.NumberOfMemoryDevices),
-		},
+// retryable reports whether err is worth retrying (transient transport/server
+// conditions) rather than a permanent rejection.
+func retryable(err error) bool {
+	switch status.Code(err) {
+	case codes.Unavailable, codes.DeadlineExceeded, codes.ResourceExhausted, codes.Aborted, codes.Unknown:
+		return true
+	default:
+		return false
 	}
-	for _, m := range inv.Memory.Modules {
-		pb.Memory.Modules = append(pb.Memory.Modules, &collectorv1.MemoryModule{
-			DeviceLocator:      m.DeviceLocator,
-			BankLocator:        m.BankLocator,
-			CapacityBytes:      m.CapacityBytes,
-			FormFactor:         m.FormFactor,
-			MemoryType:         m.MemoryType,
-			TypeDetail:         m.TypeDetail,
-			SpeedMtS:           uint32(m.SpeedMTs),
-			ConfiguredSpeedMtS: uint32(m.ConfiguredSpeedMTs),
-			Manufacturer:       m.Manufacturer,
-			SerialNumber:       m.SerialNumber,
-			AssetTag:           m.AssetTag,
-			PartNumber:         m.PartNumber,
-			MinimumVoltage:     m.MinimumVoltage,
-			MaximumVoltage:     m.MaximumVoltage,
-			ConfiguredVoltage:  m.ConfiguredVoltage,
-			TotalWidth:         m.TotalWidthBits,
-			DataWidth:          m.DataWidthBits,
-		})
-	}
-
-	// Ports
-	for _, p := range inv.Ports {
-		pb.Ports = append(pb.Ports, &collectorv1.PortInfo{
-			InternalDesignator: p.InternalDesignator,
-			ExternalDesignator: p.ExternalDesignator,
-		})
-	}
-
-	// Slots
-	for _, s := range inv.Slots {
-		pb.Slots = append(pb.Slots, &collectorv1.SlotInfo{
-			Designation: s.Designation,
-		})
-	}
-
-	// BIOS Language
-	pb.BiosLanguage = &collectorv1.BIOSLanguageInfo{
-		CurrentLanguage:      inv.BIOSLanguage.CurrentLanguage,
-		InstallableLanguages: inv.BIOSLanguage.InstallableLanguages,
-	}
-
-	// Monitors
-	for _, m := range inv.Monitor {
-		pb.Monitor = append(pb.Monitor, &collectorv1.MonitorInfo{
-			Manufacturer: m.Manufacturer,
-			Model:        m.Model,
-			SerialNumber: m.SerialNumber,
-		})
-	}
-
-	return pb
 }
