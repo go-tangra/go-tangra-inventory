@@ -163,9 +163,13 @@ func Build(ctx context.Context, cfg config.Config, o Options) (a *App, err error
 		instanceID, _ = os.Hostname()
 	}
 	if len(cfg.Valkey.Addresses) > 0 {
-		vc, verr := valkey.NewClient(valkey.ClientOption{
-			InitAddress: cfg.Valkey.Addresses, Username: cfg.Valkey.Username, Password: cfg.Valkey.Password, DisableCache: true,
-		})
+		// Same transport security as the event bus (TLS unless plaintext is
+		// allowed, with the configured CA).
+		opt, oerr := valkeykv.ClientOption(sc)
+		if oerr != nil {
+			return nil, fmt.Errorf("registry valkey: %w", oerr)
+		}
+		vc, verr := valkey.NewClient(opt)
 		if verr != nil {
 			return nil, fmt.Errorf("registry valkey: %w", verr)
 		}
