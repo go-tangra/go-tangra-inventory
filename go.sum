@@ -72,8 +72,8 @@ github.com/go-playground/form/v4 v4.3.0 h1:OVttojbQv2WNCs4P+VnjPtrt/+30Ipw4890W3
 github.com/go-playground/form/v4 v4.3.0/go.mod h1:Cpe1iYJKoXb1vILRXEwxpWMGWyQuqplQ/4cvPecy+Jo=
 github.com/go-tangra/go-tangra-auth/sdk/v4 v4.0.0 h1:H8SGCYevgHRJOfABCPaVXpDirQeykSmbW54r459EaGw=
 github.com/go-tangra/go-tangra-auth/sdk/v4 v4.0.0/go.mod h1:kzKB/d8rnaEIYH2ZS5kQWAXXz8zdhfndytNs/dvQfOM=
-github.com/go-tangra/go-tangra-lcm/sdk/v4 v4.0.0 h1:9VBHp/ouE8goIxyX4iLyzuyiZfi2itrnl3wTAconG3k=
-github.com/go-tangra/go-tangra-lcm/sdk/v4 v4.0.0/go.mod h1:j/24DHoyBPfYcHzehJKkQLL/s1jDPToGr/LqV/qA/HM=
+github.com/go-tangra/go-tangra-lcm/sdk/v4 v4.1.0 h1:KjAVJn8jAZbcIyL6B3yasngtFTxwBA1s9y7TW1ylqjc=
+github.com/go-tangra/go-tangra-lcm/sdk/v4 v4.1.0/go.mod h1:j/24DHoyBPfYcHzehJKkQLL/s1jDPToGr/LqV/qA/HM=
 github.com/go-tangra/go-tangra-portal/sdk/v4 v4.0.0 h1:THNjBM31OknVg0TJey5EuntROMaCY1ndozbN5ZBlLlg=
 github.com/go-tangra/go-tangra-portal/sdk/v4 v4.0.0/go.mod h1:SKP6ZWoKPtYo7IZboDjGZW3rbGnKtSBr7I24EoLT2Bk=
 github.com/go-tangra/go-tangra/v4 v4.0.0 h1:INrx5y8rsFkIL4iDxA+tCS3jyTOlPD3T9cPJbcxHHww=
