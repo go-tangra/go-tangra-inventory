@@ -102,6 +102,13 @@ inventory-agent -o ./out                                        # collect to JSO
 inventory-agent -service install                                # Windows service / systemd unit
 ```
 
+The ingest edge serves TLS from `ingest.tls_cert_file`/`ingest.tls_key_file`
+(hot-reloaded). Only the development opt-out `ingest.insecure: true` serves
+plaintext, and it is refused with `env: production`. The agent verifies the
+server certificate against the system roots, or only against `ca_file`
+(`-ca-file`) for a private CA; `server_name` (`-server-name`) overrides the
+verified name. See [deploy/README.md](deploy/README.md#ingest-tls).
+
 CI cross-compiles the agent for every supported platform on each change. It does
 not upload or release agent binaries.
 

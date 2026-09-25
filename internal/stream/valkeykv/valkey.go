@@ -29,10 +29,13 @@ type Config struct {
 
 type client struct{ c valkey.Client }
 
-// New returns a Client backed by Valkey (TLS 1.3 enforced when TLS is used).
-func New(cfg Config) (stream.Client, error) {
+// ClientOption builds the Valkey client options for cfg: TLS 1.3 (with the
+// configured CA, else the system roots) unless AllowPlaintext. Every Valkey
+// client of this service must be built from it so none of them silently
+// connects in plaintext.
+func ClientOption(cfg Config) (valkey.ClientOption, error) {
 	if len(cfg.Addresses) == 0 {
-		return nil, errors.New("valkey: addresses required")
+		return valkey.ClientOption{}, errors.New("valkey: addresses required")
 	}
 	opt := valkey.ClientOption{InitAddress: cfg.Addresses, Username: cfg.Username, Password: cfg.Password, DisableCache: true}
 	if !cfg.AllowPlaintext {
@@ -40,10 +43,19 @@ func New(cfg Config) (stream.Client, error) {
 		if len(cfg.CAPEM) > 0 {
 			pool := x509.NewCertPool()
 			if !pool.AppendCertsFromPEM(cfg.CAPEM) {
-				return nil, errors.New("valkey: ca is not valid PEM")
+				return valkey.ClientOption{}, errors.New("valkey: ca is not valid PEM")
 			}
 			opt.TLSConfig.RootCAs = pool
 		}
+	}
+	return opt, nil
+}
+
+// New returns a Client backed by Valkey (TLS 1.3 enforced when TLS is used).
+func New(cfg Config) (stream.Client, error) {
+	opt, err := ClientOption(cfg)
+	if err != nil {
+		return nil, err
 	}
 	c, err := valkey.NewClient(opt)
 	if err != nil {

@@ -62,13 +62,56 @@ never failures.
 ## Configuration
 
 Server `container.yaml` sections: `db`, `valkey`, `kek` (envelope key),
-`ingest` (`addr` — the off-mesh listener, `insecure` for dev), `registry`
+`ingest` (`addr` — the off-mesh listener; `tls_cert_file`/`tls_key_file`/
+`tls_reload_seconds` — its TLS certificate; `insecure` — plaintext, dev only;
+see [Ingest TLS](#ingest-tls)), `registry`
 (shared agent-connection registry; Valkey-backed when configured, else
 in-memory), `retention` (`days`), `stale` (`after_seconds`), `jobs`, `events`,
 `gateway`, `enroll` (`token_ttl_seconds` — minted enrollment-token lifetime),
 `mesh_enroll` (the server's own SVID enrollment), and `limits_inventory`
 (`max_request_bytes`, `max_snapshot_bytes`). Framework `server`/`admin`/
 `discovery` sections supply the mesh gRPC/HTTP and admin listeners.
+
+## Ingest TLS
+
+The ingest edge serves server-authenticated TLS (minimum TLS 1.2; current
+agents negotiate 1.3). Agents authenticate with their per-agent credential in
+call metadata, so no client certificate is requested.
+
+```yaml
+ingest:
+  addr: 0.0.0.0:9977
+  tls_cert_file: /app/deploy/ingest/tls.crt   # PEM chain, leaf first
+  tls_key_file: /app/deploy/ingest/tls.key
+  tls_reload_seconds: 60                      # optional; 0 = 60
+```
+
+- The certificate must carry a DNS (or IP) SAN matching the name agents dial.
+- The pair is re-read every `tls_reload_seconds`; a renewed certificate needs
+  no restart. A pair that fails to load on reload is logged and the current
+  certificate stays in use.
+- Unless `insecure: true` is set, `tls_cert_file` and `tls_key_file` are
+  required, and a missing or unloadable pair refuses start.
+- `insecure: true` serves plaintext and is refused with `env: production`. It is
+  for the development stack only, and it cannot be combined with the TLS keys.
+
+Agent side (`agent.yaml`, or the matching flags):
+
+```yaml
+ingest_endpoint: inventory.example.org:9977
+token_file: /etc/inventory-agent/token
+credential_file: /var/lib/inventory-agent/credential
+ca_file: /etc/inventory-agent/ingest-ca.pem   # optional (-ca-file)
+server_name: inventory.example.org            # optional (-server-name)
+```
+
+With `insecure: false` (the default) the agent always verifies the server
+certificate. Without `ca_file` it uses the operating-system roots. With
+`ca_file` it trusts **only** the CAs in that PEM bundle (for a private CA), and
+a certificate from any other CA is refused. `server_name` overrides the name
+checked against the certificate, which is otherwise the endpoint host. The agent
+refuses `insecure` combined with `ca_file` or `server_name`. A plaintext
+(`-insecure`) agent cannot talk to a TLS ingest edge.
 
 ## Hosts, snapshots, change tracking
 

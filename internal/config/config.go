@@ -7,6 +7,7 @@ package config
 
 import (
 	"bytes"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"net/url"
@@ -68,11 +69,22 @@ type KEK struct {
 
 // Ingest is the off-mesh listener endpoint agents post snapshots to. It is a
 // second transport separate from the mesh grpc_addr/http_addr; agents present a
-// bearer credential rather than a mesh SVID, so insecure is an explicit opt-out.
+// bearer credential rather than a mesh SVID, so the listener serves ordinary
+// server-authenticated TLS (no client certificate) from tls_cert_file and
+// tls_key_file. The pair is re-read every tls_reload_seconds (default 60), so a
+// renewed certificate needs no restart. insecure is the explicit plaintext
+// opt-out for the development stack and is refused in production.
 type Ingest struct {
-	Addr     string `yaml:"addr"`
-	Insecure bool   `yaml:"insecure"`
+	Addr             string `yaml:"addr"`
+	Insecure         bool   `yaml:"insecure"`
+	TLSCertFile      string `yaml:"tls_cert_file"`
+	TLSKeyFile       string `yaml:"tls_key_file"`
+	TLSReloadSeconds int    `yaml:"tls_reload_seconds"`
 }
+
+// defaultIngestTLSReload is how often the ingest certificate is re-read when
+// tls_reload_seconds is unset.
+const defaultIngestTLSReload = time.Minute
 
 // Registry configures the Valkey-backed live-connection registry (online/offline
 // keyed by agent id). instance_id names this service replica.
@@ -201,8 +213,8 @@ func (c Config) Validate() error {
 	if c.Ingest.Addr == "" {
 		return errors.New("config: ingest.addr is required (the off-mesh ingest listener)")
 	}
-	if prod && c.Ingest.Insecure {
-		return errors.New("config: ingest.insecure is not permitted in production")
+	if err := c.Ingest.validate(prod); err != nil {
+		return err
 	}
 	if c.Registry.HeartbeatSeconds < 1 || c.Registry.HeartbeatSeconds > 3600 {
 		return errors.New("config: registry.heartbeat_seconds must be within [1, 3600]")
@@ -240,6 +252,30 @@ func (c Config) Validate() error {
 	return nil
 }
 
+// validate checks the ingest transport: plaintext only as a non-production
+// opt-out, otherwise a complete certificate/key pair.
+func (i Ingest) validate(prod bool) error {
+	if i.Insecure {
+		if prod {
+			return errors.New("config: ingest.insecure is not permitted in production (set ingest.tls_cert_file and ingest.tls_key_file)")
+		}
+		if i.TLSCertFile != "" || i.TLSKeyFile != "" {
+			return errors.New("config: ingest.insecure contradicts ingest.tls_cert_file/tls_key_file; set one or the other")
+		}
+		return nil
+	}
+	if i.TLSCertFile == "" {
+		return errors.New("config: ingest.tls_cert_file is required unless ingest.insecure is set (development only)")
+	}
+	if i.TLSKeyFile == "" {
+		return errors.New("config: ingest.tls_key_file is required with ingest.tls_cert_file")
+	}
+	if i.TLSReloadSeconds < 0 || i.TLSReloadSeconds > 86400 {
+		return errors.New("config: ingest.tls_reload_seconds must be within [0, 86400] (0 = 60)")
+	}
+	return nil
+}
+
 // Warnings lists accepted insecure opt-outs (surfaced at start).
 func (c Config) Warnings() []string {
 	w := c.Config.Warnings()
@@ -260,6 +296,14 @@ func (c Config) HTTPAddr() string { return c.Config.Server.HTTPAddr }
 
 // IngestAddr is the off-mesh ingest listener.
 func (c Config) IngestAddr() string { return c.Ingest.Addr }
+
+// IngestTLSReload is how often the ingest certificate pair is re-read.
+func (c Config) IngestTLSReload() time.Duration {
+	if c.Ingest.TLSReloadSeconds <= 0 {
+		return defaultIngestTLSReload
+	}
+	return time.Duration(c.Ingest.TLSReloadSeconds) * time.Second
+}
 
 // AdminAddr is the framework admin/operations listener.
 func (c Config) AdminAddr() string { return c.Config.Admin.Addr }
@@ -303,7 +347,14 @@ type AgentConfig struct {
 	TokenFile       string `yaml:"token_file"`      // one-time enrollment token
 	CredentialFile  string `yaml:"credential_file"` // persisted agent credential after enroll
 	StateFile       string `yaml:"state_file"`      // last-snapshot hash / cursor
-	Insecure        bool   `yaml:"insecure"`
+	// Insecure dials the ingest edge in plaintext (development stack only).
+	Insecure bool `yaml:"insecure"`
+	// CAFile pins the ingest server's issuing CA (PEM bundle). When set, ONLY
+	// these CAs are trusted; when empty the operating system roots are used.
+	CAFile string `yaml:"ca_file"`
+	// ServerName overrides the name verified against the server certificate
+	// (default: the host part of ingest_endpoint).
+	ServerName string `yaml:"server_name"`
 }
 
 // DefaultAgent returns the endpoint agent's secure defaults.
@@ -337,6 +388,27 @@ func (a AgentConfig) Validate() error {
 	}
 	if a.TokenFile == "" && a.CredentialFile == "" {
 		return errors.New("config: agent token_file or credential_file is required")
+	}
+	if a.Insecure && (a.CAFile != "" || a.ServerName != "") {
+		return errors.New("config: agent insecure contradicts ca_file/server_name (TLS settings)")
+	}
+	if a.CAFile != "" {
+		if err := checkCABundle(a.CAFile); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkCABundle fails fast on an unreadable ca_file or one without a PEM
+// certificate.
+func checkCABundle(path string) error {
+	raw, err := os.ReadFile(path) // #nosec G304 -- operator-supplied CA path
+	if err != nil {
+		return fmt.Errorf("config: agent ca_file: %w", err)
+	}
+	if !x509.NewCertPool().AppendCertsFromPEM(raw) {
+		return fmt.Errorf("config: agent ca_file %s: no PEM certificate found", path)
 	}
 	return nil
 }

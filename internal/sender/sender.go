@@ -7,8 +7,10 @@ package sender
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	invv1 "github.com/go-tangra/go-tangra-inventory/sdk/v4/api/proto/inventory/v1"
@@ -33,29 +35,66 @@ const (
 	maxAttempts        = 5
 )
 
+// Options selects the transport to the ingest edge.
+type Options struct {
+	// Insecure dials in plaintext (development stack only).
+	Insecure bool
+	// CAFile pins the ingest server's issuing CA (PEM bundle): when set, only
+	// these CAs are trusted; when empty the operating system roots are used.
+	CAFile string
+	// ServerName overrides the name verified against the server certificate
+	// (default: the host part of the endpoint).
+	ServerName string
+}
+
+// ClientTLSConfig builds the agent's TLS configuration: TLS 1.2 minimum, the
+// server certificate always verified (system roots, or only the CAs in CAFile),
+// and an optional server-name override. No client certificate is presented; the
+// agent authenticates with its per-agent credential in call metadata.
+func (o Options) ClientTLSConfig() (*tls.Config, error) {
+	cfg := &tls.Config{MinVersion: tls.VersionTLS12, ServerName: o.ServerName}
+	if o.CAFile != "" {
+		raw, err := os.ReadFile(o.CAFile) // #nosec G304 -- operator-supplied CA path
+		if err != nil {
+			return nil, fmt.Errorf("sender: ca_file: %w", err)
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(raw) {
+			return nil, fmt.Errorf("sender: ca_file %s: no PEM certificate found", o.CAFile)
+		}
+		cfg.RootCAs = pool
+	}
+	return cfg, nil
+}
+
 // Sender dials the ingest edge and performs enroll/submit. It is safe to reuse
 // across calls; each call dials a fresh connection (the ingest edge is contacted
 // infrequently, on the agent's collection interval).
 type Sender struct {
 	endpoint string
-	insecure bool
+	opts     Options
 	timeout  time.Duration
 }
 
-// New returns a Sender for the given ingest endpoint. When insecure is true the
-// connection uses plaintext (development only); otherwise TLS with system roots.
-func New(endpoint string, insecureConn bool) *Sender {
-	return &Sender{endpoint: endpoint, insecure: insecureConn, timeout: defaultCallTimeout}
+// New returns a Sender for the given ingest endpoint. With opts.Insecure the
+// connection is plaintext (development only); otherwise TLS verified against
+// the system roots or the pinned opts.CAFile.
+func New(endpoint string, opts Options) *Sender {
+	return &Sender{endpoint: endpoint, opts: opts, timeout: defaultCallTimeout}
 }
 
 // Dial opens a gRPC connection and returns an IngestService client. Callers own
 // the returned connection and must Close it (used by the daemon for streaming).
 func (s *Sender) Dial() (invv1.IngestServiceClient, *grpc.ClientConn, error) {
 	var creds credentials.TransportCredentials
-	if s.insecure {
+	if s.opts.Insecure {
 		creds = insecure.NewCredentials()
 	} else {
-		creds = credentials.NewTLS(&tls.Config{MinVersion: tls.VersionTLS12})
+		tlsCfg, err := s.opts.ClientTLSConfig()
+		if err != nil {
+			return nil, nil, err
+		}
+		creds = credentials.NewTLS(tlsCfg)
 	}
 	conn, err := grpc.NewClient(s.endpoint, grpc.WithTransportCredentials(creds))
 	if err != nil {

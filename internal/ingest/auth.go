@@ -139,9 +139,11 @@ func RegisterServer(gs *grpc.Server, s *Server) {
 
 // NewGRPCServer builds a ready-to-serve ingest grpc.Server: a grpc.Server with
 // the auth interceptors and message-size ceiling applied, with the ingest
-// service registered. The app binds it to the off-mesh listener.
-func NewGRPCServer(s *Server) *grpc.Server {
-	gs := grpc.NewServer(s.ServerOptions()...)
+// service registered. extra carries transport options — in particular
+// CertLoader.TransportOption() for TLS; without it the server is plaintext
+// (development only). The app binds it to the off-mesh listener.
+func NewGRPCServer(s *Server, extra ...grpc.ServerOption) *grpc.Server {
+	gs := grpc.NewServer(append(s.ServerOptions(), extra...)...)
 	RegisterServer(gs, s)
 	return gs
 }
