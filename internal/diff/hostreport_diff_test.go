@@ -71,8 +71,8 @@ func TestDiff_SoftwareAvailableVersion(t *testing.T) {
 
 func TestDiff_HostReportCategories(t *testing.T) {
 	prev := store.Inventory{
-		Virtualization: store.Virtualization{Role: store.RoleVM, Kind: "kvm", Source: "dmi"},
-		Bmc:            &store.Bmc{Address: "10.0.0.5"},
+		Virtualization:   store.Virtualization{Role: store.RoleVM, Kind: "kvm", Source: "dmi"},
+		Bmc:              &store.Bmc{Address: "10.0.0.5"},
 		HypervisorGuests: []store.HypervisorGuest{{ID: "100", Name: "a"}, {ID: "101", Name: "b"}},
 		UpdateState: store.UpdateState{PackageManager: "apt", Status: store.UpdateUpToDate, RebootRequired: store.TriFalse,
 			CheckedAt: time.Unix(1, 0).UTC()},

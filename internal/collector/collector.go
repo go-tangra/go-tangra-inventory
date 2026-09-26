@@ -18,10 +18,15 @@ import (
 // overridden from the agent entrypoint (via ldflags) at build time.
 var Version = "dev"
 
-// Collect composes every sub-collector into a single store.Inventory. It never
-// returns a nil-meaning error for a missing platform capability; err is only
-// non-nil for a context cancellation observed before any work is done.
+// Collect is CollectWith the default options.
 func Collect(ctx context.Context) (store.Inventory, error) {
+	return CollectWith(ctx, DefaultOptions())
+}
+
+// CollectWith composes every sub-collector into a single store.Inventory. It
+// never returns a nil-meaning error for a missing platform capability; err is
+// only non-nil for a context cancellation observed before any work is done.
+func CollectWith(ctx context.Context, opts Options) (store.Inventory, error) {
 	if err := ctx.Err(); err != nil {
 		return store.Inventory{}, err
 	}
@@ -35,7 +40,8 @@ func Collect(ctx context.Context) (store.Inventory, error) {
 	inv.Identity = collectIdentity()
 
 	// Hardware via SMBIOS. Empty (not error) when SMBIOS is unavailable.
-	if hw, ok := collectHardware(); ok {
+	hw, smbiosOK := collectHardware()
+	if smbiosOK {
 		applyHardware(&inv, hw)
 		if inv.Identity.HardwareUUID == "" {
 			inv.Identity.HardwareUUID = inv.System.UUID
@@ -50,6 +56,17 @@ func Collect(ctx context.Context) (store.Inventory, error) {
 	// Software: installed programs, services, local users (build-tagged,
 	// best-effort; empty where not implemented for the platform).
 	inv.Programs = collectPrograms()
+
+	// Host report parts: virtualization, BMC (Linux, read-only LAN
+	// parameters), Proxmox guests (Linux), package update state (Linux).
+	collectVirtualization(&inv, smbiosOK)
+	var n uint32
+	inv.Bmc, n = collectBMC(ctx, opts.CollectBMC)
+	inv.Truncated.BmcPorts += n
+	inv.HypervisorGuests, n = collectGuests()
+	inv.Truncated.Guests += n
+	inv.Programs, inv.UpdateState, n = collectUpdates(ctx, opts, inv.Programs)
+	inv.Truncated.Packages += n
 	inv.Services = collectServices()
 	inv.Users = collectUsers()
 

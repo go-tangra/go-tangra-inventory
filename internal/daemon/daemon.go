@@ -58,7 +58,7 @@ func New(cfg config.AgentConfig, version string) *Daemon {
 // Run performs enroll-if-needed, an initial submit, then runs the periodic
 // submit loop and the reconnecting command stream until ctx is canceled.
 func (d *Daemon) Run(ctx context.Context) error {
-	inv, err := collector.Collect(ctx)
+	inv, err := collector.CollectWith(ctx, collector.OptionsFrom(d.cfg))
 	if err != nil {
 		return fmt.Errorf("daemon: initial collect: %w", err)
 	}
@@ -194,7 +194,7 @@ func (d *Daemon) streamLoop(ctx context.Context) error {
 
 // collectAndSubmit collects a fresh inventory and submits it.
 func (d *Daemon) collectAndSubmit(ctx context.Context) error {
-	inv, err := collector.Collect(ctx)
+	inv, err := collector.CollectWith(ctx, collector.OptionsFrom(d.cfg))
 	if err != nil {
 		return fmt.Errorf("collect: %w", err)
 	}
