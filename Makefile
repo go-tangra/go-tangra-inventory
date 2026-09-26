@@ -2,7 +2,7 @@ GO        ?= go
 PKGS      := $(shell $(GO) list ./... | grep -v /ui/)
 COVER_OUT := coverage.out
 
-.PHONY: lint vuln test test-integration cover generate ui-build build build-ui image agent-windows agent-linux agent
+.PHONY: lint vuln test test-integration cover fuzz proto-check generate ui-build build build-ui image agent-windows agent-linux agent
 
 lint:
 	$(GO) vet ./...
@@ -30,8 +30,23 @@ cover:
 	$(GO) test -count=1 -coverprofile=$(COVER_OUT) -coverpkg=$(COVERPKG) $(PKGS)
 	./scripts/coverage-gate.sh $(COVER_OUT)
 
+# Run every Fuzz* target of the module for FUZZTIME each (parsers of agent
+# facts, the ingest mapper, the host report projection, enrollment tokens, diff).
+FUZZTIME ?= 10s
+fuzz:
+	@set -e; for pkg in $$($(GO) list ./... | grep -v /ui/); do \
+	  for f in $$($(GO) test -list '^Fuzz' $$pkg | grep '^Fuzz' || true); do \
+	    echo "fuzz $$pkg $$f"; \
+	    $(GO) test -run='^$$' -fuzz="^$$f$$" -fuzztime=$(FUZZTIME) $$pkg; \
+	  done; \
+	done
+
 generate:
 	cd sdk && buf generate
+
+# Proto contract: lint and stay wire-compatible with the released SDK.
+proto-check:
+	cd sdk && buf lint && buf breaking --against '../.git#tag=sdk/v4.0.0,subdir=sdk'
 
 # Build the federated UI remote (produces ui/dist consumed by the -tags ui build).
 ui-build:

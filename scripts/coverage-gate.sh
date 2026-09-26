@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Service coverage gate: >=80% overall, 100% for packages that hold key material,
 # decide access, or issue/consume enrollment credentials (inventory: the authorizer,
-# sealed envelopes, and the enrollment path).
+# sealed envelopes, the enrollment path, and the host report projection that
+# bounds what IPAM receives).
 set -euo pipefail
 PROFILE="${1:-coverage.out}"
 MODULE="github.com/go-tangra/go-tangra-inventory/v4"
-SECURITY_PKGS=("internal/authz" "internal/sealed" "internal/enroll")
+SECURITY_PKGS=("internal/authz" "internal/sealed" "internal/enroll" "internal/hostreport")
 total=$(go tool cover -func="$PROFILE" | awk '/^total:/ {gsub("%","",$3); print $3}')
 echo "coverage: total ${total}%"
 fail=0

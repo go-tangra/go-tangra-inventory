@@ -93,10 +93,12 @@ jobs:
         run: npm run test:unit
 
   buf:
-    name: Buf lint (sdk)
+    name: Buf lint + breaking (sdk)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # buf breaking compares against the sdk/v4.0.0 tag
 
       - uses: bufbuild/buf-action@v1
         with:
@@ -106,6 +108,10 @@ jobs:
       - name: buf lint
         working-directory: sdk
         run: buf lint
+
+      - name: buf breaking (against sdk/v4.0.0)
+        working-directory: sdk
+        run: buf breaking --against '../.git#tag=sdk/v4.0.0,subdir=sdk'
 
   # The endpoint agent is not part of the image: operators build it for the hosts
   # they manage (make agent). CI only proves it still cross-compiles; it uploads
