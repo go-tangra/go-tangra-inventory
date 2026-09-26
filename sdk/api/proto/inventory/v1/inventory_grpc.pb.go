@@ -957,6 +957,204 @@ var InventoryAgentService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
+	HostReportService_ListReportTenants_FullMethodName = "/inventory.v1.HostReportService/ListReportTenants"
+	HostReportService_ListHostReports_FullMethodName   = "/inventory.v1.HostReportService/ListHostReports"
+	HostReportService_GetHostReport_FullMethodName     = "/inventory.v1.HostReportService/GetHostReport"
+)
+
+// HostReportServiceClient is the client API for HostReportService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// HostReportService serves an IPAM-oriented projection of each host's latest
+// snapshot (identity, interfaces, addresses, virtualization, BMC, guests,
+// update state and pending updates only). Callers are authorised by the
+// inbound mesh policy; ListReportTenants is cross-tenant and additionally
+// restricted by the handler to the service names in host_reports.consumers.
+type HostReportServiceClient interface {
+	// Tenants having at least one host whose report changed after changed_since
+	// (0 = every tenant with hosts).
+	ListReportTenants(ctx context.Context, in *ListReportTenantsRequest, opts ...grpc.CallOption) (*ListReportTenantsResponse, error)
+	// Host reports of one tenant, ordered by (report_changed_at, host id).
+	ListHostReports(ctx context.Context, in *ListHostReportsRequest, opts ...grpc.CallOption) (*ListHostReportsResponse, error)
+	// Latest report of one host.
+	GetHostReport(ctx context.Context, in *GetHostReportRequest, opts ...grpc.CallOption) (*HostReport, error)
+}
+
+type hostReportServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewHostReportServiceClient(cc grpc.ClientConnInterface) HostReportServiceClient {
+	return &hostReportServiceClient{cc}
+}
+
+func (c *hostReportServiceClient) ListReportTenants(ctx context.Context, in *ListReportTenantsRequest, opts ...grpc.CallOption) (*ListReportTenantsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListReportTenantsResponse)
+	err := c.cc.Invoke(ctx, HostReportService_ListReportTenants_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostReportServiceClient) ListHostReports(ctx context.Context, in *ListHostReportsRequest, opts ...grpc.CallOption) (*ListHostReportsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListHostReportsResponse)
+	err := c.cc.Invoke(ctx, HostReportService_ListHostReports_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostReportServiceClient) GetHostReport(ctx context.Context, in *GetHostReportRequest, opts ...grpc.CallOption) (*HostReport, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(HostReport)
+	err := c.cc.Invoke(ctx, HostReportService_GetHostReport_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// HostReportServiceServer is the server API for HostReportService service.
+// All implementations must embed UnimplementedHostReportServiceServer
+// for forward compatibility.
+//
+// HostReportService serves an IPAM-oriented projection of each host's latest
+// snapshot (identity, interfaces, addresses, virtualization, BMC, guests,
+// update state and pending updates only). Callers are authorised by the
+// inbound mesh policy; ListReportTenants is cross-tenant and additionally
+// restricted by the handler to the service names in host_reports.consumers.
+type HostReportServiceServer interface {
+	// Tenants having at least one host whose report changed after changed_since
+	// (0 = every tenant with hosts).
+	ListReportTenants(context.Context, *ListReportTenantsRequest) (*ListReportTenantsResponse, error)
+	// Host reports of one tenant, ordered by (report_changed_at, host id).
+	ListHostReports(context.Context, *ListHostReportsRequest) (*ListHostReportsResponse, error)
+	// Latest report of one host.
+	GetHostReport(context.Context, *GetHostReportRequest) (*HostReport, error)
+	mustEmbedUnimplementedHostReportServiceServer()
+}
+
+// UnimplementedHostReportServiceServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedHostReportServiceServer struct{}
+
+func (UnimplementedHostReportServiceServer) ListReportTenants(context.Context, *ListReportTenantsRequest) (*ListReportTenantsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListReportTenants not implemented")
+}
+func (UnimplementedHostReportServiceServer) ListHostReports(context.Context, *ListHostReportsRequest) (*ListHostReportsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListHostReports not implemented")
+}
+func (UnimplementedHostReportServiceServer) GetHostReport(context.Context, *GetHostReportRequest) (*HostReport, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetHostReport not implemented")
+}
+func (UnimplementedHostReportServiceServer) mustEmbedUnimplementedHostReportServiceServer() {}
+func (UnimplementedHostReportServiceServer) testEmbeddedByValue()                           {}
+
+// UnsafeHostReportServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to HostReportServiceServer will
+// result in compilation errors.
+type UnsafeHostReportServiceServer interface {
+	mustEmbedUnimplementedHostReportServiceServer()
+}
+
+func RegisterHostReportServiceServer(s grpc.ServiceRegistrar, srv HostReportServiceServer) {
+	// If the following call panics, it indicates UnimplementedHostReportServiceServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&HostReportService_ServiceDesc, srv)
+}
+
+func _HostReportService_ListReportTenants_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListReportTenantsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostReportServiceServer).ListReportTenants(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostReportService_ListReportTenants_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostReportServiceServer).ListReportTenants(ctx, req.(*ListReportTenantsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _HostReportService_ListHostReports_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListHostReportsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostReportServiceServer).ListHostReports(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostReportService_ListHostReports_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostReportServiceServer).ListHostReports(ctx, req.(*ListHostReportsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _HostReportService_GetHostReport_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetHostReportRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostReportServiceServer).GetHostReport(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostReportService_GetHostReport_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostReportServiceServer).GetHostReport(ctx, req.(*GetHostReportRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// HostReportService_ServiceDesc is the grpc.ServiceDesc for HostReportService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var HostReportService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "inventory.v1.HostReportService",
+	HandlerType: (*HostReportServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "ListReportTenants",
+			Handler:    _HostReportService_ListReportTenants_Handler,
+		},
+		{
+			MethodName: "ListHostReports",
+			Handler:    _HostReportService_ListHostReports_Handler,
+		},
+		{
+			MethodName: "GetHostReport",
+			Handler:    _HostReportService_GetHostReport_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "inventory/v1/inventory.proto",
+}
+
+const (
 	IngestService_Enroll_FullMethodName          = "/inventory.v1.IngestService/Enroll"
 	IngestService_SubmitInventory_FullMethodName = "/inventory.v1.IngestService/SubmitInventory"
 	IngestService_StreamCommands_FullMethodName  = "/inventory.v1.IngestService/StreamCommands"
