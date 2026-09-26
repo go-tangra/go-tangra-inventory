@@ -3,9 +3,11 @@ package snapshots
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/diff"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/events"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/hostreport"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/repo"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/store"
 )
@@ -78,7 +80,17 @@ func (s *Service) Ingest(ctx context.Context, tenantID string, inv store.Invento
 		return store.Snapshot{}, err
 	}
 
-	// 4. Compute + persist the change history against the previous snapshot.
+	// 4. Record the host report digest; its change time is the watermark
+	// HostReportService consumers (IPAM) poll on. Unchanged reports keep it.
+	host.LastSnapshotID = snap.ID
+	digest := hostreport.Project(host, snap).GetReportDigest()
+	if digest != host.ReportDigest {
+		if _, err := s.st.SetReportDigest(ctx, tenantID, host.ID, digest, now.Truncate(time.Millisecond)); err != nil {
+			return store.Snapshot{}, err
+		}
+	}
+
+	// 5. Compute + persist the change history against the previous snapshot.
 	var changes []store.Change
 	if havePrev {
 		raw := diff.Diff(prev.Payload, inv)
@@ -99,7 +111,7 @@ func (s *Service) Ingest(ctx context.Context, tenantID string, inv store.Invento
 		}
 	}
 
-	// 5. Publish realtime events (content-free).
+	// 6. Publish realtime events (content-free).
 	s.pub.Publish(ctx, tenantID, events.SnapshotReceived,
 		events.SnapshotReceivedPayload(host.ID, snap.ID, host.Hostname, collectedAt))
 	if len(changes) > 0 {

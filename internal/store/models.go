@@ -479,3 +479,20 @@ type HostFilter struct {
 	Limit        int
 	CursorID     string
 }
+
+// ReportCursor is the keyset position (report_changed_at, host id) of the
+// last host row returned by a host report listing. A zero ChangedAt stands
+// for a host whose report change time was never recorded (sorted first).
+type ReportCursor struct {
+	ChangedAt time.Time
+	ID        string
+}
+
+// ReportRowFilter constrains ListHostReportRows. A zero ChangedSince lists
+// every host of the tenant (including never-reported and retired ones);
+// otherwise only hosts whose report changed strictly after it.
+type ReportRowFilter struct {
+	ChangedSince time.Time
+	After        *ReportCursor
+	Limit        int // <= 0: no limit
+}

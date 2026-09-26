@@ -69,16 +69,22 @@ func mustJSON(v any) string {
 
 const hostCols = `id, tenant_id, hostname, machine_id, hardware_uuid, system_serial,
 	identity_key, manufacturer, model, os_name, os_version, os_arch, agent_version,
-	assigned_user, status, tags, first_seen, last_seen, last_snapshot_id, created_at, updated_at`
+	assigned_user, status, tags, first_seen, last_seen, last_snapshot_id, created_at, updated_at,
+	report_digest, report_changed_at`
 
 func scanHost(sc scanner) (store.Host, error) {
 	var h store.Host
 	var tags []byte
+	var changedAt *time.Time
 	if err := sc.Scan(&h.ID, &h.TenantID, &h.Hostname, &h.MachineID, &h.HardwareUUID,
 		&h.SystemSerial, &h.IdentityKey, &h.Manufacturer, &h.Model, &h.OSName, &h.OSVersion,
 		&h.OSArch, &h.AgentVersion, &h.AssignedUser, &h.Status, &tags, &h.FirstSeen,
-		&h.LastSeen, &h.LastSnapshotID, &h.CreatedAt, &h.UpdatedAt); err != nil {
+		&h.LastSeen, &h.LastSnapshotID, &h.CreatedAt, &h.UpdatedAt,
+		&h.ReportDigest, &changedAt); err != nil {
 		return store.Host{}, err
+	}
+	if changedAt != nil {
+		h.ReportChangedAt = changedAt.UTC()
 	}
 	if len(tags) > 0 {
 		_ = json.Unmarshal(tags, &h.Tags)
@@ -303,7 +309,11 @@ func (d *DB) SetHostTags(ctx context.Context, tenantID, id string, tags map[stri
 
 func (d *DB) RetireHost(ctx context.Context, tenantID, id string) error {
 	return d.tenant(ctx, tenantID, func(tx pgx.Tx) error {
-		ct, e := tx.Exec(ctx, "UPDATE inventory_hosts SET status=$3, updated_at=now() WHERE tenant_id=$1 AND id=$2",
+		// Status is part of the host report: invalidate the digest (recomputed
+		// on read) and bump the report change time.
+		ct, e := tx.Exec(ctx, `UPDATE inventory_hosts SET status=$3, updated_at=now(),
+			report_digest='', report_changed_at=date_trunc('milliseconds', now())
+			WHERE tenant_id=$1 AND id=$2`,
 			tenantID, id, store.HostRetired)
 		if e != nil {
 			return mapErr(e)

@@ -154,6 +154,15 @@ func (f *fakeStore) TenantStats(context.Context, string, time.Time) (repo.Stats,
 }
 func (f *fakeStore) TenantIDs(context.Context) ([]string, error)       { return nil, nil }
 func (f *fakeStore) AppendAudit(context.Context, store.AuditRow) error { return nil }
+func (f *fakeStore) SetReportDigest(context.Context, string, string, string, time.Time) (bool, error) {
+	return false, nil
+}
+func (f *fakeStore) ListReportTenants(context.Context, time.Time, int) ([]string, time.Time, error) {
+	return nil, time.Time{}, nil
+}
+func (f *fakeStore) ListHostReportRows(context.Context, string, store.ReportRowFilter) ([]store.Host, error) {
+	return nil, nil
+}
 
 var _ repo.Store = (*fakeStore)(nil)
 

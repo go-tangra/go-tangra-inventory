@@ -318,6 +318,10 @@ func (m *Mem) RetireHost(_ context.Context, tenantID, id string) error {
 	}
 	h.Status = store.HostRetired
 	h.UpdatedAt = m.Now()
+	// The report changes (status is projected): invalidate the digest so the
+	// next listing recomputes it, and bump the change time.
+	h.ReportDigest = ""
+	h.ReportChangedAt = m.Now().Truncate(time.Millisecond)
 	m.hosts[id] = h
 	return nil
 }

@@ -78,4 +78,15 @@ type Store interface {
 
 	// Audit
 	AppendAudit(ctx context.Context, row store.AuditRow) error
+
+	// Host reports (feature 020). SetReportDigest records a new projection
+	// digest and its change time only when the digest differs from the stored
+	// one (changed reports whether it did). ListReportTenants is system scope:
+	// tenants with a host whose report changed after since (zero = every
+	// tenant with hosts), at most limit (<= 0: no limit), and the highest change
+	// time among them (since when none). ListHostReportRows is tenant scope,
+	// ordered by (report_changed_at, id).
+	SetReportDigest(ctx context.Context, tenantID, hostID, digest string, changedAt time.Time) (changed bool, err error)
+	ListReportTenants(ctx context.Context, since time.Time, limit int) (ids []string, maxChanged time.Time, err error)
+	ListHostReportRows(ctx context.Context, tenantID string, f store.ReportRowFilter) ([]store.Host, error)
 }
