@@ -168,18 +168,18 @@ func run(ctx context.Context, api agentAPI, tokens []string, rounds int, change 
 // seed; from round 1 on a `change` fraction of hosts moves its primary
 // address to a new host number in the same subnet.
 func Synthesize(i, round int, seed uint64, change float64) store.Inventory {
-	rnd := rand.New(rand.NewPCG(seed, uint64(i))) // #nosec G404 -- synthetic test data
+	rnd := rand.New(rand.NewPCG(seed, u64(i))) // #nosec G404 -- synthetic test data
 	subnet := i / 200
 	hostOctet := i%200 + 10
-	if round > 0 && rand.New(rand.NewPCG(seed+uint64(round), uint64(i))).Float64() < change { // #nosec G404 -- synthetic test data
+	if round > 0 && rand.New(rand.NewPCG(seed+u64(round), u64(i))).Float64() < change { // #nosec G404 -- synthetic test data
 		hostOctet = 210 + (i+round)%40
 	}
 	primary := fmt.Sprintf("10.%d.%d.%d", 20+subnet/250, subnet%250, hostOctet)
 	mac := func(n int) string {
-		return fmt.Sprintf("02:%02x:%02x:%02x:%02x:%02x", byte(seed), byte(i>>16), byte(i>>8), byte(i), byte(n))
+		return fmt.Sprintf("02:%02x:%02x:%02x:%02x:%02x", seed&0xff, i>>16&0xff, i>>8&0xff, i&0xff, n&0xff)
 	}
 	inv := store.Inventory{
-		Identity:     store.Identity{Hostname: fmt.Sprintf("loadgen-%05d", i), HardwareUUID: fmt.Sprintf("00000000-0000-4000-8000-%012x", seed<<32|uint64(i))},
+		Identity:     store.Identity{Hostname: fmt.Sprintf("loadgen-%05d", i), HardwareUUID: fmt.Sprintf("00000000-0000-4000-8000-%012x", seed<<32|u64(i))},
 		CollectedAt:  time.Now().UTC(),
 		AgentVersion: "loadgen",
 		OS:           store.OSInfo{Name: "ubuntu", Version: "24.04", Arch: "amd64", Family: "linux"},
@@ -206,7 +206,7 @@ func Synthesize(i, round int, seed uint64, change float64) store.Inventory {
 	if i%10 == 0 { // every tenth host is a Proxmox node with five guests
 		for g := 0; g < 5; g++ {
 			inv.HypervisorGuests = append(inv.HypervisorGuests, store.HypervisorGuest{ID: fmt.Sprint(100 + g), Name: fmt.Sprintf("guest-%d-%d", i, g),
-				Kind: "vm", Platform: "proxmox", MACs: []string{fmt.Sprintf("bc:24:11:%02x:%02x:%02x", byte(i>>8), byte(i), byte(g))}})
+				Kind: "vm", Platform: "proxmox", MACs: []string{fmt.Sprintf("bc:24:11:%02x:%02x:%02x", i>>8&0xff, i&0xff, g&0xff)}})
 		}
 	}
 	for p := 0; p < 200; p++ {
@@ -221,4 +221,12 @@ func Synthesize(i, round int, seed uint64, change float64) store.Inventory {
 		inv.Programs = append(inv.Programs, prog)
 	}
 	return inv
+}
+
+// u64 converts a non-negative loop index.
+func u64(n int) uint64 {
+	if n < 0 {
+		return 0
+	}
+	return uint64(n)
 }

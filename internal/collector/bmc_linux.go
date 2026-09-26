@@ -89,7 +89,7 @@ func readBMC(ctx context.Context, open ipmiOpener, budget time.Duration) (*store
 			}
 			chans = append(chans, agentfacts.BmcChannel{Channel: ch, Params: params})
 		}
-		_ = c.Close(context.Background())
+		_ = c.Close(ctx)
 		b, dropped := agentfacts.DecodeBmc(chans)
 		done <- result{b, dropped}
 	}()
