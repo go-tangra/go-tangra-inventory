@@ -1,0 +1,44 @@
+# nfpm package definition for the endpoint agent (.deb and .rpm).
+# Built by `make packages` and CI: VERSION (without "v") and ARCH
+# (amd64 | arm64) come from the environment; the binary for ARCH is staged
+# at bin/pkg/inventory-agent (nfpm expands no variables in src paths).
+name: tangra-inventory-agent
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+version_schema: semver
+section: admin
+priority: optional
+maintainer: go-tangra <noreply@github.com>
+description: |
+  go-tangra inventory agent: reports the host's hardware, operating system,
+  software, network, BMC and update state to the go-tangra inventory module.
+vendor: go-tangra
+homepage: https://github.com/go-tangra/go-tangra-inventory
+license: Proprietary
+contents:
+  - src: ./bin/pkg/inventory-agent
+    dst: /usr/bin/inventory-agent
+    file_info:
+      mode: 0755
+  - src: ./packaging/inventory-agent.service
+    dst: /usr/lib/systemd/system/inventory-agent.service
+    file_info:
+      mode: 0644
+  - src: ./packaging/agent.yaml
+    dst: /etc/inventory-agent/agent.yaml
+    type: config|noreplace
+    file_info:
+      mode: 0640
+  - dst: /etc/inventory-agent
+    type: dir
+    file_info:
+      mode: 0750
+  - dst: /var/lib/inventory-agent
+    type: dir
+    file_info:
+      mode: 0700
+scripts:
+  postinstall: ./packaging/scripts/postinstall.sh
+  preremove: ./packaging/scripts/preremove.sh
+  postremove: ./packaging/scripts/postremove.sh

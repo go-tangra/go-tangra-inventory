@@ -318,6 +318,10 @@ func (m *Mem) RetireHost(_ context.Context, tenantID, id string) error {
 	}
 	h.Status = store.HostRetired
 	h.UpdatedAt = m.Now()
+	// The report changes (status is projected): invalidate the digest so the
+	// next listing recomputes it, and bump the change time.
+	h.ReportDigest = ""
+	h.ReportChangedAt = m.Now().Truncate(time.Millisecond)
 	m.hosts[id] = h
 	return nil
 }
@@ -455,6 +459,9 @@ func (m *Mem) ListSnapshotsForHost(_ context.Context, tenantID, hostID string, l
 func (m *Mem) GetLatestForHost(_ context.Context, tenantID, hostID string) (store.Snapshot, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if err := m.fail("GetLatestForHost"); err != nil {
+		return store.Snapshot{}, err
+	}
 	var latest store.Snapshot
 	found := false
 	for _, s := range m.snaps {

@@ -2,7 +2,9 @@
 # traffic and probes health; the inventory.v1 gRPC surface (host/snapshot/
 # statistics/agent) is called by other modules directly. The off-mesh ingest
 # edge authenticates agents by per-agent credential (not mesh policy) on a
-# separate listener. Inventory itself calls auth/lcm as a client.
+# separate listener. Inventory itself calls auth/lcm as a client. IPAM pulls
+# host reports (HostReportService, feature 020) and nothing else; the handler
+# additionally checks host_reports.consumers.
 version: inventory-dev-1
 rules:
   - id: gateway-forwards
@@ -14,4 +16,14 @@ rules:
     from: ["spiffe://example.org/svc/asset"]
     to: ["inventory"]
     operations: ["/inventory.v1.InventoryHostService/ListHosts", "/inventory.v1.InventoryHostService/GetHost", "/grpc.health.v1.Health/Check"]
+    effect: allow
+  - id: ipam-hostsync
+    # ipam pulls host reports (projection of the latest snapshot) to keep
+    # devices, interfaces and addresses current (ipam feature 020, D4/D5).
+    from: ["spiffe://example.org/svc/ipam"]
+    to: ["inventory"]
+    operations: ["/inventory.v1.HostReportService/ListReportTenants",
+                 "/inventory.v1.HostReportService/ListHostReports",
+                 "/inventory.v1.HostReportService/GetHostReport",
+                 "/grpc.health.v1.Health/Check"]
     effect: allow

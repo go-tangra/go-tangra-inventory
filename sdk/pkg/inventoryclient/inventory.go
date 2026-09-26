@@ -31,6 +31,14 @@ type Inventory struct {
 	Environment  Environment
 	Networks     []NetworkInterface
 	Disks        []Disk
+	// 020: host report fields (zero values from older agents).
+	PrimaryIPv4    string
+	PrimaryIPv6    string
+	Virtualization Virtualization
+	BMC            *BMC // nil = no BMC or not readable
+	Guests         []HypervisorGuest
+	Updates        UpdateState
+	Truncated      CollectionLimits
 }
 
 type Identity struct {
@@ -48,6 +56,7 @@ type OSInfo struct {
 	InstallDate time.Time
 	LastBoot    time.Time
 	UptimeSec   uint64
+	Family      string // "linux" | "windows" ("" = old agent)
 }
 
 type BIOSInfo struct {
@@ -144,6 +153,10 @@ type Program struct {
 	InstallDate     string
 	InstallLocation string
 	SizeBytes       uint64
+	// AvailableVersion is a newer version available from the package
+	// manager ("" = none/unknown); SecurityUpdate marks it as a security update.
+	AvailableVersion string
+	SecurityUpdate   bool
 }
 
 type ServiceInfo struct {
@@ -181,8 +194,79 @@ type NetworkInterface struct {
 	DNS         []string
 	DHCP        bool
 	SpeedBps    uint64
-	Type        string
+	Type        string // kind: ethernet|wireless|bond|bridge|vlan|virtual|loopback|other
 	Up          bool
+	Addresses   []InterfaceAddress
+	// DefaultRoute is true when the interface carries a default route.
+	DefaultRoute bool
+	Master       string // bond or bridge this interface is enslaved to
+	VLANID       uint32
+}
+
+// InterfaceAddress is one address of an interface with its prefix and flags.
+type InterfaceAddress struct {
+	Address      string // canonical text, no prefix
+	PrefixLength uint32
+	Family       string // "ipv4" | "ipv6"
+	DHCP         bool
+	Temporary    bool
+	Deprecated   bool
+	Scope        string // "global" | "site" | "link" | "host"
+}
+
+// Virtualization is the detected virtualization role and kind.
+type Virtualization struct {
+	Role   string // physical|vm|container|unknown ("" = old agent)
+	Kind   string
+	Source string
+}
+
+// BMC is the out-of-band controller's LAN configuration. It deliberately has
+// no credential field.
+type BMC struct {
+	Address      string
+	PrefixLength uint32
+	Gateway      string
+	IPSource     string // static|dhcp|bios|other|""
+	VLANID       uint32
+	Ports        []BMCPort
+}
+
+// BMCPort is one BMC LAN channel.
+type BMCPort struct {
+	Channel uint32
+	MAC     string
+	Address string
+}
+
+// HypervisorGuest is a guest defined on a hypervisor host.
+type HypervisorGuest struct {
+	ID       string
+	Name     string
+	Kind     string // vm|container
+	Platform string // proxmox
+	MACs     []string
+}
+
+// UpdateState is a host's package update state.
+type UpdateState struct {
+	PackageManager     string
+	Status             string // unknown|up_to_date|updates_available|unsupported|error ("" = old agent)
+	RebootRequired     string // unknown|true|false
+	AutomaticUpdates   string // unknown|true|false
+	SecurityClassified bool
+	CheckedAt          time.Time
+	PendingCount       uint32
+	SecurityCount      uint32
+}
+
+// CollectionLimits counts entries dropped because a bound was reached.
+type CollectionLimits struct {
+	Interfaces uint32
+	Addresses  uint32
+	Guests     uint32
+	Packages   uint32
+	BMCPorts   uint32
 }
 
 type Disk struct {
@@ -218,7 +302,7 @@ func toInventory(pb *invv1.Inventory) *Inventory {
 		inv.OS = OSInfo{
 			Name: os.GetName(), Version: os.GetVersion(), Build: os.GetBuild(), Arch: os.GetArch(),
 			Kernel: os.GetKernel(), InstallDate: unixTime(os.GetInstallDate()), LastBoot: unixTime(os.GetLastBoot()),
-			UptimeSec: os.GetUptimeSec(),
+			UptimeSec: os.GetUptimeSec(), Family: os.GetFamily(),
 		}
 	}
 	if b := pb.GetBios(); b != nil {
@@ -282,6 +366,7 @@ func toInventory(pb *invv1.Inventory) *Inventory {
 		inv.Programs = append(inv.Programs, Program{
 			Name: p.GetName(), Version: p.GetVersion(), Publisher: p.GetPublisher(), InstallDate: p.GetInstallDate(),
 			InstallLocation: p.GetInstallLocation(), SizeBytes: p.GetSizeBytes(),
+			AvailableVersion: p.GetAvailableVersion(), SecurityUpdate: p.GetSecurityUpdate(),
 		})
 	}
 	for _, sv := range pb.GetServices() {
@@ -296,13 +381,14 @@ func toInventory(pb *invv1.Inventory) *Inventory {
 	for _, p := range pb.GetPatches() {
 		inv.Patches = append(inv.Patches, Patch{ID: p.GetId(), InstalledOn: p.GetInstalledOn()})
 	}
-	for _, n := range pb.GetNetworkInterfaces() {
-		inv.Networks = append(inv.Networks, NetworkInterface{
-			Name: n.GetName(), MAC: n.GetMac(), IPAddresses: n.GetIpAddresses(), Subnet: n.GetSubnet(),
-			Gateway: n.GetGateway(), DNS: n.GetDns(), DHCP: n.GetDhcp(), SpeedBps: n.GetSpeedBps(),
-			Type: n.GetType(), Up: n.GetUp(),
-		})
-	}
+	inv.Networks = toInterfaces(pb.GetNetworkInterfaces())
+	inv.PrimaryIPv4 = pb.GetPrimaryIpv4()
+	inv.PrimaryIPv6 = pb.GetPrimaryIpv6()
+	inv.Virtualization = toVirtualization(pb.GetVirtualization())
+	inv.BMC = toBMC(pb.GetBmc())
+	inv.Guests = toGuests(pb.GetHypervisorGuests())
+	inv.Updates = toUpdateState(pb.GetUpdateState())
+	inv.Truncated = toLimits(pb.GetTruncated())
 	for _, d := range pb.GetDisks() {
 		disk := Disk{
 			Model: d.GetModel(), Serial: d.GetSerial(), SizeBytes: d.GetSizeBytes(),
@@ -316,4 +402,62 @@ func toInventory(pb *invv1.Inventory) *Inventory {
 		inv.Disks = append(inv.Disks, disk)
 	}
 	return inv
+}
+
+func toInterfaces(in []*invv1.NetworkInterface) []NetworkInterface {
+	var out []NetworkInterface
+	for _, n := range in {
+		ni := NetworkInterface{
+			Name: n.GetName(), MAC: n.GetMac(), IPAddresses: n.GetIpAddresses(), Subnet: n.GetSubnet(),
+			Gateway: n.GetGateway(), DNS: n.GetDns(), DHCP: n.GetDhcp(), SpeedBps: n.GetSpeedBps(),
+			Type: n.GetType(), Up: n.GetUp(), DefaultRoute: n.GetDefaultRoute(), Master: n.GetMaster(),
+			VLANID: n.GetVlanId(),
+		}
+		for _, a := range n.GetAddresses() {
+			ni.Addresses = append(ni.Addresses, InterfaceAddress{
+				Address: a.GetAddress(), PrefixLength: a.GetPrefixLength(), Family: a.GetFamily(),
+				DHCP: a.GetDhcp(), Temporary: a.GetTemporary(), Deprecated: a.GetDeprecated(), Scope: a.GetScope(),
+			})
+		}
+		out = append(out, ni)
+	}
+	return out
+}
+
+func toVirtualization(v *invv1.Virtualization) Virtualization {
+	return Virtualization{Role: v.GetRole(), Kind: v.GetKind(), Source: v.GetSource()}
+}
+
+func toBMC(b *invv1.Bmc) *BMC {
+	if b == nil {
+		return nil
+	}
+	out := &BMC{Address: b.GetAddress(), PrefixLength: b.GetPrefixLength(), Gateway: b.GetGateway(),
+		IPSource: b.GetIpSource(), VLANID: b.GetVlanId()}
+	for _, p := range b.GetPorts() {
+		out.Ports = append(out.Ports, BMCPort{Channel: p.GetChannel(), MAC: p.GetMac(), Address: p.GetAddress()})
+	}
+	return out
+}
+
+func toGuests(in []*invv1.HypervisorGuest) []HypervisorGuest {
+	var out []HypervisorGuest
+	for _, g := range in {
+		out = append(out, HypervisorGuest{ID: g.GetId(), Name: g.GetName(), Kind: g.GetKind(),
+			Platform: g.GetPlatform(), MACs: g.GetMacs()})
+	}
+	return out
+}
+
+func toUpdateState(u *invv1.UpdateState) UpdateState {
+	return UpdateState{
+		PackageManager: u.GetPackageManager(), Status: u.GetStatus(), RebootRequired: u.GetRebootRequired(),
+		AutomaticUpdates: u.GetAutomaticUpdates(), SecurityClassified: u.GetSecurityClassified(),
+		CheckedAt: unixTime(u.GetCheckedAt()), PendingCount: u.GetPendingCount(), SecurityCount: u.GetSecurityCount(),
+	}
+}
+
+func toLimits(l *invv1.CollectionLimits) CollectionLimits {
+	return CollectionLimits{Interfaces: l.GetInterfaces(), Addresses: l.GetAddresses(), Guests: l.GetGuests(),
+		Packages: l.GetPackages(), BMCPorts: l.GetBmcPorts()}
 }

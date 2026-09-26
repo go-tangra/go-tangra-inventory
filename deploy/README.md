@@ -47,8 +47,12 @@ In the containerized platform stack it comes up with one command; see
 inventory-agent -ingest <host:port> -token <enrollment-token>   # one-shot enroll+collect+submit
 inventory-agent -config agent.yaml -daemon                      # enroll once, submit on an interval, hold a refresh stream
 inventory-agent -o ./out                                        # collect and write JSON (no submit)
-inventory-agent -service install | uninstall                    # Windows service / Linux systemd
+inventory-agent -service install | uninstall                    # Windows service only
 ```
+
+`-service install|uninstall` manages the Windows service. It does not create
+a systemd unit: on Linux it fails with "not supported"; run the daemon under
+systemd as shown below.
 
 On first run the agent exchanges an operator-issued **enrollment token** for a
 persistent per-agent credential (stored locally, 0600), then submits full
@@ -56,8 +60,95 @@ snapshots over authenticated TLS to the ingest edge and holds a reconnecting
 command stream for on-demand **refresh**. It collects: hardware via SMBIOS
 (BIOS/system/board/chassis/CPU/cache/memory/ports/slots/OEM/BIOS-language),
 monitors (EDID, Windows), OS/software/services/users/patches, network interfaces
-and disks (gopsutil). Categories unavailable on a platform yield empty sections,
-never failures.
+and disks, and the host report data described below. Categories unavailable on
+a platform yield empty sections, never failures.
+
+### Installing the agent from a package
+
+Every `v*` release carries `tangra-inventory-agent` packages for amd64 and
+arm64 (`.deb` and `.rpm`, with `SHA256SUMS`); `make packages` builds the same
+into `dist/`. The package installs `/usr/bin/inventory-agent`, the systemd
+unit below as `/usr/lib/systemd/system/inventory-agent.service` (enabled), a
+sample `/etc/inventory-agent/agent.yaml` (kept on upgrade) and
+`/var/lib/inventory-agent` (0700).
+
+```sh
+sudo apt install ./tangra-inventory-agent_<version>_amd64.deb   # or: sudo dnf install ./tangra-inventory-agent-<version>-1.x86_64.rpm
+sudoedit /etc/inventory-agent/agent.yaml                        # ingest_endpoint (and ca_file if pinned)
+sudo install -m 0600 /dev/stdin /etc/inventory-agent/enrollment.token <<< '<token from Inventory > Agents>'
+sudo systemctl start inventory-agent
+```
+
+The unit only starts once `/etc/inventory-agent/enrollment.token` or the
+stored credential `/var/lib/inventory-agent/credential` exists, so an
+unconfigured install stays idle instead of restarting in a loop. Upgrades
+restart a running agent; `apt purge` also removes the credential and state.
+
+### Running the agent under systemd
+
+```ini
+# /etc/systemd/system/inventory-agent.service
+[Unit]
+Description=go-tangra inventory agent
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/inventory-agent -config /etc/inventory-agent/agent.yaml -daemon
+Restart=on-failure
+RestartSec=30
+# root reads SMBIOS, /dev/ipmi0 (BMC) and the package managers' state.
+User=root
+StateDirectory=inventory-agent
+NoNewPrivileges=yes
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
+```
+
+`systemctl daemon-reload && systemctl enable --now inventory-agent`. Keep
+`credential_file` and `state_file` under `/var/lib/inventory-agent`.
+
+### Host report collection
+
+What the agent reports for the IPAM host sync, per platform:
+
+| Data | Linux | Windows |
+|---|---|---|
+| interfaces: kind, speed, master, VLAN, addresses with prefix and DHCP/temporary/deprecated flags, gateway, default route | sysfs + rtnetlink (5 s budget) | `GetAdaptersAddresses` |
+| primary IPv4/IPv6 | first global, non-temporary address of the lowest-metric default-route interface | same |
+| virtualization role and kind | container markers, WSL, Xen, SMBIOS, cpuinfo | SMBIOS |
+| BMC LAN settings | OpenIPMI `/dev/ipmi0`, 10 s budget | not collected |
+| Proxmox guests (VMID, name, MACs) | `/etc/pve/qemu-server`, `/etc/pve/lxc` | not collected |
+| update state, pending and security updates | apt, dnf, yum, apk, pacman (`checkupdates`) | `unknown` |
+
+Bounds: 256 interfaces, 64 addresses per interface, 1000 guests, 32 MACs per
+guest, 5000 pending updates, 8 BMC ports; the excess is counted in the
+snapshot's `truncated` counters, and the ingest edge enforces the same bounds.
+
+Agent options (`agent.yaml`):
+
+```yaml
+collect_bmc: true              # read-only BMC LAN parameters (Linux)
+collect_updates: true          # package update state (Linux)
+refresh_package_lists: false   # never refresh package lists unless enabled
+update_timeout_seconds: 120    # 30-600, whole update collection
+```
+
+- **BMC**: needs root and the `ipmi_devintf` and `ipmi_si` kernel modules
+  (`modprobe ipmi_devintf ipmi_si`, or load them at boot). The agent never loads
+  modules. It reads only IPMI LAN parameters 3 (IP), 4 (IP source), 5 (MAC),
+  6 (subnet mask), 12 (default gateway) and 20 (VLAN id): never parameter 16
+  (community string) and no user, password, session or cipher command. No
+  device, no permission or a timeout means "no BMC".
+- **Updates**: the agent reads the package lists the OS keeps fresh (apt/dnf
+  timers) and does **not** run `apt update`, `dnf makecache` or `apk update`
+  by default. With `refresh_package_lists: true` it refreshes at most once per
+  24 h. Every command runs without a shell, with `LANG=C`, a 60 s deadline, and
+  the whole collection stops at `update_timeout_seconds`. pacman needs
+  `pacman-contrib` (`checkupdates`); without it the state is `unsupported`.
 
 ## Configuration
 
@@ -68,8 +159,10 @@ see [Ingest TLS](#ingest-tls)), `registry`
 (shared agent-connection registry; Valkey-backed when configured, else
 in-memory), `retention` (`days`), `stale` (`after_seconds`), `jobs`, `events`,
 `gateway`, `enroll` (`token_ttl_seconds` — minted enrollment-token lifetime),
-`mesh_enroll` (the server's own SVID enrollment), and `limits_inventory`
-(`max_request_bytes`, `max_snapshot_bytes`). Framework `server`/`admin`/
+`mesh_enroll` (the server's own SVID enrollment), `limits_inventory`
+(`max_request_bytes`, `max_snapshot_bytes`), and `host_reports`
+(`consumers` — mesh service names allowed to call HostReportService, default
+`[ipam]`; `max_page_bytes` — bound of one ListHostReports page, default 3 MiB). Framework `server`/`admin`/
 `discovery` sections supply the mesh gRPC/HTTP and admin listeners.
 
 ## Ingest TLS
@@ -123,6 +216,39 @@ collected time) with the full payload plus normalized, queryable component table
 monitors). On ingest the server diffs the new snapshot against the host's
 previous one and records a **change history** (added/removed/modified per
 category); a `diff` API compares any two snapshots.
+
+## Host reports (IPAM)
+
+`inventory.v1.HostReportService` is served on the mesh gRPC listener only (no
+gateway route). It exposes, per host, a projection of the latest snapshot
+(identity, interfaces, addresses, virtualization, BMC, guests, update state and
+the packages with a pending update) with a digest and the time the projection
+last changed:
+
+- `ListReportTenants(changed_since)` — tenants with a changed host (cross-tenant);
+- `ListHostReports(tenant, changed_since, view full|digest, limit ≤ 200, cursor)` —
+  ordered by change time, pages bounded by `host_reports.max_page_bytes`;
+- `GetHostReport(tenant, host)`.
+
+A caller needs both the inbound policy rule and its service name in
+`host_reports.consumers`. `deploy/policy.yaml` carries the rule for IPAM:
+
+```yaml
+  - id: ipam-hostsync
+    from: ["spiffe://example.org/svc/ipam"]
+    to: ["inventory"]
+    operations: ["/inventory.v1.HostReportService/ListReportTenants",
+                 "/inventory.v1.HostReportService/ListHostReports",
+                 "/inventory.v1.HostReportService/GetHostReport",
+                 "/grpc.health.v1.Health/Check"]
+    effect: allow
+```
+
+Production stacks copy their own policy file (go-tangra-docker
+`policies/inventory.yaml`): add the rule there, with the real trust domain,
+when deploying this version. Without it IPAM's host sync reports `degraded` and
+writes nothing. Deploy the server before rolling out new agents: an older server
+drops the new report fields.
 
 ## On-demand refresh & live status
 

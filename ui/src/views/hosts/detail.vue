@@ -7,7 +7,7 @@ import { useAgents } from '@/stores/agents'
 import { useSnapshots } from '@/stores/snapshots'
 import { useLive } from '@/stores/live'
 import { describe } from '@/api/client'
-import type { Change, Host, Snapshot, SnapshotDiff } from '@/api/types'
+import type { Change, Host, IfAddress, Snapshot, SnapshotDiff } from '@/api/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -131,14 +131,45 @@ const partitionColumns: Column<Record<string, unknown>>[] = [
   { key: 'mount', label: 'Mount' }, { key: 'fs', label: 'FS' }, { key: 'size_bytes', label: 'Size', align: 'end', format: (p) => humanBytes(p.size_bytes as number) }, { key: 'free_bytes', label: 'Free', align: 'end', format: (p) => humanBytes(p.free_bytes as number) },
 ]
 const monitorColumns: Column<Record<string, unknown>>[] = [{ key: 'manufacturer', label: 'Manufacturer' }, { key: 'model', label: 'Model' }, { key: 'serial_number', label: 'Serial' }]
-const programColumns: Column<Record<string, unknown>>[] = [{ key: 'name', label: 'Name', sortable: true }, { key: 'version', label: 'Version' }, { key: 'publisher', label: 'Publisher', hideOnStack: true }, { key: 'install_date', label: 'Installed', hideOnStack: true }]
+const programColumns: Column<Record<string, unknown>>[] = [{ key: 'name', label: 'Name', sortable: true }, { key: 'version', label: 'Version' }, { key: 'available_version', label: 'Update' }, { key: 'publisher', label: 'Publisher', hideOnStack: true }, { key: 'install_date', label: 'Installed', hideOnStack: true }]
 const serviceColumns: Column<Record<string, unknown>>[] = [{ key: 'name', label: 'Name', sortable: true }, { key: 'display_name', label: 'Display name', hideOnStack: true }, { key: 'state', label: 'State', width: 'sm' }, { key: 'start_mode', label: 'Start mode', hideOnStack: true }]
 const userColumns: Column<Record<string, unknown>>[] = [{ key: 'name', label: 'Name' }, { key: 'is_admin', label: 'Admin', format: (u) => (u.is_admin ? 'yes' : '') }, { key: 'last_logon', label: 'Last logon', format: (u) => fmt(u.last_logon as string) }]
 const patchColumns: Column<Record<string, unknown>>[] = [{ key: 'id', label: 'ID', format: (p) => String(p.patch_id ?? '') }, { key: 'installed_on', label: 'Installed on' }]
 const nicColumns: Column<Record<string, unknown>>[] = [
-  { key: 'name', label: 'Name' }, { key: 'mac', label: 'MAC', hideOnStack: true }, { key: 'ip_addresses', label: 'Addresses', format: (n) => ((n.ip_addresses as string[] | undefined) ?? []).join(', ') },
-  { key: 'gateway', label: 'Gateway', hideOnStack: true }, { key: 'dns', label: 'DNS', format: (n) => ((n.dns as string[] | undefined) ?? []).join(', '), hideOnStack: true }, { key: 'type', label: 'Type', hideOnStack: true }, { key: 'up', label: 'State', width: 'sm' },
+  { key: 'name', label: 'Name' }, { key: 'type', label: 'Kind', format: (n) => [n.type, n.vlan_id ? 'vlan ' + String(n.vlan_id) : '', n.master ? 'in ' + String(n.master) : ''].filter(Boolean).join(' · ') },
+  { key: 'mac', label: 'MAC', hideOnStack: true }, { key: 'addresses', label: 'Addresses' },
+  { key: 'speed_bps', label: 'Speed', align: 'end', hideOnStack: true, format: (n) => humanSpeed(n.speed_bps as number | undefined) },
+  { key: 'gateway', label: 'Gateway', hideOnStack: true }, { key: 'dns', label: 'DNS', format: (n) => ((n.dns as string[] | undefined) ?? []).join(', '), hideOnStack: true }, { key: 'up', label: 'State', width: 'sm' },
 ]
+// Per-address rows for new agents; older agents only report CIDR strings.
+function addressesOf(n: Record<string, unknown>): { text: string; a?: IfAddress }[] {
+  const list = n.addresses as IfAddress[] | undefined
+  if (list?.length) return list.map((a) => ({ text: a.address + '/' + String(a.prefix_length), a }))
+  return ((n.ip_addresses as string[] | undefined) ?? []).map((text) => ({ text }))
+}
+function humanSpeed(bps?: number): string {
+  if (!bps) return ''
+  return bps >= 1e9 ? String(bps / 1e9) + ' Gbps' : String(bps / 1e6) + ' Mbps'
+}
+const tristate = (v?: string): string => (v === 'true' ? 'yes' : v === 'false' ? 'no' : 'unknown')
+const updateColors = { up_to_date: 'success', updates_available: 'warning', error: 'error', unsupported: 'neutral', unknown: 'neutral' } as const
+const updateStatus = computed(() => inv.value?.update_state?.status || 'unknown')
+const updateSummary = computed<KeyValue[]>(() => {
+  const u = inv.value?.update_state ?? {}
+  return kv([['Package manager', u.package_manager], ['Reboot required', tristate(u.reboot_required)], ['Automatic updates', tristate(u.automatic_updates)],
+    ['Pending updates', u.pending_count ?? 0], ['Security updates', u.security_classified ? (u.security_count ?? 0) : 'not classified'], ['Checked', fmt(u.checked_at)]])
+})
+const bmcPortColumns: Column<Record<string, unknown>>[] = [{ key: 'channel', label: 'Channel', width: 'sm' }, { key: 'mac', label: 'MAC' }, { key: 'address', label: 'Address' }]
+const guestColumns: Column<Record<string, unknown>>[] = [
+  { key: 'guest_id', label: 'VMID', width: 'sm' }, { key: 'name', label: 'Name' }, { key: 'kind', label: 'Kind', width: 'sm' },
+  { key: 'macs', label: 'MACs', format: (g) => ((g.macs as string[] | undefined) ?? []).join(', ') },
+]
+const guestRows = computed(() => rows((inv.value?.hypervisor_guests ?? []).map((g) => ({ ...g, guest_id: g.id }))))
+const truncatedText = computed(() => {
+  const t = inv.value?.truncated ?? {}
+  const parts: [number | undefined, string][] = [[t.interfaces, 'interfaces'], [t.addresses, 'addresses'], [t.guests, 'guests'], [t.packages, 'pending updates'], [t.bmc_ports, 'BMC ports']]
+  return parts.filter(([n]) => (n ?? 0) > 0).map(([n, what]) => String(n) + ' ' + what).join(', ')
+})
 const snapshotColumns: Column<Snapshot>[] = [
   { key: 'collected_at', label: 'Collected', format: (s) => fmt(s.collected_at) }, { key: 'received_at', label: 'Received', format: (s) => fmt(s.received_at), hideOnStack: true },
   { key: 'source', label: 'Source', width: 'sm' }, { key: 'agent_version', label: 'Agent', hideOnStack: true }, { key: 'short', label: 'ID', format: (s) => s.id.slice(0, 8) },
@@ -216,7 +247,20 @@ const changeColors = { added: 'success', removed: 'error', modified: 'warning' }
         <UiCard title="Operating system"><UiKeyValueTable :items="kv([['Name', inv.os.name], ['Version', inv.os.version], ['Build', inv.os.build], ['Arch', inv.os.arch], ['Kernel', inv.os.kernel], ['Install date', fmt(inv.os.install_date)], ['Last boot', fmt(inv.os.last_boot)]])" /></UiCard>
         <UiCard title="Environment"><UiKeyValueTable :items="kv([['Domain', inv.environment.domain], ['Workgroup', inv.environment.workgroup], ['Timezone', inv.environment.timezone], ['Locale', inv.environment.locale]])" /></UiCard>
       </div>
-      <UiCard title="Installed programs" :subtitle="String((inv.installed_programs ?? []).length)" :padded="false"><UiDataTable :items="rows(inv.installed_programs)" :columns="programColumns" caption="Installed programs" empty-title="Not collected" :virtual-at="200" /></UiCard>
+      <UiCard title="Updates" data-test="update-card">
+        <div class="mb-2 flex flex-wrap items-center gap-1">
+          <UiStatusChip :status="updateStatus" :colors="updateColors" :label="updateStatus.replace(/_/g, ' ')" />
+          <UiBadge v-if="inv.update_state?.reboot_required === 'true'" color="warning">reboot required</UiBadge>
+        </div>
+        <UiKeyValueTable :items="updateSummary" :columns="2" />
+      </UiCard>
+      <UiCard title="Installed programs" :subtitle="String((inv.installed_programs ?? []).length)" :padded="false">
+        <UiDataTable :items="rows(inv.installed_programs)" :columns="programColumns" caption="Installed programs" empty-title="Not collected" :virtual-at="200">
+          <template #cell-available_version="{ row }">
+            <span v-if="row.available_version">{{ row.available_version }} <UiBadge v-if="row.security_update" color="error" size="xs" data-test="security-update">security</UiBadge></span>
+          </template>
+        </UiDataTable>
+      </UiCard>
       <UiCard title="Services" :subtitle="String((inv.services ?? []).length)" :padded="false">
         <UiDataTable :items="rows(inv.services)" :columns="serviceColumns" caption="Services" empty-title="Not collected" :virtual-at="200">
           <template #cell-state="{ row }"><UiStatusChip :status="String(row.state ?? '')" :colors="{ running: 'success', stopped: 'neutral' }" /></template>
@@ -228,11 +272,38 @@ const changeColors = { added: 'success', removed: 'error', modified: 'warning' }
       </div>
     </div>
 
-    <UiCard v-if="tab === 'network' && inv" title="Network interfaces" :padded="false">
-      <UiDataTable :items="rows(inv.network_interfaces)" :columns="nicColumns" caption="Network interfaces" empty-title="Not collected">
-        <template #cell-up="{ row }"><UiStatusChip :status="row.up ? 'up' : 'down'" :colors="{ up: 'success', down: 'neutral' }" /></template>
-      </UiDataTable>
-    </UiCard>
+    <div v-if="tab === 'network' && inv" class="flex flex-col gap-4">
+      <UiAlert v-if="truncatedText" kind="warning" data-test="truncated-notice">The agent dropped entries above its limits: {{ truncatedText }}.</UiAlert>
+      <UiCard title="Addressing">
+        <UiKeyValueTable :items="kv([['Primary IPv4', inv.primary_ipv4], ['Primary IPv6', inv.primary_ipv6], ['Virtualization', [inv.virtualization?.role, inv.virtualization?.kind].filter(Boolean).join(' · ')], ['OS family', inv.os.family]])" :columns="2" />
+      </UiCard>
+      <UiCard title="Network interfaces" :padded="false">
+        <UiDataTable :items="rows(inv.network_interfaces)" :columns="nicColumns" caption="Network interfaces" empty-title="Not collected">
+          <template #cell-addresses="{ row }">
+            <div class="flex flex-col gap-0.5">
+              <span v-for="(ad, i) in addressesOf(row)" :key="i" class="flex flex-wrap items-center gap-1">
+                <span>{{ ad.text }}</span>
+                <UiBadge v-if="ad.a?.dhcp" size="xs" soft data-test="addr-flag-dhcp">dhcp</UiBadge>
+                <UiBadge v-if="ad.a?.temporary" size="xs" soft data-test="addr-flag-temporary">temporary</UiBadge>
+                <UiBadge v-if="ad.a?.deprecated" size="xs" soft color="warning" data-test="addr-flag-deprecated">deprecated</UiBadge>
+                <UiBadge v-if="ad.a && ad.a.scope && ad.a.scope !== 'global'" size="xs" soft>{{ ad.a.scope }}</UiBadge>
+              </span>
+            </div>
+          </template>
+          <template #cell-gateway="{ row }">
+            <span class="flex flex-wrap items-center gap-1">{{ row.gateway }}<UiBadge v-if="row.default_route" size="xs" soft>default</UiBadge><UiBadge v-if="row.dhcp" size="xs" soft data-test="iface-dhcp">DHCP</UiBadge></span>
+          </template>
+          <template #cell-up="{ row }"><UiStatusChip :status="row.up ? 'up' : 'down'" :colors="{ up: 'success', down: 'neutral' }" /></template>
+        </UiDataTable>
+      </UiCard>
+      <UiCard v-if="inv.bmc" title="BMC (out-of-band)" data-test="bmc-card">
+        <UiKeyValueTable :items="kv([['Address', inv.bmc.address ? inv.bmc.address + (inv.bmc.prefix_length ? '/' + inv.bmc.prefix_length : '') : ''], ['Gateway', inv.bmc.gateway], ['IP source', inv.bmc.ip_source], ['VLAN', inv.bmc.vlan_id || '']])" :columns="2" />
+        <UiDataTable :items="rows(inv.bmc.ports)" :columns="bmcPortColumns" caption="BMC ports" empty-title="No ports" class="mt-3" />
+      </UiCard>
+      <UiCard v-if="guestRows.length" title="Hypervisor guests" :subtitle="String(guestRows.length)" :padded="false" data-test="guests-card">
+        <UiDataTable :items="guestRows" :columns="guestColumns" caption="Hypervisor guests" :virtual-at="200" />
+      </UiCard>
+    </div>
 
     <div v-if="tab === 'history'" class="flex flex-col gap-4">
       <UiCard title="Compare snapshots">

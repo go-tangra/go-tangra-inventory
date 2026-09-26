@@ -245,6 +245,56 @@ func (CommandType) EnumDescriptor() ([]byte, []int) {
 	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{3}
 }
 
+// HostReportView selects how much of each report ListHostReports returns.
+type HostReportView int32
+
+const (
+	HostReportView_HOST_REPORT_VIEW_UNSPECIFIED HostReportView = 0 // = FULL
+	HostReportView_HOST_REPORT_VIEW_FULL        HostReportView = 1
+	HostReportView_HOST_REPORT_VIEW_DIGEST      HostReportView = 2 // host, status, report_digest, report_changed_at only
+)
+
+// Enum value maps for HostReportView.
+var (
+	HostReportView_name = map[int32]string{
+		0: "HOST_REPORT_VIEW_UNSPECIFIED",
+		1: "HOST_REPORT_VIEW_FULL",
+		2: "HOST_REPORT_VIEW_DIGEST",
+	}
+	HostReportView_value = map[string]int32{
+		"HOST_REPORT_VIEW_UNSPECIFIED": 0,
+		"HOST_REPORT_VIEW_FULL":        1,
+		"HOST_REPORT_VIEW_DIGEST":      2,
+	}
+)
+
+func (x HostReportView) Enum() *HostReportView {
+	p := new(HostReportView)
+	*p = x
+	return p
+}
+
+func (x HostReportView) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (HostReportView) Descriptor() protoreflect.EnumDescriptor {
+	return file_inventory_v1_inventory_proto_enumTypes[4].Descriptor()
+}
+
+func (HostReportView) Type() protoreflect.EnumType {
+	return &file_inventory_v1_inventory_proto_enumTypes[4]
+}
+
+func (x HostReportView) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use HostReportView.Descriptor instead.
+func (HostReportView) EnumDescriptor() ([]byte, []int) {
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{4}
+}
+
 // Identity carries the fields an agent reports to resolve a stable host.
 type Identity struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -717,8 +767,17 @@ type Inventory struct {
 	Environment       *Environment           `protobuf:"bytes,21,opt,name=environment,proto3" json:"environment,omitempty"`
 	NetworkInterfaces []*NetworkInterface    `protobuf:"bytes,22,rep,name=network_interfaces,json=networkInterfaces,proto3" json:"network_interfaces,omitempty"`
 	Disks             []*Disk                `protobuf:"bytes,23,rep,name=disks,proto3" json:"disks,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// First global, non-temporary, non-deprecated address of the lowest-metric
+	// default-route interface ("" = unknown / old agent).
+	PrimaryIpv4      string             `protobuf:"bytes,24,opt,name=primary_ipv4,json=primaryIpv4,proto3" json:"primary_ipv4,omitempty"`
+	PrimaryIpv6      string             `protobuf:"bytes,25,opt,name=primary_ipv6,json=primaryIpv6,proto3" json:"primary_ipv6,omitempty"`
+	Virtualization   *Virtualization    `protobuf:"bytes,26,opt,name=virtualization,proto3" json:"virtualization,omitempty"`
+	Bmc              *Bmc               `protobuf:"bytes,27,opt,name=bmc,proto3" json:"bmc,omitempty"`                                                   // absent = no BMC or not readable
+	HypervisorGuests []*HypervisorGuest `protobuf:"bytes,28,rep,name=hypervisor_guests,json=hypervisorGuests,proto3" json:"hypervisor_guests,omitempty"` // <= 1000
+	UpdateState      *UpdateState       `protobuf:"bytes,29,opt,name=update_state,json=updateState,proto3" json:"update_state,omitempty"`
+	Truncated        *CollectionLimits  `protobuf:"bytes,30,opt,name=truncated,proto3" json:"truncated,omitempty"` // entries dropped because a bound was reached
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *Inventory) Reset() {
@@ -908,6 +967,55 @@ func (x *Inventory) GetNetworkInterfaces() []*NetworkInterface {
 func (x *Inventory) GetDisks() []*Disk {
 	if x != nil {
 		return x.Disks
+	}
+	return nil
+}
+
+func (x *Inventory) GetPrimaryIpv4() string {
+	if x != nil {
+		return x.PrimaryIpv4
+	}
+	return ""
+}
+
+func (x *Inventory) GetPrimaryIpv6() string {
+	if x != nil {
+		return x.PrimaryIpv6
+	}
+	return ""
+}
+
+func (x *Inventory) GetVirtualization() *Virtualization {
+	if x != nil {
+		return x.Virtualization
+	}
+	return nil
+}
+
+func (x *Inventory) GetBmc() *Bmc {
+	if x != nil {
+		return x.Bmc
+	}
+	return nil
+}
+
+func (x *Inventory) GetHypervisorGuests() []*HypervisorGuest {
+	if x != nil {
+		return x.HypervisorGuests
+	}
+	return nil
+}
+
+func (x *Inventory) GetUpdateState() *UpdateState {
+	if x != nil {
+		return x.UpdateState
+	}
+	return nil
+}
+
+func (x *Inventory) GetTruncated() *CollectionLimits {
+	if x != nil {
+		return x.Truncated
 	}
 	return nil
 }
@@ -1738,6 +1846,7 @@ type OSInfo struct {
 	InstallDate   int64                  `protobuf:"varint,6,opt,name=install_date,json=installDate,proto3" json:"install_date,omitempty"` // unix seconds
 	LastBoot      int64                  `protobuf:"varint,7,opt,name=last_boot,json=lastBoot,proto3" json:"last_boot,omitempty"`          // unix seconds
 	UptimeSec     uint64                 `protobuf:"varint,8,opt,name=uptime_sec,json=uptimeSec,proto3" json:"uptime_sec,omitempty"`
+	Family        string                 `protobuf:"bytes,9,opt,name=family,proto3" json:"family,omitempty"` // "linux" | "windows" ("" = old agent)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1828,16 +1937,25 @@ func (x *OSInfo) GetUptimeSec() uint64 {
 	return 0
 }
 
+func (x *OSInfo) GetFamily() string {
+	if x != nil {
+		return x.Family
+	}
+	return ""
+}
+
 type Program struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	Name            string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Version         string                 `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
-	Publisher       string                 `protobuf:"bytes,3,opt,name=publisher,proto3" json:"publisher,omitempty"`
-	InstallDate     string                 `protobuf:"bytes,4,opt,name=install_date,json=installDate,proto3" json:"install_date,omitempty"`
-	InstallLocation string                 `protobuf:"bytes,5,opt,name=install_location,json=installLocation,proto3" json:"install_location,omitempty"`
-	SizeBytes       uint64                 `protobuf:"varint,6,opt,name=size_bytes,json=sizeBytes,proto3" json:"size_bytes,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Name             string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Version          string                 `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
+	Publisher        string                 `protobuf:"bytes,3,opt,name=publisher,proto3" json:"publisher,omitempty"`
+	InstallDate      string                 `protobuf:"bytes,4,opt,name=install_date,json=installDate,proto3" json:"install_date,omitempty"`
+	InstallLocation  string                 `protobuf:"bytes,5,opt,name=install_location,json=installLocation,proto3" json:"install_location,omitempty"`
+	SizeBytes        uint64                 `protobuf:"varint,6,opt,name=size_bytes,json=sizeBytes,proto3" json:"size_bytes,omitempty"`
+	AvailableVersion string                 `protobuf:"bytes,7,opt,name=available_version,json=availableVersion,proto3" json:"available_version,omitempty"` // newer version available from the package manager; "" = none/unknown
+	SecurityUpdate   bool                   `protobuf:"varint,8,opt,name=security_update,json=securityUpdate,proto3" json:"security_update,omitempty"`      // the available version is a security update
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *Program) Reset() {
@@ -1910,6 +2028,20 @@ func (x *Program) GetSizeBytes() uint64 {
 		return x.SizeBytes
 	}
 	return 0
+}
+
+func (x *Program) GetAvailableVersion() string {
+	if x != nil {
+		return x.AvailableVersion
+	}
+	return ""
+}
+
+func (x *Program) GetSecurityUpdate() bool {
+	if x != nil {
+		return x.SecurityUpdate
+	}
+	return false
 }
 
 type Service struct {
@@ -2169,17 +2301,22 @@ func (x *Environment) GetLocale() string {
 }
 
 type NetworkInterface struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Mac           string                 `protobuf:"bytes,2,opt,name=mac,proto3" json:"mac,omitempty"`
-	IpAddresses   []string               `protobuf:"bytes,3,rep,name=ip_addresses,json=ipAddresses,proto3" json:"ip_addresses,omitempty"`
-	Subnet        string                 `protobuf:"bytes,4,opt,name=subnet,proto3" json:"subnet,omitempty"`
-	Gateway       string                 `protobuf:"bytes,5,opt,name=gateway,proto3" json:"gateway,omitempty"`
-	Dns           []string               `protobuf:"bytes,6,rep,name=dns,proto3" json:"dns,omitempty"`
-	Dhcp          bool                   `protobuf:"varint,7,opt,name=dhcp,proto3" json:"dhcp,omitempty"`
-	SpeedBps      uint64                 `protobuf:"varint,8,opt,name=speed_bps,json=speedBps,proto3" json:"speed_bps,omitempty"`
-	Type          string                 `protobuf:"bytes,9,opt,name=type,proto3" json:"type,omitempty"`
-	Up            bool                   `protobuf:"varint,10,opt,name=up,proto3" json:"up,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Name        string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Mac         string                 `protobuf:"bytes,2,opt,name=mac,proto3" json:"mac,omitempty"`
+	IpAddresses []string               `protobuf:"bytes,3,rep,name=ip_addresses,json=ipAddresses,proto3" json:"ip_addresses,omitempty"` // CIDR strings, kept for old consumers
+	Subnet      string                 `protobuf:"bytes,4,opt,name=subnet,proto3" json:"subnet,omitempty"`
+	Gateway     string                 `protobuf:"bytes,5,opt,name=gateway,proto3" json:"gateway,omitempty"` // default gateway via this interface
+	Dns         []string               `protobuf:"bytes,6,rep,name=dns,proto3" json:"dns,omitempty"`
+	Dhcp        bool                   `protobuf:"varint,7,opt,name=dhcp,proto3" json:"dhcp,omitempty"`                         // any IPv4 address is dynamic (DHCP)
+	SpeedBps    uint64                 `protobuf:"varint,8,opt,name=speed_bps,json=speedBps,proto3" json:"speed_bps,omitempty"` // 0 = unknown
+	// Interface kind: ethernet|wireless|bond|bridge|vlan|virtual|loopback|other.
+	Type          string              `protobuf:"bytes,9,opt,name=type,proto3" json:"type,omitempty"`
+	Up            bool                `protobuf:"varint,10,opt,name=up,proto3" json:"up,omitempty"`
+	Addresses     []*InterfaceAddress `protobuf:"bytes,11,rep,name=addresses,proto3" json:"addresses,omitempty"`                            // <= 64
+	DefaultRoute  bool                `protobuf:"varint,12,opt,name=default_route,json=defaultRoute,proto3" json:"default_route,omitempty"` // this interface carries a default route
+	Master        string              `protobuf:"bytes,13,opt,name=master,proto3" json:"master,omitempty"`                                  // bond or bridge this interface is enslaved to
+	VlanId        uint32              `protobuf:"varint,14,opt,name=vlan_id,json=vlanId,proto3" json:"vlan_id,omitempty"`                   // for kind vlan
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2284,6 +2421,590 @@ func (x *NetworkInterface) GetUp() bool {
 	return false
 }
 
+func (x *NetworkInterface) GetAddresses() []*InterfaceAddress {
+	if x != nil {
+		return x.Addresses
+	}
+	return nil
+}
+
+func (x *NetworkInterface) GetDefaultRoute() bool {
+	if x != nil {
+		return x.DefaultRoute
+	}
+	return false
+}
+
+func (x *NetworkInterface) GetMaster() string {
+	if x != nil {
+		return x.Master
+	}
+	return ""
+}
+
+func (x *NetworkInterface) GetVlanId() uint32 {
+	if x != nil {
+		return x.VlanId
+	}
+	return 0
+}
+
+// InterfaceAddress is one address assigned to an interface.
+type InterfaceAddress struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Address       string                 `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"` // canonical text, no prefix
+	PrefixLength  uint32                 `protobuf:"varint,2,opt,name=prefix_length,json=prefixLength,proto3" json:"prefix_length,omitempty"`
+	Family        string                 `protobuf:"bytes,3,opt,name=family,proto3" json:"family,omitempty"`          // "ipv4" | "ipv6"
+	Dhcp          bool                   `protobuf:"varint,4,opt,name=dhcp,proto3" json:"dhcp,omitempty"`             // dynamically assigned (DHCP/DHCPv6/SLAAC)
+	Temporary     bool                   `protobuf:"varint,5,opt,name=temporary,proto3" json:"temporary,omitempty"`   // IPv6 privacy address
+	Deprecated    bool                   `protobuf:"varint,6,opt,name=deprecated,proto3" json:"deprecated,omitempty"` // IPv6 preferred lifetime expired
+	Scope         string                 `protobuf:"bytes,7,opt,name=scope,proto3" json:"scope,omitempty"`            // "global" | "site" | "link" | "host"
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InterfaceAddress) Reset() {
+	*x = InterfaceAddress{}
+	mi := &file_inventory_v1_inventory_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InterfaceAddress) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InterfaceAddress) ProtoMessage() {}
+
+func (x *InterfaceAddress) ProtoReflect() protoreflect.Message {
+	mi := &file_inventory_v1_inventory_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InterfaceAddress.ProtoReflect.Descriptor instead.
+func (*InterfaceAddress) Descriptor() ([]byte, []int) {
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *InterfaceAddress) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+func (x *InterfaceAddress) GetPrefixLength() uint32 {
+	if x != nil {
+		return x.PrefixLength
+	}
+	return 0
+}
+
+func (x *InterfaceAddress) GetFamily() string {
+	if x != nil {
+		return x.Family
+	}
+	return ""
+}
+
+func (x *InterfaceAddress) GetDhcp() bool {
+	if x != nil {
+		return x.Dhcp
+	}
+	return false
+}
+
+func (x *InterfaceAddress) GetTemporary() bool {
+	if x != nil {
+		return x.Temporary
+	}
+	return false
+}
+
+func (x *InterfaceAddress) GetDeprecated() bool {
+	if x != nil {
+		return x.Deprecated
+	}
+	return false
+}
+
+func (x *InterfaceAddress) GetScope() string {
+	if x != nil {
+		return x.Scope
+	}
+	return ""
+}
+
+// Virtualization is the host's virtualization role as detected by the agent.
+type Virtualization struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Role          string                 `protobuf:"bytes,1,opt,name=role,proto3" json:"role,omitempty"`     // "physical" | "vm" | "container" | "unknown"
+	Kind          string                 `protobuf:"bytes,2,opt,name=kind,proto3" json:"kind,omitempty"`     // kvm|vmware|hyperv|xen|virtualbox|lxc|docker|podman|wsl|aws|gce|... ("" for physical)
+	Source        string                 `protobuf:"bytes,3,opt,name=source,proto3" json:"source,omitempty"` // detection evidence label, e.g. "dmi", "cgroup", "hypervisor-type"
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Virtualization) Reset() {
+	*x = Virtualization{}
+	mi := &file_inventory_v1_inventory_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Virtualization) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Virtualization) ProtoMessage() {}
+
+func (x *Virtualization) ProtoReflect() protoreflect.Message {
+	mi := &file_inventory_v1_inventory_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Virtualization.ProtoReflect.Descriptor instead.
+func (*Virtualization) Descriptor() ([]byte, []int) {
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *Virtualization) GetRole() string {
+	if x != nil {
+		return x.Role
+	}
+	return ""
+}
+
+func (x *Virtualization) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *Virtualization) GetSource() string {
+	if x != nil {
+		return x.Source
+	}
+	return ""
+}
+
+// Bmc is the host's out-of-band controller LAN configuration. There is
+// deliberately NO credential, user, cipher or community-string field.
+type Bmc struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Address       string                 `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	PrefixLength  uint32                 `protobuf:"varint,2,opt,name=prefix_length,json=prefixLength,proto3" json:"prefix_length,omitempty"`
+	Gateway       string                 `protobuf:"bytes,3,opt,name=gateway,proto3" json:"gateway,omitempty"`
+	IpSource      string                 `protobuf:"bytes,4,opt,name=ip_source,json=ipSource,proto3" json:"ip_source,omitempty"` // "static" | "dhcp" | "bios" | "other" | ""
+	VlanId        uint32                 `protobuf:"varint,5,opt,name=vlan_id,json=vlanId,proto3" json:"vlan_id,omitempty"`
+	Ports         []*BmcPort             `protobuf:"bytes,6,rep,name=ports,proto3" json:"ports,omitempty"` // <= 8
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Bmc) Reset() {
+	*x = Bmc{}
+	mi := &file_inventory_v1_inventory_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Bmc) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Bmc) ProtoMessage() {}
+
+func (x *Bmc) ProtoReflect() protoreflect.Message {
+	mi := &file_inventory_v1_inventory_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Bmc.ProtoReflect.Descriptor instead.
+func (*Bmc) Descriptor() ([]byte, []int) {
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *Bmc) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+func (x *Bmc) GetPrefixLength() uint32 {
+	if x != nil {
+		return x.PrefixLength
+	}
+	return 0
+}
+
+func (x *Bmc) GetGateway() string {
+	if x != nil {
+		return x.Gateway
+	}
+	return ""
+}
+
+func (x *Bmc) GetIpSource() string {
+	if x != nil {
+		return x.IpSource
+	}
+	return ""
+}
+
+func (x *Bmc) GetVlanId() uint32 {
+	if x != nil {
+		return x.VlanId
+	}
+	return 0
+}
+
+func (x *Bmc) GetPorts() []*BmcPort {
+	if x != nil {
+		return x.Ports
+	}
+	return nil
+}
+
+// BmcPort is one LAN channel of the BMC.
+type BmcPort struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Channel       uint32                 `protobuf:"varint,1,opt,name=channel,proto3" json:"channel,omitempty"`
+	Mac           string                 `protobuf:"bytes,2,opt,name=mac,proto3" json:"mac,omitempty"`
+	Address       string                 `protobuf:"bytes,3,opt,name=address,proto3" json:"address,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BmcPort) Reset() {
+	*x = BmcPort{}
+	mi := &file_inventory_v1_inventory_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BmcPort) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BmcPort) ProtoMessage() {}
+
+func (x *BmcPort) ProtoReflect() protoreflect.Message {
+	mi := &file_inventory_v1_inventory_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BmcPort.ProtoReflect.Descriptor instead.
+func (*BmcPort) Descriptor() ([]byte, []int) {
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *BmcPort) GetChannel() uint32 {
+	if x != nil {
+		return x.Channel
+	}
+	return 0
+}
+
+func (x *BmcPort) GetMac() string {
+	if x != nil {
+		return x.Mac
+	}
+	return ""
+}
+
+func (x *BmcPort) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+// HypervisorGuest is a guest defined on this host (Proxmox).
+type HypervisorGuest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"` // VMID
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Kind          string                 `protobuf:"bytes,3,opt,name=kind,proto3" json:"kind,omitempty"`         // "vm" | "container"
+	Platform      string                 `protobuf:"bytes,4,opt,name=platform,proto3" json:"platform,omitempty"` // "proxmox"
+	Macs          []string               `protobuf:"bytes,5,rep,name=macs,proto3" json:"macs,omitempty"`         // <= 32
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HypervisorGuest) Reset() {
+	*x = HypervisorGuest{}
+	mi := &file_inventory_v1_inventory_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HypervisorGuest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HypervisorGuest) ProtoMessage() {}
+
+func (x *HypervisorGuest) ProtoReflect() protoreflect.Message {
+	mi := &file_inventory_v1_inventory_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HypervisorGuest.ProtoReflect.Descriptor instead.
+func (*HypervisorGuest) Descriptor() ([]byte, []int) {
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *HypervisorGuest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *HypervisorGuest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *HypervisorGuest) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *HypervisorGuest) GetPlatform() string {
+	if x != nil {
+		return x.Platform
+	}
+	return ""
+}
+
+func (x *HypervisorGuest) GetMacs() []string {
+	if x != nil {
+		return x.Macs
+	}
+	return nil
+}
+
+// UpdateState is the host's package update state (Linux).
+type UpdateState struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	PackageManager     string                 `protobuf:"bytes,1,opt,name=package_manager,json=packageManager,proto3" json:"package_manager,omitempty"`              // apt|dnf|yum|apk|pacman|""
+	Status             string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`                                                    // unknown|up_to_date|updates_available|unsupported|error
+	RebootRequired     string                 `protobuf:"bytes,3,opt,name=reboot_required,json=rebootRequired,proto3" json:"reboot_required,omitempty"`              // "unknown" | "true" | "false"
+	AutomaticUpdates   string                 `protobuf:"bytes,4,opt,name=automatic_updates,json=automaticUpdates,proto3" json:"automatic_updates,omitempty"`        // "unknown" | "true" | "false"
+	SecurityClassified bool                   `protobuf:"varint,5,opt,name=security_classified,json=securityClassified,proto3" json:"security_classified,omitempty"` // manager reports security updates
+	CheckedAt          int64                  `protobuf:"varint,6,opt,name=checked_at,json=checkedAt,proto3" json:"checked_at,omitempty"`                            // unix seconds
+	PendingCount       uint32                 `protobuf:"varint,7,opt,name=pending_count,json=pendingCount,proto3" json:"pending_count,omitempty"`
+	SecurityCount      uint32                 `protobuf:"varint,8,opt,name=security_count,json=securityCount,proto3" json:"security_count,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *UpdateState) Reset() {
+	*x = UpdateState{}
+	mi := &file_inventory_v1_inventory_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateState) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateState) ProtoMessage() {}
+
+func (x *UpdateState) ProtoReflect() protoreflect.Message {
+	mi := &file_inventory_v1_inventory_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateState.ProtoReflect.Descriptor instead.
+func (*UpdateState) Descriptor() ([]byte, []int) {
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *UpdateState) GetPackageManager() string {
+	if x != nil {
+		return x.PackageManager
+	}
+	return ""
+}
+
+func (x *UpdateState) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *UpdateState) GetRebootRequired() string {
+	if x != nil {
+		return x.RebootRequired
+	}
+	return ""
+}
+
+func (x *UpdateState) GetAutomaticUpdates() string {
+	if x != nil {
+		return x.AutomaticUpdates
+	}
+	return ""
+}
+
+func (x *UpdateState) GetSecurityClassified() bool {
+	if x != nil {
+		return x.SecurityClassified
+	}
+	return false
+}
+
+func (x *UpdateState) GetCheckedAt() int64 {
+	if x != nil {
+		return x.CheckedAt
+	}
+	return 0
+}
+
+func (x *UpdateState) GetPendingCount() uint32 {
+	if x != nil {
+		return x.PendingCount
+	}
+	return 0
+}
+
+func (x *UpdateState) GetSecurityCount() uint32 {
+	if x != nil {
+		return x.SecurityCount
+	}
+	return 0
+}
+
+// CollectionLimits counts entries dropped because a bound was reached.
+type CollectionLimits struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Interfaces    uint32                 `protobuf:"varint,1,opt,name=interfaces,proto3" json:"interfaces,omitempty"`
+	Addresses     uint32                 `protobuf:"varint,2,opt,name=addresses,proto3" json:"addresses,omitempty"`
+	Guests        uint32                 `protobuf:"varint,3,opt,name=guests,proto3" json:"guests,omitempty"`
+	Packages      uint32                 `protobuf:"varint,4,opt,name=packages,proto3" json:"packages,omitempty"`
+	BmcPorts      uint32                 `protobuf:"varint,5,opt,name=bmc_ports,json=bmcPorts,proto3" json:"bmc_ports,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CollectionLimits) Reset() {
+	*x = CollectionLimits{}
+	mi := &file_inventory_v1_inventory_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CollectionLimits) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CollectionLimits) ProtoMessage() {}
+
+func (x *CollectionLimits) ProtoReflect() protoreflect.Message {
+	mi := &file_inventory_v1_inventory_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CollectionLimits.ProtoReflect.Descriptor instead.
+func (*CollectionLimits) Descriptor() ([]byte, []int) {
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *CollectionLimits) GetInterfaces() uint32 {
+	if x != nil {
+		return x.Interfaces
+	}
+	return 0
+}
+
+func (x *CollectionLimits) GetAddresses() uint32 {
+	if x != nil {
+		return x.Addresses
+	}
+	return 0
+}
+
+func (x *CollectionLimits) GetGuests() uint32 {
+	if x != nil {
+		return x.Guests
+	}
+	return 0
+}
+
+func (x *CollectionLimits) GetPackages() uint32 {
+	if x != nil {
+		return x.Packages
+	}
+	return 0
+}
+
+func (x *CollectionLimits) GetBmcPorts() uint32 {
+	if x != nil {
+		return x.BmcPorts
+	}
+	return 0
+}
+
 type Disk struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Model         string                 `protobuf:"bytes,1,opt,name=model,proto3" json:"model,omitempty"`
@@ -2298,7 +3019,7 @@ type Disk struct {
 
 func (x *Disk) Reset() {
 	*x = Disk{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[22]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2310,7 +3031,7 @@ func (x *Disk) String() string {
 func (*Disk) ProtoMessage() {}
 
 func (x *Disk) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[22]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2323,7 +3044,7 @@ func (x *Disk) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Disk.ProtoReflect.Descriptor instead.
 func (*Disk) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{22}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *Disk) GetModel() string {
@@ -2380,7 +3101,7 @@ type Partition struct {
 
 func (x *Partition) Reset() {
 	*x = Partition{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[23]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2392,7 +3113,7 @@ func (x *Partition) String() string {
 func (*Partition) ProtoMessage() {}
 
 func (x *Partition) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[23]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2405,7 +3126,7 @@ func (x *Partition) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Partition.ProtoReflect.Descriptor instead.
 func (*Partition) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{23}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *Partition) GetMount() string {
@@ -2456,7 +3177,7 @@ type Change struct {
 
 func (x *Change) Reset() {
 	*x = Change{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[24]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2468,7 +3189,7 @@ func (x *Change) String() string {
 func (*Change) ProtoMessage() {}
 
 func (x *Change) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[24]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2481,7 +3202,7 @@ func (x *Change) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Change.ProtoReflect.Descriptor instead.
 func (*Change) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{24}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *Change) GetId() string {
@@ -2583,7 +3304,7 @@ type Stats struct {
 
 func (x *Stats) Reset() {
 	*x = Stats{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[25]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2595,7 +3316,7 @@ func (x *Stats) String() string {
 func (*Stats) ProtoMessage() {}
 
 func (x *Stats) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[25]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2608,7 +3329,7 @@ func (x *Stats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Stats.ProtoReflect.Descriptor instead.
 func (*Stats) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{25}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *Stats) GetHostsTotal() int64 {
@@ -2718,7 +3439,7 @@ type ConnectedAgent struct {
 
 func (x *ConnectedAgent) Reset() {
 	*x = ConnectedAgent{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[26]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2730,7 +3451,7 @@ func (x *ConnectedAgent) String() string {
 func (*ConnectedAgent) ProtoMessage() {}
 
 func (x *ConnectedAgent) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[26]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2743,7 +3464,7 @@ func (x *ConnectedAgent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConnectedAgent.ProtoReflect.Descriptor instead.
 func (*ConnectedAgent) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{26}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *ConnectedAgent) GetAgentId() string {
@@ -2813,7 +3534,7 @@ type ListHostsRequest struct {
 
 func (x *ListHostsRequest) Reset() {
 	*x = ListHostsRequest{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[27]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2825,7 +3546,7 @@ func (x *ListHostsRequest) String() string {
 func (*ListHostsRequest) ProtoMessage() {}
 
 func (x *ListHostsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[27]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2838,7 +3559,7 @@ func (x *ListHostsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListHostsRequest.ProtoReflect.Descriptor instead.
 func (*ListHostsRequest) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{27}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *ListHostsRequest) GetTenantId() string {
@@ -2921,7 +3642,7 @@ type ListHostsResponse struct {
 
 func (x *ListHostsResponse) Reset() {
 	*x = ListHostsResponse{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[28]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2933,7 +3654,7 @@ func (x *ListHostsResponse) String() string {
 func (*ListHostsResponse) ProtoMessage() {}
 
 func (x *ListHostsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[28]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2946,7 +3667,7 @@ func (x *ListHostsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListHostsResponse.ProtoReflect.Descriptor instead.
 func (*ListHostsResponse) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{28}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *ListHostsResponse) GetHosts() []*Host {
@@ -2973,7 +3694,7 @@ type GetHostRequest struct {
 
 func (x *GetHostRequest) Reset() {
 	*x = GetHostRequest{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[29]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2985,7 +3706,7 @@ func (x *GetHostRequest) String() string {
 func (*GetHostRequest) ProtoMessage() {}
 
 func (x *GetHostRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[29]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2998,7 +3719,7 @@ func (x *GetHostRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetHostRequest.ProtoReflect.Descriptor instead.
 func (*GetHostRequest) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{29}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *GetHostRequest) GetTenantId() string {
@@ -3025,7 +3746,7 @@ type GetHostByIdentityRequest struct {
 
 func (x *GetHostByIdentityRequest) Reset() {
 	*x = GetHostByIdentityRequest{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[30]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3037,7 +3758,7 @@ func (x *GetHostByIdentityRequest) String() string {
 func (*GetHostByIdentityRequest) ProtoMessage() {}
 
 func (x *GetHostByIdentityRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[30]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3050,7 +3771,7 @@ func (x *GetHostByIdentityRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetHostByIdentityRequest.ProtoReflect.Descriptor instead.
 func (*GetHostByIdentityRequest) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{30}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *GetHostByIdentityRequest) GetTenantId() string {
@@ -3078,7 +3799,7 @@ type TagHostRequest struct {
 
 func (x *TagHostRequest) Reset() {
 	*x = TagHostRequest{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[31]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3090,7 +3811,7 @@ func (x *TagHostRequest) String() string {
 func (*TagHostRequest) ProtoMessage() {}
 
 func (x *TagHostRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[31]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3103,7 +3824,7 @@ func (x *TagHostRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TagHostRequest.ProtoReflect.Descriptor instead.
 func (*TagHostRequest) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{31}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *TagHostRequest) GetTenantId() string {
@@ -3137,7 +3858,7 @@ type RetireHostRequest struct {
 
 func (x *RetireHostRequest) Reset() {
 	*x = RetireHostRequest{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[32]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3149,7 +3870,7 @@ func (x *RetireHostRequest) String() string {
 func (*RetireHostRequest) ProtoMessage() {}
 
 func (x *RetireHostRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[32]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3162,7 +3883,7 @@ func (x *RetireHostRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RetireHostRequest.ProtoReflect.Descriptor instead.
 func (*RetireHostRequest) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{32}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *RetireHostRequest) GetTenantId() string {
@@ -3189,7 +3910,7 @@ type DeleteHostRequest struct {
 
 func (x *DeleteHostRequest) Reset() {
 	*x = DeleteHostRequest{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[33]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3201,7 +3922,7 @@ func (x *DeleteHostRequest) String() string {
 func (*DeleteHostRequest) ProtoMessage() {}
 
 func (x *DeleteHostRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[33]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3214,7 +3935,7 @@ func (x *DeleteHostRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteHostRequest.ProtoReflect.Descriptor instead.
 func (*DeleteHostRequest) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{33}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *DeleteHostRequest) GetTenantId() string {
@@ -3239,7 +3960,7 @@ type DeleteHostResponse struct {
 
 func (x *DeleteHostResponse) Reset() {
 	*x = DeleteHostResponse{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[34]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3251,7 +3972,7 @@ func (x *DeleteHostResponse) String() string {
 func (*DeleteHostResponse) ProtoMessage() {}
 
 func (x *DeleteHostResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[34]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3264,7 +3985,7 @@ func (x *DeleteHostResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteHostResponse.ProtoReflect.Descriptor instead.
 func (*DeleteHostResponse) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{34}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{41}
 }
 
 type GetSnapshotRequest struct {
@@ -3277,7 +3998,7 @@ type GetSnapshotRequest struct {
 
 func (x *GetSnapshotRequest) Reset() {
 	*x = GetSnapshotRequest{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[35]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3289,7 +4010,7 @@ func (x *GetSnapshotRequest) String() string {
 func (*GetSnapshotRequest) ProtoMessage() {}
 
 func (x *GetSnapshotRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[35]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3302,7 +4023,7 @@ func (x *GetSnapshotRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSnapshotRequest.ProtoReflect.Descriptor instead.
 func (*GetSnapshotRequest) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{35}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *GetSnapshotRequest) GetTenantId() string {
@@ -3331,7 +4052,7 @@ type ListSnapshotsRequest struct {
 
 func (x *ListSnapshotsRequest) Reset() {
 	*x = ListSnapshotsRequest{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[36]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3343,7 +4064,7 @@ func (x *ListSnapshotsRequest) String() string {
 func (*ListSnapshotsRequest) ProtoMessage() {}
 
 func (x *ListSnapshotsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[36]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3356,7 +4077,7 @@ func (x *ListSnapshotsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSnapshotsRequest.ProtoReflect.Descriptor instead.
 func (*ListSnapshotsRequest) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{36}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *ListSnapshotsRequest) GetTenantId() string {
@@ -3397,7 +4118,7 @@ type ListSnapshotsResponse struct {
 
 func (x *ListSnapshotsResponse) Reset() {
 	*x = ListSnapshotsResponse{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[37]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3409,7 +4130,7 @@ func (x *ListSnapshotsResponse) String() string {
 func (*ListSnapshotsResponse) ProtoMessage() {}
 
 func (x *ListSnapshotsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[37]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3422,7 +4143,7 @@ func (x *ListSnapshotsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSnapshotsResponse.ProtoReflect.Descriptor instead.
 func (*ListSnapshotsResponse) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{37}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *ListSnapshotsResponse) GetSnapshots() []*SnapshotSummary {
@@ -3449,7 +4170,7 @@ type GetLatestByHostRequest struct {
 
 func (x *GetLatestByHostRequest) Reset() {
 	*x = GetLatestByHostRequest{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[38]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3461,7 +4182,7 @@ func (x *GetLatestByHostRequest) String() string {
 func (*GetLatestByHostRequest) ProtoMessage() {}
 
 func (x *GetLatestByHostRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[38]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3474,7 +4195,7 @@ func (x *GetLatestByHostRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetLatestByHostRequest.ProtoReflect.Descriptor instead.
 func (*GetLatestByHostRequest) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{38}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *GetLatestByHostRequest) GetTenantId() string {
@@ -3502,7 +4223,7 @@ type DiffSnapshotsRequest struct {
 
 func (x *DiffSnapshotsRequest) Reset() {
 	*x = DiffSnapshotsRequest{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[39]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3514,7 +4235,7 @@ func (x *DiffSnapshotsRequest) String() string {
 func (*DiffSnapshotsRequest) ProtoMessage() {}
 
 func (x *DiffSnapshotsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[39]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3527,7 +4248,7 @@ func (x *DiffSnapshotsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DiffSnapshotsRequest.ProtoReflect.Descriptor instead.
 func (*DiffSnapshotsRequest) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{39}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *DiffSnapshotsRequest) GetTenantId() string {
@@ -3560,7 +4281,7 @@ type DiffSnapshotsResponse struct {
 
 func (x *DiffSnapshotsResponse) Reset() {
 	*x = DiffSnapshotsResponse{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[40]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3572,7 +4293,7 @@ func (x *DiffSnapshotsResponse) String() string {
 func (*DiffSnapshotsResponse) ProtoMessage() {}
 
 func (x *DiffSnapshotsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[40]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3585,7 +4306,7 @@ func (x *DiffSnapshotsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DiffSnapshotsResponse.ProtoReflect.Descriptor instead.
 func (*DiffSnapshotsResponse) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{40}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *DiffSnapshotsResponse) GetChanges() []*Change {
@@ -3606,7 +4327,7 @@ type ListChangesRequest struct {
 
 func (x *ListChangesRequest) Reset() {
 	*x = ListChangesRequest{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[41]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3618,7 +4339,7 @@ func (x *ListChangesRequest) String() string {
 func (*ListChangesRequest) ProtoMessage() {}
 
 func (x *ListChangesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[41]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3631,7 +4352,7 @@ func (x *ListChangesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListChangesRequest.ProtoReflect.Descriptor instead.
 func (*ListChangesRequest) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{41}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *ListChangesRequest) GetTenantId() string {
@@ -3664,7 +4385,7 @@ type ListChangesResponse struct {
 
 func (x *ListChangesResponse) Reset() {
 	*x = ListChangesResponse{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[42]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3676,7 +4397,7 @@ func (x *ListChangesResponse) String() string {
 func (*ListChangesResponse) ProtoMessage() {}
 
 func (x *ListChangesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[42]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3689,7 +4410,7 @@ func (x *ListChangesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListChangesResponse.ProtoReflect.Descriptor instead.
 func (*ListChangesResponse) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{42}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *ListChangesResponse) GetChanges() []*Change {
@@ -3709,7 +4430,7 @@ type DeleteSnapshotRequest struct {
 
 func (x *DeleteSnapshotRequest) Reset() {
 	*x = DeleteSnapshotRequest{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[43]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3721,7 +4442,7 @@ func (x *DeleteSnapshotRequest) String() string {
 func (*DeleteSnapshotRequest) ProtoMessage() {}
 
 func (x *DeleteSnapshotRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[43]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3734,7 +4455,7 @@ func (x *DeleteSnapshotRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteSnapshotRequest.ProtoReflect.Descriptor instead.
 func (*DeleteSnapshotRequest) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{43}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *DeleteSnapshotRequest) GetTenantId() string {
@@ -3759,7 +4480,7 @@ type DeleteSnapshotResponse struct {
 
 func (x *DeleteSnapshotResponse) Reset() {
 	*x = DeleteSnapshotResponse{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[44]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3771,7 +4492,7 @@ func (x *DeleteSnapshotResponse) String() string {
 func (*DeleteSnapshotResponse) ProtoMessage() {}
 
 func (x *DeleteSnapshotResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[44]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3784,7 +4505,7 @@ func (x *DeleteSnapshotResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteSnapshotResponse.ProtoReflect.Descriptor instead.
 func (*DeleteSnapshotResponse) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{44}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{51}
 }
 
 type GetStatisticsRequest struct {
@@ -3796,7 +4517,7 @@ type GetStatisticsRequest struct {
 
 func (x *GetStatisticsRequest) Reset() {
 	*x = GetStatisticsRequest{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[45]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3808,7 +4529,7 @@ func (x *GetStatisticsRequest) String() string {
 func (*GetStatisticsRequest) ProtoMessage() {}
 
 func (x *GetStatisticsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[45]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3821,7 +4542,7 @@ func (x *GetStatisticsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetStatisticsRequest.ProtoReflect.Descriptor instead.
 func (*GetStatisticsRequest) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{45}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *GetStatisticsRequest) GetTenantId() string {
@@ -3840,7 +4561,7 @@ type ListConnectedAgentsRequest struct {
 
 func (x *ListConnectedAgentsRequest) Reset() {
 	*x = ListConnectedAgentsRequest{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[46]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3852,7 +4573,7 @@ func (x *ListConnectedAgentsRequest) String() string {
 func (*ListConnectedAgentsRequest) ProtoMessage() {}
 
 func (x *ListConnectedAgentsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[46]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3865,7 +4586,7 @@ func (x *ListConnectedAgentsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListConnectedAgentsRequest.ProtoReflect.Descriptor instead.
 func (*ListConnectedAgentsRequest) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{46}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{53}
 }
 
 func (x *ListConnectedAgentsRequest) GetTenantId() string {
@@ -3884,7 +4605,7 @@ type ListConnectedAgentsResponse struct {
 
 func (x *ListConnectedAgentsResponse) Reset() {
 	*x = ListConnectedAgentsResponse{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[47]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3896,7 +4617,7 @@ func (x *ListConnectedAgentsResponse) String() string {
 func (*ListConnectedAgentsResponse) ProtoMessage() {}
 
 func (x *ListConnectedAgentsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[47]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3909,7 +4630,7 @@ func (x *ListConnectedAgentsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListConnectedAgentsResponse.ProtoReflect.Descriptor instead.
 func (*ListConnectedAgentsResponse) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{47}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{54}
 }
 
 func (x *ListConnectedAgentsResponse) GetAgents() []*ConnectedAgent {
@@ -3929,7 +4650,7 @@ type RefreshInventoryRequest struct {
 
 func (x *RefreshInventoryRequest) Reset() {
 	*x = RefreshInventoryRequest{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[48]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3941,7 +4662,7 @@ func (x *RefreshInventoryRequest) String() string {
 func (*RefreshInventoryRequest) ProtoMessage() {}
 
 func (x *RefreshInventoryRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[48]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3954,7 +4675,7 @@ func (x *RefreshInventoryRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RefreshInventoryRequest.ProtoReflect.Descriptor instead.
 func (*RefreshInventoryRequest) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{48}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{55}
 }
 
 func (x *RefreshInventoryRequest) GetTenantId() string {
@@ -3981,7 +4702,7 @@ type RefreshInventoryResponse struct {
 
 func (x *RefreshInventoryResponse) Reset() {
 	*x = RefreshInventoryResponse{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[49]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[56]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3993,7 +4714,7 @@ func (x *RefreshInventoryResponse) String() string {
 func (*RefreshInventoryResponse) ProtoMessage() {}
 
 func (x *RefreshInventoryResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[49]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[56]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4006,7 +4727,7 @@ func (x *RefreshInventoryResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RefreshInventoryResponse.ProtoReflect.Descriptor instead.
 func (*RefreshInventoryResponse) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{49}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{56}
 }
 
 func (x *RefreshInventoryResponse) GetDelivered() bool {
@@ -4034,7 +4755,7 @@ type MintEnrollmentTokenRequest struct {
 
 func (x *MintEnrollmentTokenRequest) Reset() {
 	*x = MintEnrollmentTokenRequest{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[50]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[57]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4046,7 +4767,7 @@ func (x *MintEnrollmentTokenRequest) String() string {
 func (*MintEnrollmentTokenRequest) ProtoMessage() {}
 
 func (x *MintEnrollmentTokenRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[50]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[57]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4059,7 +4780,7 @@ func (x *MintEnrollmentTokenRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MintEnrollmentTokenRequest.ProtoReflect.Descriptor instead.
 func (*MintEnrollmentTokenRequest) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{50}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{57}
 }
 
 func (x *MintEnrollmentTokenRequest) GetTenantId() string {
@@ -4097,7 +4818,7 @@ type MintEnrollmentTokenResponse struct {
 
 func (x *MintEnrollmentTokenResponse) Reset() {
 	*x = MintEnrollmentTokenResponse{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[51]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[58]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4109,7 +4830,7 @@ func (x *MintEnrollmentTokenResponse) String() string {
 func (*MintEnrollmentTokenResponse) ProtoMessage() {}
 
 func (x *MintEnrollmentTokenResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[51]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[58]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4122,7 +4843,7 @@ func (x *MintEnrollmentTokenResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MintEnrollmentTokenResponse.ProtoReflect.Descriptor instead.
 func (*MintEnrollmentTokenResponse) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{51}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{58}
 }
 
 func (x *MintEnrollmentTokenResponse) GetId() string {
@@ -4163,7 +4884,7 @@ type RevokeAgentRequest struct {
 
 func (x *RevokeAgentRequest) Reset() {
 	*x = RevokeAgentRequest{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[52]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[59]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4175,7 +4896,7 @@ func (x *RevokeAgentRequest) String() string {
 func (*RevokeAgentRequest) ProtoMessage() {}
 
 func (x *RevokeAgentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[52]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[59]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4188,7 +4909,7 @@ func (x *RevokeAgentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeAgentRequest.ProtoReflect.Descriptor instead.
 func (*RevokeAgentRequest) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{52}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{59}
 }
 
 func (x *RevokeAgentRequest) GetTenantId() string {
@@ -4213,7 +4934,7 @@ type RevokeAgentResponse struct {
 
 func (x *RevokeAgentResponse) Reset() {
 	*x = RevokeAgentResponse{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[53]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[60]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4225,7 +4946,7 @@ func (x *RevokeAgentResponse) String() string {
 func (*RevokeAgentResponse) ProtoMessage() {}
 
 func (x *RevokeAgentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[53]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[60]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4238,7 +4959,525 @@ func (x *RevokeAgentResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeAgentResponse.ProtoReflect.Descriptor instead.
 func (*RevokeAgentResponse) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{53}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{60}
+}
+
+type ListReportTenantsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ChangedSince  int64                  `protobuf:"varint,1,opt,name=changed_since,json=changedSince,proto3" json:"changed_since,omitempty"` // unix milliseconds (inventory clock)
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListReportTenantsRequest) Reset() {
+	*x = ListReportTenantsRequest{}
+	mi := &file_inventory_v1_inventory_proto_msgTypes[61]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListReportTenantsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListReportTenantsRequest) ProtoMessage() {}
+
+func (x *ListReportTenantsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_inventory_v1_inventory_proto_msgTypes[61]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListReportTenantsRequest.ProtoReflect.Descriptor instead.
+func (*ListReportTenantsRequest) Descriptor() ([]byte, []int) {
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{61}
+}
+
+func (x *ListReportTenantsRequest) GetChangedSince() int64 {
+	if x != nil {
+		return x.ChangedSince
+	}
+	return 0
+}
+
+type ListReportTenantsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TenantIds     []string               `protobuf:"bytes,1,rep,name=tenant_ids,json=tenantIds,proto3" json:"tenant_ids,omitempty"`             // <= 10000
+	MaxChangedAt  int64                  `protobuf:"varint,2,opt,name=max_changed_at,json=maxChangedAt,proto3" json:"max_changed_at,omitempty"` // unix ms, next watermark
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListReportTenantsResponse) Reset() {
+	*x = ListReportTenantsResponse{}
+	mi := &file_inventory_v1_inventory_proto_msgTypes[62]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListReportTenantsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListReportTenantsResponse) ProtoMessage() {}
+
+func (x *ListReportTenantsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_inventory_v1_inventory_proto_msgTypes[62]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListReportTenantsResponse.ProtoReflect.Descriptor instead.
+func (*ListReportTenantsResponse) Descriptor() ([]byte, []int) {
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{62}
+}
+
+func (x *ListReportTenantsResponse) GetTenantIds() []string {
+	if x != nil {
+		return x.TenantIds
+	}
+	return nil
+}
+
+func (x *ListReportTenantsResponse) GetMaxChangedAt() int64 {
+	if x != nil {
+		return x.MaxChangedAt
+	}
+	return 0
+}
+
+type ListHostReportsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TenantId      string                 `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`              // uuid, required
+	ChangedSince  int64                  `protobuf:"varint,2,opt,name=changed_since,json=changedSince,proto3" json:"changed_since,omitempty"` // unix ms; 0 = all hosts (incl. retired, flagged by status)
+	View          HostReportView         `protobuf:"varint,3,opt,name=view,proto3,enum=inventory.v1.HostReportView" json:"view,omitempty"`
+	Limit         int32                  `protobuf:"varint,4,opt,name=limit,proto3" json:"limit,omitempty"`  // 1-200, default 100
+	Cursor        string                 `protobuf:"bytes,5,opt,name=cursor,proto3" json:"cursor,omitempty"` // opaque, from next_cursor
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListHostReportsRequest) Reset() {
+	*x = ListHostReportsRequest{}
+	mi := &file_inventory_v1_inventory_proto_msgTypes[63]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListHostReportsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListHostReportsRequest) ProtoMessage() {}
+
+func (x *ListHostReportsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_inventory_v1_inventory_proto_msgTypes[63]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListHostReportsRequest.ProtoReflect.Descriptor instead.
+func (*ListHostReportsRequest) Descriptor() ([]byte, []int) {
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{63}
+}
+
+func (x *ListHostReportsRequest) GetTenantId() string {
+	if x != nil {
+		return x.TenantId
+	}
+	return ""
+}
+
+func (x *ListHostReportsRequest) GetChangedSince() int64 {
+	if x != nil {
+		return x.ChangedSince
+	}
+	return 0
+}
+
+func (x *ListHostReportsRequest) GetView() HostReportView {
+	if x != nil {
+		return x.View
+	}
+	return HostReportView_HOST_REPORT_VIEW_UNSPECIFIED
+}
+
+func (x *ListHostReportsRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+func (x *ListHostReportsRequest) GetCursor() string {
+	if x != nil {
+		return x.Cursor
+	}
+	return ""
+}
+
+type ListHostReportsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Reports       []*HostReport          `protobuf:"bytes,1,rep,name=reports,proto3" json:"reports,omitempty"`                         // page also bounded by host_reports.max_page_bytes
+	NextCursor    string                 `protobuf:"bytes,2,opt,name=next_cursor,json=nextCursor,proto3" json:"next_cursor,omitempty"` // "" = last page
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListHostReportsResponse) Reset() {
+	*x = ListHostReportsResponse{}
+	mi := &file_inventory_v1_inventory_proto_msgTypes[64]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListHostReportsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListHostReportsResponse) ProtoMessage() {}
+
+func (x *ListHostReportsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_inventory_v1_inventory_proto_msgTypes[64]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListHostReportsResponse.ProtoReflect.Descriptor instead.
+func (*ListHostReportsResponse) Descriptor() ([]byte, []int) {
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{64}
+}
+
+func (x *ListHostReportsResponse) GetReports() []*HostReport {
+	if x != nil {
+		return x.Reports
+	}
+	return nil
+}
+
+func (x *ListHostReportsResponse) GetNextCursor() string {
+	if x != nil {
+		return x.NextCursor
+	}
+	return ""
+}
+
+type GetHostReportRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TenantId      string                 `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
+	HostId        string                 `protobuf:"bytes,2,opt,name=host_id,json=hostId,proto3" json:"host_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetHostReportRequest) Reset() {
+	*x = GetHostReportRequest{}
+	mi := &file_inventory_v1_inventory_proto_msgTypes[65]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetHostReportRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetHostReportRequest) ProtoMessage() {}
+
+func (x *GetHostReportRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_inventory_v1_inventory_proto_msgTypes[65]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetHostReportRequest.ProtoReflect.Descriptor instead.
+func (*GetHostReportRequest) Descriptor() ([]byte, []int) {
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{65}
+}
+
+func (x *GetHostReportRequest) GetTenantId() string {
+	if x != nil {
+		return x.TenantId
+	}
+	return ""
+}
+
+func (x *GetHostReportRequest) GetHostId() string {
+	if x != nil {
+		return x.HostId
+	}
+	return ""
+}
+
+// HostReport is the projection of one host's latest snapshot.
+type HostReport struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	TenantId          string                 `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
+	Host              *Host                  `protobuf:"bytes,2,opt,name=host,proto3" json:"host,omitempty"`
+	SnapshotId        string                 `protobuf:"bytes,3,opt,name=snapshot_id,json=snapshotId,proto3" json:"snapshot_id,omitempty"`
+	CollectedAt       int64                  `protobuf:"varint,4,opt,name=collected_at,json=collectedAt,proto3" json:"collected_at,omitempty"`               // unix seconds
+	ReportChangedAt   int64                  `protobuf:"varint,5,opt,name=report_changed_at,json=reportChangedAt,proto3" json:"report_changed_at,omitempty"` // unix ms
+	ReportDigest      string                 `protobuf:"bytes,6,opt,name=report_digest,json=reportDigest,proto3" json:"report_digest,omitempty"`             // hex sha256 of the projection
+	AgentVersion      string                 `protobuf:"bytes,7,opt,name=agent_version,json=agentVersion,proto3" json:"agent_version,omitempty"`
+	OsFamily          string                 `protobuf:"bytes,8,opt,name=os_family,json=osFamily,proto3" json:"os_family,omitempty"`
+	NetworkInterfaces []*NetworkInterface    `protobuf:"bytes,9,rep,name=network_interfaces,json=networkInterfaces,proto3" json:"network_interfaces,omitempty"`
+	PrimaryIpv4       string                 `protobuf:"bytes,10,opt,name=primary_ipv4,json=primaryIpv4,proto3" json:"primary_ipv4,omitempty"`
+	PrimaryIpv6       string                 `protobuf:"bytes,11,opt,name=primary_ipv6,json=primaryIpv6,proto3" json:"primary_ipv6,omitempty"`
+	Virtualization    *Virtualization        `protobuf:"bytes,12,opt,name=virtualization,proto3" json:"virtualization,omitempty"`
+	Bmc               *Bmc                   `protobuf:"bytes,13,opt,name=bmc,proto3" json:"bmc,omitempty"`
+	HypervisorGuests  []*HypervisorGuest     `protobuf:"bytes,14,rep,name=hypervisor_guests,json=hypervisorGuests,proto3" json:"hypervisor_guests,omitempty"`
+	UpdateState       *UpdateState           `protobuf:"bytes,15,opt,name=update_state,json=updateState,proto3" json:"update_state,omitempty"`
+	PendingUpdates    []*PendingUpdate       `protobuf:"bytes,16,rep,name=pending_updates,json=pendingUpdates,proto3" json:"pending_updates,omitempty"` // <= 5000
+	Truncated         *CollectionLimits      `protobuf:"bytes,17,opt,name=truncated,proto3" json:"truncated,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *HostReport) Reset() {
+	*x = HostReport{}
+	mi := &file_inventory_v1_inventory_proto_msgTypes[66]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HostReport) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HostReport) ProtoMessage() {}
+
+func (x *HostReport) ProtoReflect() protoreflect.Message {
+	mi := &file_inventory_v1_inventory_proto_msgTypes[66]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HostReport.ProtoReflect.Descriptor instead.
+func (*HostReport) Descriptor() ([]byte, []int) {
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{66}
+}
+
+func (x *HostReport) GetTenantId() string {
+	if x != nil {
+		return x.TenantId
+	}
+	return ""
+}
+
+func (x *HostReport) GetHost() *Host {
+	if x != nil {
+		return x.Host
+	}
+	return nil
+}
+
+func (x *HostReport) GetSnapshotId() string {
+	if x != nil {
+		return x.SnapshotId
+	}
+	return ""
+}
+
+func (x *HostReport) GetCollectedAt() int64 {
+	if x != nil {
+		return x.CollectedAt
+	}
+	return 0
+}
+
+func (x *HostReport) GetReportChangedAt() int64 {
+	if x != nil {
+		return x.ReportChangedAt
+	}
+	return 0
+}
+
+func (x *HostReport) GetReportDigest() string {
+	if x != nil {
+		return x.ReportDigest
+	}
+	return ""
+}
+
+func (x *HostReport) GetAgentVersion() string {
+	if x != nil {
+		return x.AgentVersion
+	}
+	return ""
+}
+
+func (x *HostReport) GetOsFamily() string {
+	if x != nil {
+		return x.OsFamily
+	}
+	return ""
+}
+
+func (x *HostReport) GetNetworkInterfaces() []*NetworkInterface {
+	if x != nil {
+		return x.NetworkInterfaces
+	}
+	return nil
+}
+
+func (x *HostReport) GetPrimaryIpv4() string {
+	if x != nil {
+		return x.PrimaryIpv4
+	}
+	return ""
+}
+
+func (x *HostReport) GetPrimaryIpv6() string {
+	if x != nil {
+		return x.PrimaryIpv6
+	}
+	return ""
+}
+
+func (x *HostReport) GetVirtualization() *Virtualization {
+	if x != nil {
+		return x.Virtualization
+	}
+	return nil
+}
+
+func (x *HostReport) GetBmc() *Bmc {
+	if x != nil {
+		return x.Bmc
+	}
+	return nil
+}
+
+func (x *HostReport) GetHypervisorGuests() []*HypervisorGuest {
+	if x != nil {
+		return x.HypervisorGuests
+	}
+	return nil
+}
+
+func (x *HostReport) GetUpdateState() *UpdateState {
+	if x != nil {
+		return x.UpdateState
+	}
+	return nil
+}
+
+func (x *HostReport) GetPendingUpdates() []*PendingUpdate {
+	if x != nil {
+		return x.PendingUpdates
+	}
+	return nil
+}
+
+func (x *HostReport) GetTruncated() *CollectionLimits {
+	if x != nil {
+		return x.Truncated
+	}
+	return nil
+}
+
+// PendingUpdate is an installed package with a newer version available.
+type PendingUpdate struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Name             string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	InstalledVersion string                 `protobuf:"bytes,2,opt,name=installed_version,json=installedVersion,proto3" json:"installed_version,omitempty"`
+	AvailableVersion string                 `protobuf:"bytes,3,opt,name=available_version,json=availableVersion,proto3" json:"available_version,omitempty"`
+	Security         bool                   `protobuf:"varint,4,opt,name=security,proto3" json:"security,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *PendingUpdate) Reset() {
+	*x = PendingUpdate{}
+	mi := &file_inventory_v1_inventory_proto_msgTypes[67]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PendingUpdate) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PendingUpdate) ProtoMessage() {}
+
+func (x *PendingUpdate) ProtoReflect() protoreflect.Message {
+	mi := &file_inventory_v1_inventory_proto_msgTypes[67]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PendingUpdate.ProtoReflect.Descriptor instead.
+func (*PendingUpdate) Descriptor() ([]byte, []int) {
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{67}
+}
+
+func (x *PendingUpdate) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *PendingUpdate) GetInstalledVersion() string {
+	if x != nil {
+		return x.InstalledVersion
+	}
+	return ""
+}
+
+func (x *PendingUpdate) GetAvailableVersion() string {
+	if x != nil {
+		return x.AvailableVersion
+	}
+	return ""
+}
+
+func (x *PendingUpdate) GetSecurity() bool {
+	if x != nil {
+		return x.Security
+	}
+	return false
 }
 
 type EnrollRequest struct {
@@ -4252,7 +5491,7 @@ type EnrollRequest struct {
 
 func (x *EnrollRequest) Reset() {
 	*x = EnrollRequest{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[54]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[68]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4264,7 +5503,7 @@ func (x *EnrollRequest) String() string {
 func (*EnrollRequest) ProtoMessage() {}
 
 func (x *EnrollRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[54]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[68]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4277,7 +5516,7 @@ func (x *EnrollRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EnrollRequest.ProtoReflect.Descriptor instead.
 func (*EnrollRequest) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{54}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{68}
 }
 
 func (x *EnrollRequest) GetEnrollmentToken() string {
@@ -4313,7 +5552,7 @@ type EnrollResponse struct {
 
 func (x *EnrollResponse) Reset() {
 	*x = EnrollResponse{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[55]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[69]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4325,7 +5564,7 @@ func (x *EnrollResponse) String() string {
 func (*EnrollResponse) ProtoMessage() {}
 
 func (x *EnrollResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[55]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[69]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4338,7 +5577,7 @@ func (x *EnrollResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EnrollResponse.ProtoReflect.Descriptor instead.
 func (*EnrollResponse) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{55}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{69}
 }
 
 func (x *EnrollResponse) GetAgentId() string {
@@ -4364,7 +5603,7 @@ type SubmitRequest struct {
 
 func (x *SubmitRequest) Reset() {
 	*x = SubmitRequest{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[56]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[70]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4376,7 +5615,7 @@ func (x *SubmitRequest) String() string {
 func (*SubmitRequest) ProtoMessage() {}
 
 func (x *SubmitRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[56]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[70]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4389,7 +5628,7 @@ func (x *SubmitRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitRequest.ProtoReflect.Descriptor instead.
 func (*SubmitRequest) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{56}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{70}
 }
 
 func (x *SubmitRequest) GetInventory() *Inventory {
@@ -4410,7 +5649,7 @@ type SubmitResponse struct {
 
 func (x *SubmitResponse) Reset() {
 	*x = SubmitResponse{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[57]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[71]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4422,7 +5661,7 @@ func (x *SubmitResponse) String() string {
 func (*SubmitResponse) ProtoMessage() {}
 
 func (x *SubmitResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[57]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[71]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4435,7 +5674,7 @@ func (x *SubmitResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitResponse.ProtoReflect.Descriptor instead.
 func (*SubmitResponse) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{57}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{71}
 }
 
 func (x *SubmitResponse) GetSnapshotId() string {
@@ -4469,7 +5708,7 @@ type StreamRequest struct {
 
 func (x *StreamRequest) Reset() {
 	*x = StreamRequest{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[58]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[72]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4481,7 +5720,7 @@ func (x *StreamRequest) String() string {
 func (*StreamRequest) ProtoMessage() {}
 
 func (x *StreamRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[58]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[72]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4494,7 +5733,7 @@ func (x *StreamRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamRequest.ProtoReflect.Descriptor instead.
 func (*StreamRequest) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{58}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{72}
 }
 
 func (x *StreamRequest) GetAgentId() string {
@@ -4522,7 +5761,7 @@ type Command struct {
 
 func (x *Command) Reset() {
 	*x = Command{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[59]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[73]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4534,7 +5773,7 @@ func (x *Command) String() string {
 func (*Command) ProtoMessage() {}
 
 func (x *Command) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[59]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[73]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4547,7 +5786,7 @@ func (x *Command) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Command.ProtoReflect.Descriptor instead.
 func (*Command) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{59}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{73}
 }
 
 func (x *Command) GetCommandId() string {
@@ -4622,7 +5861,7 @@ const file_inventory_v1_inventory_proto_rawDesc = "" +
 	"\x05model\x18\v \x01(\tR\x05model\"v\n" +
 	"\bSnapshot\x127\n" +
 	"\asummary\x18\x01 \x01(\v2\x1d.inventory.v1.SnapshotSummaryR\asummary\x121\n" +
-	"\apayload\x18\x02 \x01(\v2\x17.inventory.v1.InventoryR\apayload\"\xc9\b\n" +
+	"\apayload\x18\x02 \x01(\v2\x17.inventory.v1.InventoryR\apayload\"\xc2\v\n" +
 	"\tInventory\x122\n" +
 	"\bidentity\x18\x01 \x01(\v2\x16.inventory.v1.IdentityR\bidentity\x12!\n" +
 	"\fcollected_at\x18\x02 \x01(\x03R\vcollectedAt\x12#\n" +
@@ -4650,7 +5889,14 @@ const file_inventory_v1_inventory_proto_rawDesc = "" +
 	"\apatches\x18\x14 \x03(\v2\x13.inventory.v1.PatchR\apatches\x12;\n" +
 	"\venvironment\x18\x15 \x01(\v2\x19.inventory.v1.EnvironmentR\venvironment\x12M\n" +
 	"\x12network_interfaces\x18\x16 \x03(\v2\x1e.inventory.v1.NetworkInterfaceR\x11networkInterfaces\x12(\n" +
-	"\x05disks\x18\x17 \x03(\v2\x12.inventory.v1.DiskR\x05disks\"_\n" +
+	"\x05disks\x18\x17 \x03(\v2\x12.inventory.v1.DiskR\x05disks\x12!\n" +
+	"\fprimary_ipv4\x18\x18 \x01(\tR\vprimaryIpv4\x12!\n" +
+	"\fprimary_ipv6\x18\x19 \x01(\tR\vprimaryIpv6\x12D\n" +
+	"\x0evirtualization\x18\x1a \x01(\v2\x1c.inventory.v1.VirtualizationR\x0evirtualization\x12#\n" +
+	"\x03bmc\x18\x1b \x01(\v2\x11.inventory.v1.BmcR\x03bmc\x12J\n" +
+	"\x11hypervisor_guests\x18\x1c \x03(\v2\x1d.inventory.v1.HypervisorGuestR\x10hypervisorGuests\x12<\n" +
+	"\fupdate_state\x18\x1d \x01(\v2\x19.inventory.v1.UpdateStateR\vupdateState\x12<\n" +
+	"\ttruncated\x18\x1e \x01(\v2\x1e.inventory.v1.CollectionLimitsR\ttruncated\"_\n" +
 	"\bBIOSInfo\x12\x16\n" +
 	"\x06vendor\x18\x01 \x01(\tR\x06vendor\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12!\n" +
@@ -4731,7 +5977,7 @@ const file_inventory_v1_inventory_proto_rawDesc = "" +
 	"\aMonitor\x12\"\n" +
 	"\fmanufacturer\x18\x01 \x01(\tR\fmanufacturer\x12\x14\n" +
 	"\x05model\x18\x02 \x01(\tR\x05model\x12#\n" +
-	"\rserial_number\x18\x03 \x01(\tR\fserialNumber\"\xd7\x01\n" +
+	"\rserial_number\x18\x03 \x01(\tR\fserialNumber\"\xef\x01\n" +
 	"\x06OSInfo\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12\x14\n" +
@@ -4741,7 +5987,8 @@ const file_inventory_v1_inventory_proto_rawDesc = "" +
 	"\finstall_date\x18\x06 \x01(\x03R\vinstallDate\x12\x1b\n" +
 	"\tlast_boot\x18\a \x01(\x03R\blastBoot\x12\x1d\n" +
 	"\n" +
-	"uptime_sec\x18\b \x01(\x04R\tuptimeSec\"\xc2\x01\n" +
+	"uptime_sec\x18\b \x01(\x04R\tuptimeSec\x12\x16\n" +
+	"\x06family\x18\t \x01(\tR\x06family\"\x98\x02\n" +
 	"\aProgram\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12\x1c\n" +
@@ -4749,7 +5996,9 @@ const file_inventory_v1_inventory_proto_rawDesc = "" +
 	"\finstall_date\x18\x04 \x01(\tR\vinstallDate\x12)\n" +
 	"\x10install_location\x18\x05 \x01(\tR\x0finstallLocation\x12\x1d\n" +
 	"\n" +
-	"size_bytes\x18\x06 \x01(\x04R\tsizeBytes\"\x8f\x01\n" +
+	"size_bytes\x18\x06 \x01(\x04R\tsizeBytes\x12+\n" +
+	"\x11available_version\x18\a \x01(\tR\x10availableVersion\x12'\n" +
+	"\x0fsecurity_update\x18\b \x01(\bR\x0esecurityUpdate\"\x8f\x01\n" +
 	"\aService\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12!\n" +
 	"\fdisplay_name\x18\x02 \x01(\tR\vdisplayName\x12\x14\n" +
@@ -4769,7 +6018,7 @@ const file_inventory_v1_inventory_proto_rawDesc = "" +
 	"\x06domain\x18\x01 \x01(\tR\x06domain\x12\x1c\n" +
 	"\tworkgroup\x18\x02 \x01(\tR\tworkgroup\x12\x1a\n" +
 	"\btimezone\x18\x03 \x01(\tR\btimezone\x12\x16\n" +
-	"\x06locale\x18\x04 \x01(\tR\x06locale\"\xf4\x01\n" +
+	"\x06locale\x18\x04 \x01(\tR\x06locale\"\x88\x03\n" +
 	"\x10NetworkInterface\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x10\n" +
 	"\x03mac\x18\x02 \x01(\tR\x03mac\x12!\n" +
@@ -4781,7 +6030,60 @@ const file_inventory_v1_inventory_proto_rawDesc = "" +
 	"\tspeed_bps\x18\b \x01(\x04R\bspeedBps\x12\x12\n" +
 	"\x04type\x18\t \x01(\tR\x04type\x12\x0e\n" +
 	"\x02up\x18\n" +
-	" \x01(\bR\x02up\"\xc9\x01\n" +
+	" \x01(\bR\x02up\x12<\n" +
+	"\taddresses\x18\v \x03(\v2\x1e.inventory.v1.InterfaceAddressR\taddresses\x12#\n" +
+	"\rdefault_route\x18\f \x01(\bR\fdefaultRoute\x12\x16\n" +
+	"\x06master\x18\r \x01(\tR\x06master\x12\x17\n" +
+	"\avlan_id\x18\x0e \x01(\rR\x06vlanId\"\xd1\x01\n" +
+	"\x10InterfaceAddress\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\x12#\n" +
+	"\rprefix_length\x18\x02 \x01(\rR\fprefixLength\x12\x16\n" +
+	"\x06family\x18\x03 \x01(\tR\x06family\x12\x12\n" +
+	"\x04dhcp\x18\x04 \x01(\bR\x04dhcp\x12\x1c\n" +
+	"\ttemporary\x18\x05 \x01(\bR\ttemporary\x12\x1e\n" +
+	"\n" +
+	"deprecated\x18\x06 \x01(\bR\n" +
+	"deprecated\x12\x14\n" +
+	"\x05scope\x18\a \x01(\tR\x05scope\"P\n" +
+	"\x0eVirtualization\x12\x12\n" +
+	"\x04role\x18\x01 \x01(\tR\x04role\x12\x12\n" +
+	"\x04kind\x18\x02 \x01(\tR\x04kind\x12\x16\n" +
+	"\x06source\x18\x03 \x01(\tR\x06source\"\xc1\x01\n" +
+	"\x03Bmc\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\x12#\n" +
+	"\rprefix_length\x18\x02 \x01(\rR\fprefixLength\x12\x18\n" +
+	"\agateway\x18\x03 \x01(\tR\agateway\x12\x1b\n" +
+	"\tip_source\x18\x04 \x01(\tR\bipSource\x12\x17\n" +
+	"\avlan_id\x18\x05 \x01(\rR\x06vlanId\x12+\n" +
+	"\x05ports\x18\x06 \x03(\v2\x15.inventory.v1.BmcPortR\x05ports\"O\n" +
+	"\aBmcPort\x12\x18\n" +
+	"\achannel\x18\x01 \x01(\rR\achannel\x12\x10\n" +
+	"\x03mac\x18\x02 \x01(\tR\x03mac\x12\x18\n" +
+	"\aaddress\x18\x03 \x01(\tR\aaddress\"y\n" +
+	"\x0fHypervisorGuest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
+	"\x04kind\x18\x03 \x01(\tR\x04kind\x12\x1a\n" +
+	"\bplatform\x18\x04 \x01(\tR\bplatform\x12\x12\n" +
+	"\x04macs\x18\x05 \x03(\tR\x04macs\"\xc0\x02\n" +
+	"\vUpdateState\x12'\n" +
+	"\x0fpackage_manager\x18\x01 \x01(\tR\x0epackageManager\x12\x16\n" +
+	"\x06status\x18\x02 \x01(\tR\x06status\x12'\n" +
+	"\x0freboot_required\x18\x03 \x01(\tR\x0erebootRequired\x12+\n" +
+	"\x11automatic_updates\x18\x04 \x01(\tR\x10automaticUpdates\x12/\n" +
+	"\x13security_classified\x18\x05 \x01(\bR\x12securityClassified\x12\x1d\n" +
+	"\n" +
+	"checked_at\x18\x06 \x01(\x03R\tcheckedAt\x12#\n" +
+	"\rpending_count\x18\a \x01(\rR\fpendingCount\x12%\n" +
+	"\x0esecurity_count\x18\b \x01(\rR\rsecurityCount\"\xa1\x01\n" +
+	"\x10CollectionLimits\x12\x1e\n" +
+	"\n" +
+	"interfaces\x18\x01 \x01(\rR\n" +
+	"interfaces\x12\x1c\n" +
+	"\taddresses\x18\x02 \x01(\rR\taddresses\x12\x16\n" +
+	"\x06guests\x18\x03 \x01(\rR\x06guests\x12\x1a\n" +
+	"\bpackages\x18\x04 \x01(\rR\bpackages\x12\x1b\n" +
+	"\tbmc_ports\x18\x05 \x01(\rR\bbmcPorts\"\xc9\x01\n" +
 	"\x04Disk\x12\x14\n" +
 	"\x05model\x18\x01 \x01(\tR\x05model\x12\x16\n" +
 	"\x06serial\x18\x02 \x01(\tR\x06serial\x12\x1d\n" +
@@ -4950,7 +6252,52 @@ const file_inventory_v1_inventory_proto_rawDesc = "" +
 	"\x12RevokeAgentRequest\x12\x1b\n" +
 	"\ttenant_id\x18\x01 \x01(\tR\btenantId\x12\x0e\n" +
 	"\x02id\x18\x02 \x01(\tR\x02id\"\x15\n" +
-	"\x13RevokeAgentResponse\"\x93\x01\n" +
+	"\x13RevokeAgentResponse\"?\n" +
+	"\x18ListReportTenantsRequest\x12#\n" +
+	"\rchanged_since\x18\x01 \x01(\x03R\fchangedSince\"`\n" +
+	"\x19ListReportTenantsResponse\x12\x1d\n" +
+	"\n" +
+	"tenant_ids\x18\x01 \x03(\tR\ttenantIds\x12$\n" +
+	"\x0emax_changed_at\x18\x02 \x01(\x03R\fmaxChangedAt\"\xba\x01\n" +
+	"\x16ListHostReportsRequest\x12\x1b\n" +
+	"\ttenant_id\x18\x01 \x01(\tR\btenantId\x12#\n" +
+	"\rchanged_since\x18\x02 \x01(\x03R\fchangedSince\x120\n" +
+	"\x04view\x18\x03 \x01(\x0e2\x1c.inventory.v1.HostReportViewR\x04view\x12\x14\n" +
+	"\x05limit\x18\x04 \x01(\x05R\x05limit\x12\x16\n" +
+	"\x06cursor\x18\x05 \x01(\tR\x06cursor\"n\n" +
+	"\x17ListHostReportsResponse\x122\n" +
+	"\areports\x18\x01 \x03(\v2\x18.inventory.v1.HostReportR\areports\x12\x1f\n" +
+	"\vnext_cursor\x18\x02 \x01(\tR\n" +
+	"nextCursor\"L\n" +
+	"\x14GetHostReportRequest\x12\x1b\n" +
+	"\ttenant_id\x18\x01 \x01(\tR\btenantId\x12\x17\n" +
+	"\ahost_id\x18\x02 \x01(\tR\x06hostId\"\xb6\x06\n" +
+	"\n" +
+	"HostReport\x12\x1b\n" +
+	"\ttenant_id\x18\x01 \x01(\tR\btenantId\x12&\n" +
+	"\x04host\x18\x02 \x01(\v2\x12.inventory.v1.HostR\x04host\x12\x1f\n" +
+	"\vsnapshot_id\x18\x03 \x01(\tR\n" +
+	"snapshotId\x12!\n" +
+	"\fcollected_at\x18\x04 \x01(\x03R\vcollectedAt\x12*\n" +
+	"\x11report_changed_at\x18\x05 \x01(\x03R\x0freportChangedAt\x12#\n" +
+	"\rreport_digest\x18\x06 \x01(\tR\freportDigest\x12#\n" +
+	"\ragent_version\x18\a \x01(\tR\fagentVersion\x12\x1b\n" +
+	"\tos_family\x18\b \x01(\tR\bosFamily\x12M\n" +
+	"\x12network_interfaces\x18\t \x03(\v2\x1e.inventory.v1.NetworkInterfaceR\x11networkInterfaces\x12!\n" +
+	"\fprimary_ipv4\x18\n" +
+	" \x01(\tR\vprimaryIpv4\x12!\n" +
+	"\fprimary_ipv6\x18\v \x01(\tR\vprimaryIpv6\x12D\n" +
+	"\x0evirtualization\x18\f \x01(\v2\x1c.inventory.v1.VirtualizationR\x0evirtualization\x12#\n" +
+	"\x03bmc\x18\r \x01(\v2\x11.inventory.v1.BmcR\x03bmc\x12J\n" +
+	"\x11hypervisor_guests\x18\x0e \x03(\v2\x1d.inventory.v1.HypervisorGuestR\x10hypervisorGuests\x12<\n" +
+	"\fupdate_state\x18\x0f \x01(\v2\x19.inventory.v1.UpdateStateR\vupdateState\x12D\n" +
+	"\x0fpending_updates\x18\x10 \x03(\v2\x1b.inventory.v1.PendingUpdateR\x0ependingUpdates\x12<\n" +
+	"\ttruncated\x18\x11 \x01(\v2\x1e.inventory.v1.CollectionLimitsR\ttruncated\"\x99\x01\n" +
+	"\rPendingUpdate\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12+\n" +
+	"\x11installed_version\x18\x02 \x01(\tR\x10installedVersion\x12+\n" +
+	"\x11available_version\x18\x03 \x01(\tR\x10availableVersion\x12\x1a\n" +
+	"\bsecurity\x18\x04 \x01(\bR\bsecurity\"\x93\x01\n" +
 	"\rEnrollRequest\x12)\n" +
 	"\x10enrollment_token\x18\x01 \x01(\tR\x0fenrollmentToken\x122\n" +
 	"\bidentity\x18\x02 \x01(\v2\x16.inventory.v1.IdentityR\bidentity\x12#\n" +
@@ -4992,7 +6339,11 @@ const file_inventory_v1_inventory_proto_rawDesc = "" +
 	"\x14CHANGE_TYPE_MODIFIED\x10\x03*E\n" +
 	"\vCommandType\x12\x1c\n" +
 	"\x18COMMAND_TYPE_UNSPECIFIED\x10\x00\x12\x18\n" +
-	"\x14COMMAND_TYPE_REFRESH\x10\x012\xc3\x03\n" +
+	"\x14COMMAND_TYPE_REFRESH\x10\x01*j\n" +
+	"\x0eHostReportView\x12 \n" +
+	"\x1cHOST_REPORT_VIEW_UNSPECIFIED\x10\x00\x12\x19\n" +
+	"\x15HOST_REPORT_VIEW_FULL\x10\x01\x12\x1b\n" +
+	"\x17HOST_REPORT_VIEW_DIGEST\x10\x022\xc3\x03\n" +
 	"\x14InventoryHostService\x12L\n" +
 	"\tListHosts\x12\x1e.inventory.v1.ListHostsRequest\x1a\x1f.inventory.v1.ListHostsResponse\x12;\n" +
 	"\aGetHost\x12\x1c.inventory.v1.GetHostRequest\x1a\x12.inventory.v1.Host\x12O\n" +
@@ -5015,7 +6366,11 @@ const file_inventory_v1_inventory_proto_rawDesc = "" +
 	"\x13ListConnectedAgents\x12(.inventory.v1.ListConnectedAgentsRequest\x1a).inventory.v1.ListConnectedAgentsResponse\x12a\n" +
 	"\x10RefreshInventory\x12%.inventory.v1.RefreshInventoryRequest\x1a&.inventory.v1.RefreshInventoryResponse\x12j\n" +
 	"\x13MintEnrollmentToken\x12(.inventory.v1.MintEnrollmentTokenRequest\x1a).inventory.v1.MintEnrollmentTokenResponse\x12R\n" +
-	"\vRevokeAgent\x12 .inventory.v1.RevokeAgentRequest\x1a!.inventory.v1.RevokeAgentResponse2\xea\x01\n" +
+	"\vRevokeAgent\x12 .inventory.v1.RevokeAgentRequest\x1a!.inventory.v1.RevokeAgentResponse2\xa8\x02\n" +
+	"\x11HostReportService\x12d\n" +
+	"\x11ListReportTenants\x12&.inventory.v1.ListReportTenantsRequest\x1a'.inventory.v1.ListReportTenantsResponse\x12^\n" +
+	"\x0fListHostReports\x12$.inventory.v1.ListHostReportsRequest\x1a%.inventory.v1.ListHostReportsResponse\x12M\n" +
+	"\rGetHostReport\x12\".inventory.v1.GetHostReportRequest\x1a\x18.inventory.v1.HostReport2\xea\x01\n" +
 	"\rIngestService\x12C\n" +
 	"\x06Enroll\x12\x1b.inventory.v1.EnrollRequest\x1a\x1c.inventory.v1.EnrollResponse\x12L\n" +
 	"\x0fSubmitInventory\x12\x1b.inventory.v1.SubmitRequest\x1a\x1c.inventory.v1.SubmitResponse\x12F\n" +
@@ -5033,169 +6388,207 @@ func file_inventory_v1_inventory_proto_rawDescGZIP() []byte {
 	return file_inventory_v1_inventory_proto_rawDescData
 }
 
-var file_inventory_v1_inventory_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-var file_inventory_v1_inventory_proto_msgTypes = make([]protoimpl.MessageInfo, 67)
+var file_inventory_v1_inventory_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
+var file_inventory_v1_inventory_proto_msgTypes = make([]protoimpl.MessageInfo, 81)
 var file_inventory_v1_inventory_proto_goTypes = []any{
 	(HostStatus)(0),                     // 0: inventory.v1.HostStatus
 	(SnapshotSource)(0),                 // 1: inventory.v1.SnapshotSource
 	(ChangeType)(0),                     // 2: inventory.v1.ChangeType
 	(CommandType)(0),                    // 3: inventory.v1.CommandType
-	(*Identity)(nil),                    // 4: inventory.v1.Identity
-	(*Host)(nil),                        // 5: inventory.v1.Host
-	(*SnapshotSummary)(nil),             // 6: inventory.v1.SnapshotSummary
-	(*Snapshot)(nil),                    // 7: inventory.v1.Snapshot
-	(*Inventory)(nil),                   // 8: inventory.v1.Inventory
-	(*BIOSInfo)(nil),                    // 9: inventory.v1.BIOSInfo
-	(*SystemInfo)(nil),                  // 10: inventory.v1.SystemInfo
-	(*BaseboardInfo)(nil),               // 11: inventory.v1.BaseboardInfo
-	(*ChassisInfo)(nil),                 // 12: inventory.v1.ChassisInfo
-	(*Processor)(nil),                   // 13: inventory.v1.Processor
-	(*CacheInfo)(nil),                   // 14: inventory.v1.CacheInfo
-	(*MemoryInfo)(nil),                  // 15: inventory.v1.MemoryInfo
-	(*MemoryArray)(nil),                 // 16: inventory.v1.MemoryArray
-	(*MemoryModule)(nil),                // 17: inventory.v1.MemoryModule
-	(*Monitor)(nil),                     // 18: inventory.v1.Monitor
-	(*OSInfo)(nil),                      // 19: inventory.v1.OSInfo
-	(*Program)(nil),                     // 20: inventory.v1.Program
-	(*Service)(nil),                     // 21: inventory.v1.Service
-	(*UserAccount)(nil),                 // 22: inventory.v1.UserAccount
-	(*Patch)(nil),                       // 23: inventory.v1.Patch
-	(*Environment)(nil),                 // 24: inventory.v1.Environment
-	(*NetworkInterface)(nil),            // 25: inventory.v1.NetworkInterface
-	(*Disk)(nil),                        // 26: inventory.v1.Disk
-	(*Partition)(nil),                   // 27: inventory.v1.Partition
-	(*Change)(nil),                      // 28: inventory.v1.Change
-	(*Stats)(nil),                       // 29: inventory.v1.Stats
-	(*ConnectedAgent)(nil),              // 30: inventory.v1.ConnectedAgent
-	(*ListHostsRequest)(nil),            // 31: inventory.v1.ListHostsRequest
-	(*ListHostsResponse)(nil),           // 32: inventory.v1.ListHostsResponse
-	(*GetHostRequest)(nil),              // 33: inventory.v1.GetHostRequest
-	(*GetHostByIdentityRequest)(nil),    // 34: inventory.v1.GetHostByIdentityRequest
-	(*TagHostRequest)(nil),              // 35: inventory.v1.TagHostRequest
-	(*RetireHostRequest)(nil),           // 36: inventory.v1.RetireHostRequest
-	(*DeleteHostRequest)(nil),           // 37: inventory.v1.DeleteHostRequest
-	(*DeleteHostResponse)(nil),          // 38: inventory.v1.DeleteHostResponse
-	(*GetSnapshotRequest)(nil),          // 39: inventory.v1.GetSnapshotRequest
-	(*ListSnapshotsRequest)(nil),        // 40: inventory.v1.ListSnapshotsRequest
-	(*ListSnapshotsResponse)(nil),       // 41: inventory.v1.ListSnapshotsResponse
-	(*GetLatestByHostRequest)(nil),      // 42: inventory.v1.GetLatestByHostRequest
-	(*DiffSnapshotsRequest)(nil),        // 43: inventory.v1.DiffSnapshotsRequest
-	(*DiffSnapshotsResponse)(nil),       // 44: inventory.v1.DiffSnapshotsResponse
-	(*ListChangesRequest)(nil),          // 45: inventory.v1.ListChangesRequest
-	(*ListChangesResponse)(nil),         // 46: inventory.v1.ListChangesResponse
-	(*DeleteSnapshotRequest)(nil),       // 47: inventory.v1.DeleteSnapshotRequest
-	(*DeleteSnapshotResponse)(nil),      // 48: inventory.v1.DeleteSnapshotResponse
-	(*GetStatisticsRequest)(nil),        // 49: inventory.v1.GetStatisticsRequest
-	(*ListConnectedAgentsRequest)(nil),  // 50: inventory.v1.ListConnectedAgentsRequest
-	(*ListConnectedAgentsResponse)(nil), // 51: inventory.v1.ListConnectedAgentsResponse
-	(*RefreshInventoryRequest)(nil),     // 52: inventory.v1.RefreshInventoryRequest
-	(*RefreshInventoryResponse)(nil),    // 53: inventory.v1.RefreshInventoryResponse
-	(*MintEnrollmentTokenRequest)(nil),  // 54: inventory.v1.MintEnrollmentTokenRequest
-	(*MintEnrollmentTokenResponse)(nil), // 55: inventory.v1.MintEnrollmentTokenResponse
-	(*RevokeAgentRequest)(nil),          // 56: inventory.v1.RevokeAgentRequest
-	(*RevokeAgentResponse)(nil),         // 57: inventory.v1.RevokeAgentResponse
-	(*EnrollRequest)(nil),               // 58: inventory.v1.EnrollRequest
-	(*EnrollResponse)(nil),              // 59: inventory.v1.EnrollResponse
-	(*SubmitRequest)(nil),               // 60: inventory.v1.SubmitRequest
-	(*SubmitResponse)(nil),              // 61: inventory.v1.SubmitResponse
-	(*StreamRequest)(nil),               // 62: inventory.v1.StreamRequest
-	(*Command)(nil),                     // 63: inventory.v1.Command
-	nil,                                 // 64: inventory.v1.Host.TagsEntry
-	nil,                                 // 65: inventory.v1.Stats.HostsByStatusEntry
-	nil,                                 // 66: inventory.v1.Stats.HostsByOsEntry
-	nil,                                 // 67: inventory.v1.Stats.HostsByManufacturerEntry
-	nil,                                 // 68: inventory.v1.Stats.TopProgramsEntry
-	nil,                                 // 69: inventory.v1.Stats.OsVersionsEntry
-	nil,                                 // 70: inventory.v1.TagHostRequest.TagsEntry
+	(HostReportView)(0),                 // 4: inventory.v1.HostReportView
+	(*Identity)(nil),                    // 5: inventory.v1.Identity
+	(*Host)(nil),                        // 6: inventory.v1.Host
+	(*SnapshotSummary)(nil),             // 7: inventory.v1.SnapshotSummary
+	(*Snapshot)(nil),                    // 8: inventory.v1.Snapshot
+	(*Inventory)(nil),                   // 9: inventory.v1.Inventory
+	(*BIOSInfo)(nil),                    // 10: inventory.v1.BIOSInfo
+	(*SystemInfo)(nil),                  // 11: inventory.v1.SystemInfo
+	(*BaseboardInfo)(nil),               // 12: inventory.v1.BaseboardInfo
+	(*ChassisInfo)(nil),                 // 13: inventory.v1.ChassisInfo
+	(*Processor)(nil),                   // 14: inventory.v1.Processor
+	(*CacheInfo)(nil),                   // 15: inventory.v1.CacheInfo
+	(*MemoryInfo)(nil),                  // 16: inventory.v1.MemoryInfo
+	(*MemoryArray)(nil),                 // 17: inventory.v1.MemoryArray
+	(*MemoryModule)(nil),                // 18: inventory.v1.MemoryModule
+	(*Monitor)(nil),                     // 19: inventory.v1.Monitor
+	(*OSInfo)(nil),                      // 20: inventory.v1.OSInfo
+	(*Program)(nil),                     // 21: inventory.v1.Program
+	(*Service)(nil),                     // 22: inventory.v1.Service
+	(*UserAccount)(nil),                 // 23: inventory.v1.UserAccount
+	(*Patch)(nil),                       // 24: inventory.v1.Patch
+	(*Environment)(nil),                 // 25: inventory.v1.Environment
+	(*NetworkInterface)(nil),            // 26: inventory.v1.NetworkInterface
+	(*InterfaceAddress)(nil),            // 27: inventory.v1.InterfaceAddress
+	(*Virtualization)(nil),              // 28: inventory.v1.Virtualization
+	(*Bmc)(nil),                         // 29: inventory.v1.Bmc
+	(*BmcPort)(nil),                     // 30: inventory.v1.BmcPort
+	(*HypervisorGuest)(nil),             // 31: inventory.v1.HypervisorGuest
+	(*UpdateState)(nil),                 // 32: inventory.v1.UpdateState
+	(*CollectionLimits)(nil),            // 33: inventory.v1.CollectionLimits
+	(*Disk)(nil),                        // 34: inventory.v1.Disk
+	(*Partition)(nil),                   // 35: inventory.v1.Partition
+	(*Change)(nil),                      // 36: inventory.v1.Change
+	(*Stats)(nil),                       // 37: inventory.v1.Stats
+	(*ConnectedAgent)(nil),              // 38: inventory.v1.ConnectedAgent
+	(*ListHostsRequest)(nil),            // 39: inventory.v1.ListHostsRequest
+	(*ListHostsResponse)(nil),           // 40: inventory.v1.ListHostsResponse
+	(*GetHostRequest)(nil),              // 41: inventory.v1.GetHostRequest
+	(*GetHostByIdentityRequest)(nil),    // 42: inventory.v1.GetHostByIdentityRequest
+	(*TagHostRequest)(nil),              // 43: inventory.v1.TagHostRequest
+	(*RetireHostRequest)(nil),           // 44: inventory.v1.RetireHostRequest
+	(*DeleteHostRequest)(nil),           // 45: inventory.v1.DeleteHostRequest
+	(*DeleteHostResponse)(nil),          // 46: inventory.v1.DeleteHostResponse
+	(*GetSnapshotRequest)(nil),          // 47: inventory.v1.GetSnapshotRequest
+	(*ListSnapshotsRequest)(nil),        // 48: inventory.v1.ListSnapshotsRequest
+	(*ListSnapshotsResponse)(nil),       // 49: inventory.v1.ListSnapshotsResponse
+	(*GetLatestByHostRequest)(nil),      // 50: inventory.v1.GetLatestByHostRequest
+	(*DiffSnapshotsRequest)(nil),        // 51: inventory.v1.DiffSnapshotsRequest
+	(*DiffSnapshotsResponse)(nil),       // 52: inventory.v1.DiffSnapshotsResponse
+	(*ListChangesRequest)(nil),          // 53: inventory.v1.ListChangesRequest
+	(*ListChangesResponse)(nil),         // 54: inventory.v1.ListChangesResponse
+	(*DeleteSnapshotRequest)(nil),       // 55: inventory.v1.DeleteSnapshotRequest
+	(*DeleteSnapshotResponse)(nil),      // 56: inventory.v1.DeleteSnapshotResponse
+	(*GetStatisticsRequest)(nil),        // 57: inventory.v1.GetStatisticsRequest
+	(*ListConnectedAgentsRequest)(nil),  // 58: inventory.v1.ListConnectedAgentsRequest
+	(*ListConnectedAgentsResponse)(nil), // 59: inventory.v1.ListConnectedAgentsResponse
+	(*RefreshInventoryRequest)(nil),     // 60: inventory.v1.RefreshInventoryRequest
+	(*RefreshInventoryResponse)(nil),    // 61: inventory.v1.RefreshInventoryResponse
+	(*MintEnrollmentTokenRequest)(nil),  // 62: inventory.v1.MintEnrollmentTokenRequest
+	(*MintEnrollmentTokenResponse)(nil), // 63: inventory.v1.MintEnrollmentTokenResponse
+	(*RevokeAgentRequest)(nil),          // 64: inventory.v1.RevokeAgentRequest
+	(*RevokeAgentResponse)(nil),         // 65: inventory.v1.RevokeAgentResponse
+	(*ListReportTenantsRequest)(nil),    // 66: inventory.v1.ListReportTenantsRequest
+	(*ListReportTenantsResponse)(nil),   // 67: inventory.v1.ListReportTenantsResponse
+	(*ListHostReportsRequest)(nil),      // 68: inventory.v1.ListHostReportsRequest
+	(*ListHostReportsResponse)(nil),     // 69: inventory.v1.ListHostReportsResponse
+	(*GetHostReportRequest)(nil),        // 70: inventory.v1.GetHostReportRequest
+	(*HostReport)(nil),                  // 71: inventory.v1.HostReport
+	(*PendingUpdate)(nil),               // 72: inventory.v1.PendingUpdate
+	(*EnrollRequest)(nil),               // 73: inventory.v1.EnrollRequest
+	(*EnrollResponse)(nil),              // 74: inventory.v1.EnrollResponse
+	(*SubmitRequest)(nil),               // 75: inventory.v1.SubmitRequest
+	(*SubmitResponse)(nil),              // 76: inventory.v1.SubmitResponse
+	(*StreamRequest)(nil),               // 77: inventory.v1.StreamRequest
+	(*Command)(nil),                     // 78: inventory.v1.Command
+	nil,                                 // 79: inventory.v1.Host.TagsEntry
+	nil,                                 // 80: inventory.v1.Stats.HostsByStatusEntry
+	nil,                                 // 81: inventory.v1.Stats.HostsByOsEntry
+	nil,                                 // 82: inventory.v1.Stats.HostsByManufacturerEntry
+	nil,                                 // 83: inventory.v1.Stats.TopProgramsEntry
+	nil,                                 // 84: inventory.v1.Stats.OsVersionsEntry
+	nil,                                 // 85: inventory.v1.TagHostRequest.TagsEntry
 }
 var file_inventory_v1_inventory_proto_depIdxs = []int32{
 	0,  // 0: inventory.v1.Host.status:type_name -> inventory.v1.HostStatus
-	64, // 1: inventory.v1.Host.tags:type_name -> inventory.v1.Host.TagsEntry
+	79, // 1: inventory.v1.Host.tags:type_name -> inventory.v1.Host.TagsEntry
 	1,  // 2: inventory.v1.SnapshotSummary.source:type_name -> inventory.v1.SnapshotSource
-	6,  // 3: inventory.v1.Snapshot.summary:type_name -> inventory.v1.SnapshotSummary
-	8,  // 4: inventory.v1.Snapshot.payload:type_name -> inventory.v1.Inventory
-	4,  // 5: inventory.v1.Inventory.identity:type_name -> inventory.v1.Identity
-	19, // 6: inventory.v1.Inventory.os:type_name -> inventory.v1.OSInfo
-	9,  // 7: inventory.v1.Inventory.bios:type_name -> inventory.v1.BIOSInfo
-	10, // 8: inventory.v1.Inventory.system:type_name -> inventory.v1.SystemInfo
-	11, // 9: inventory.v1.Inventory.baseboard:type_name -> inventory.v1.BaseboardInfo
-	12, // 10: inventory.v1.Inventory.chassis:type_name -> inventory.v1.ChassisInfo
-	13, // 11: inventory.v1.Inventory.processors:type_name -> inventory.v1.Processor
-	14, // 12: inventory.v1.Inventory.cache:type_name -> inventory.v1.CacheInfo
-	15, // 13: inventory.v1.Inventory.memory:type_name -> inventory.v1.MemoryInfo
-	18, // 14: inventory.v1.Inventory.monitors:type_name -> inventory.v1.Monitor
-	20, // 15: inventory.v1.Inventory.installed_programs:type_name -> inventory.v1.Program
-	21, // 16: inventory.v1.Inventory.services:type_name -> inventory.v1.Service
-	22, // 17: inventory.v1.Inventory.users:type_name -> inventory.v1.UserAccount
-	23, // 18: inventory.v1.Inventory.patches:type_name -> inventory.v1.Patch
-	24, // 19: inventory.v1.Inventory.environment:type_name -> inventory.v1.Environment
-	25, // 20: inventory.v1.Inventory.network_interfaces:type_name -> inventory.v1.NetworkInterface
-	26, // 21: inventory.v1.Inventory.disks:type_name -> inventory.v1.Disk
-	16, // 22: inventory.v1.MemoryInfo.array:type_name -> inventory.v1.MemoryArray
-	17, // 23: inventory.v1.MemoryInfo.modules:type_name -> inventory.v1.MemoryModule
-	27, // 24: inventory.v1.Disk.partitions:type_name -> inventory.v1.Partition
-	2,  // 25: inventory.v1.Change.change_type:type_name -> inventory.v1.ChangeType
-	65, // 26: inventory.v1.Stats.hosts_by_status:type_name -> inventory.v1.Stats.HostsByStatusEntry
-	66, // 27: inventory.v1.Stats.hosts_by_os:type_name -> inventory.v1.Stats.HostsByOsEntry
-	67, // 28: inventory.v1.Stats.hosts_by_manufacturer:type_name -> inventory.v1.Stats.HostsByManufacturerEntry
-	68, // 29: inventory.v1.Stats.top_programs:type_name -> inventory.v1.Stats.TopProgramsEntry
-	69, // 30: inventory.v1.Stats.os_versions:type_name -> inventory.v1.Stats.OsVersionsEntry
-	0,  // 31: inventory.v1.ListHostsRequest.status:type_name -> inventory.v1.HostStatus
-	5,  // 32: inventory.v1.ListHostsResponse.hosts:type_name -> inventory.v1.Host
-	4,  // 33: inventory.v1.GetHostByIdentityRequest.identity:type_name -> inventory.v1.Identity
-	70, // 34: inventory.v1.TagHostRequest.tags:type_name -> inventory.v1.TagHostRequest.TagsEntry
-	6,  // 35: inventory.v1.ListSnapshotsResponse.snapshots:type_name -> inventory.v1.SnapshotSummary
-	28, // 36: inventory.v1.DiffSnapshotsResponse.changes:type_name -> inventory.v1.Change
-	28, // 37: inventory.v1.ListChangesResponse.changes:type_name -> inventory.v1.Change
-	30, // 38: inventory.v1.ListConnectedAgentsResponse.agents:type_name -> inventory.v1.ConnectedAgent
-	4,  // 39: inventory.v1.EnrollRequest.identity:type_name -> inventory.v1.Identity
-	8,  // 40: inventory.v1.SubmitRequest.inventory:type_name -> inventory.v1.Inventory
-	3,  // 41: inventory.v1.Command.type:type_name -> inventory.v1.CommandType
-	31, // 42: inventory.v1.InventoryHostService.ListHosts:input_type -> inventory.v1.ListHostsRequest
-	33, // 43: inventory.v1.InventoryHostService.GetHost:input_type -> inventory.v1.GetHostRequest
-	34, // 44: inventory.v1.InventoryHostService.GetHostByIdentity:input_type -> inventory.v1.GetHostByIdentityRequest
-	35, // 45: inventory.v1.InventoryHostService.TagHost:input_type -> inventory.v1.TagHostRequest
-	36, // 46: inventory.v1.InventoryHostService.RetireHost:input_type -> inventory.v1.RetireHostRequest
-	37, // 47: inventory.v1.InventoryHostService.DeleteHost:input_type -> inventory.v1.DeleteHostRequest
-	39, // 48: inventory.v1.InventorySnapshotService.GetSnapshot:input_type -> inventory.v1.GetSnapshotRequest
-	40, // 49: inventory.v1.InventorySnapshotService.ListSnapshots:input_type -> inventory.v1.ListSnapshotsRequest
-	42, // 50: inventory.v1.InventorySnapshotService.GetLatestByHost:input_type -> inventory.v1.GetLatestByHostRequest
-	43, // 51: inventory.v1.InventorySnapshotService.DiffSnapshots:input_type -> inventory.v1.DiffSnapshotsRequest
-	45, // 52: inventory.v1.InventorySnapshotService.ListChanges:input_type -> inventory.v1.ListChangesRequest
-	47, // 53: inventory.v1.InventorySnapshotService.DeleteSnapshot:input_type -> inventory.v1.DeleteSnapshotRequest
-	49, // 54: inventory.v1.InventoryStatisticsService.GetStatistics:input_type -> inventory.v1.GetStatisticsRequest
-	50, // 55: inventory.v1.InventoryAgentService.ListConnectedAgents:input_type -> inventory.v1.ListConnectedAgentsRequest
-	52, // 56: inventory.v1.InventoryAgentService.RefreshInventory:input_type -> inventory.v1.RefreshInventoryRequest
-	54, // 57: inventory.v1.InventoryAgentService.MintEnrollmentToken:input_type -> inventory.v1.MintEnrollmentTokenRequest
-	56, // 58: inventory.v1.InventoryAgentService.RevokeAgent:input_type -> inventory.v1.RevokeAgentRequest
-	58, // 59: inventory.v1.IngestService.Enroll:input_type -> inventory.v1.EnrollRequest
-	60, // 60: inventory.v1.IngestService.SubmitInventory:input_type -> inventory.v1.SubmitRequest
-	62, // 61: inventory.v1.IngestService.StreamCommands:input_type -> inventory.v1.StreamRequest
-	32, // 62: inventory.v1.InventoryHostService.ListHosts:output_type -> inventory.v1.ListHostsResponse
-	5,  // 63: inventory.v1.InventoryHostService.GetHost:output_type -> inventory.v1.Host
-	5,  // 64: inventory.v1.InventoryHostService.GetHostByIdentity:output_type -> inventory.v1.Host
-	5,  // 65: inventory.v1.InventoryHostService.TagHost:output_type -> inventory.v1.Host
-	5,  // 66: inventory.v1.InventoryHostService.RetireHost:output_type -> inventory.v1.Host
-	38, // 67: inventory.v1.InventoryHostService.DeleteHost:output_type -> inventory.v1.DeleteHostResponse
-	7,  // 68: inventory.v1.InventorySnapshotService.GetSnapshot:output_type -> inventory.v1.Snapshot
-	41, // 69: inventory.v1.InventorySnapshotService.ListSnapshots:output_type -> inventory.v1.ListSnapshotsResponse
-	7,  // 70: inventory.v1.InventorySnapshotService.GetLatestByHost:output_type -> inventory.v1.Snapshot
-	44, // 71: inventory.v1.InventorySnapshotService.DiffSnapshots:output_type -> inventory.v1.DiffSnapshotsResponse
-	46, // 72: inventory.v1.InventorySnapshotService.ListChanges:output_type -> inventory.v1.ListChangesResponse
-	48, // 73: inventory.v1.InventorySnapshotService.DeleteSnapshot:output_type -> inventory.v1.DeleteSnapshotResponse
-	29, // 74: inventory.v1.InventoryStatisticsService.GetStatistics:output_type -> inventory.v1.Stats
-	51, // 75: inventory.v1.InventoryAgentService.ListConnectedAgents:output_type -> inventory.v1.ListConnectedAgentsResponse
-	53, // 76: inventory.v1.InventoryAgentService.RefreshInventory:output_type -> inventory.v1.RefreshInventoryResponse
-	55, // 77: inventory.v1.InventoryAgentService.MintEnrollmentToken:output_type -> inventory.v1.MintEnrollmentTokenResponse
-	57, // 78: inventory.v1.InventoryAgentService.RevokeAgent:output_type -> inventory.v1.RevokeAgentResponse
-	59, // 79: inventory.v1.IngestService.Enroll:output_type -> inventory.v1.EnrollResponse
-	61, // 80: inventory.v1.IngestService.SubmitInventory:output_type -> inventory.v1.SubmitResponse
-	63, // 81: inventory.v1.IngestService.StreamCommands:output_type -> inventory.v1.Command
-	62, // [62:82] is the sub-list for method output_type
-	42, // [42:62] is the sub-list for method input_type
-	42, // [42:42] is the sub-list for extension type_name
-	42, // [42:42] is the sub-list for extension extendee
-	0,  // [0:42] is the sub-list for field type_name
+	7,  // 3: inventory.v1.Snapshot.summary:type_name -> inventory.v1.SnapshotSummary
+	9,  // 4: inventory.v1.Snapshot.payload:type_name -> inventory.v1.Inventory
+	5,  // 5: inventory.v1.Inventory.identity:type_name -> inventory.v1.Identity
+	20, // 6: inventory.v1.Inventory.os:type_name -> inventory.v1.OSInfo
+	10, // 7: inventory.v1.Inventory.bios:type_name -> inventory.v1.BIOSInfo
+	11, // 8: inventory.v1.Inventory.system:type_name -> inventory.v1.SystemInfo
+	12, // 9: inventory.v1.Inventory.baseboard:type_name -> inventory.v1.BaseboardInfo
+	13, // 10: inventory.v1.Inventory.chassis:type_name -> inventory.v1.ChassisInfo
+	14, // 11: inventory.v1.Inventory.processors:type_name -> inventory.v1.Processor
+	15, // 12: inventory.v1.Inventory.cache:type_name -> inventory.v1.CacheInfo
+	16, // 13: inventory.v1.Inventory.memory:type_name -> inventory.v1.MemoryInfo
+	19, // 14: inventory.v1.Inventory.monitors:type_name -> inventory.v1.Monitor
+	21, // 15: inventory.v1.Inventory.installed_programs:type_name -> inventory.v1.Program
+	22, // 16: inventory.v1.Inventory.services:type_name -> inventory.v1.Service
+	23, // 17: inventory.v1.Inventory.users:type_name -> inventory.v1.UserAccount
+	24, // 18: inventory.v1.Inventory.patches:type_name -> inventory.v1.Patch
+	25, // 19: inventory.v1.Inventory.environment:type_name -> inventory.v1.Environment
+	26, // 20: inventory.v1.Inventory.network_interfaces:type_name -> inventory.v1.NetworkInterface
+	34, // 21: inventory.v1.Inventory.disks:type_name -> inventory.v1.Disk
+	28, // 22: inventory.v1.Inventory.virtualization:type_name -> inventory.v1.Virtualization
+	29, // 23: inventory.v1.Inventory.bmc:type_name -> inventory.v1.Bmc
+	31, // 24: inventory.v1.Inventory.hypervisor_guests:type_name -> inventory.v1.HypervisorGuest
+	32, // 25: inventory.v1.Inventory.update_state:type_name -> inventory.v1.UpdateState
+	33, // 26: inventory.v1.Inventory.truncated:type_name -> inventory.v1.CollectionLimits
+	17, // 27: inventory.v1.MemoryInfo.array:type_name -> inventory.v1.MemoryArray
+	18, // 28: inventory.v1.MemoryInfo.modules:type_name -> inventory.v1.MemoryModule
+	27, // 29: inventory.v1.NetworkInterface.addresses:type_name -> inventory.v1.InterfaceAddress
+	30, // 30: inventory.v1.Bmc.ports:type_name -> inventory.v1.BmcPort
+	35, // 31: inventory.v1.Disk.partitions:type_name -> inventory.v1.Partition
+	2,  // 32: inventory.v1.Change.change_type:type_name -> inventory.v1.ChangeType
+	80, // 33: inventory.v1.Stats.hosts_by_status:type_name -> inventory.v1.Stats.HostsByStatusEntry
+	81, // 34: inventory.v1.Stats.hosts_by_os:type_name -> inventory.v1.Stats.HostsByOsEntry
+	82, // 35: inventory.v1.Stats.hosts_by_manufacturer:type_name -> inventory.v1.Stats.HostsByManufacturerEntry
+	83, // 36: inventory.v1.Stats.top_programs:type_name -> inventory.v1.Stats.TopProgramsEntry
+	84, // 37: inventory.v1.Stats.os_versions:type_name -> inventory.v1.Stats.OsVersionsEntry
+	0,  // 38: inventory.v1.ListHostsRequest.status:type_name -> inventory.v1.HostStatus
+	6,  // 39: inventory.v1.ListHostsResponse.hosts:type_name -> inventory.v1.Host
+	5,  // 40: inventory.v1.GetHostByIdentityRequest.identity:type_name -> inventory.v1.Identity
+	85, // 41: inventory.v1.TagHostRequest.tags:type_name -> inventory.v1.TagHostRequest.TagsEntry
+	7,  // 42: inventory.v1.ListSnapshotsResponse.snapshots:type_name -> inventory.v1.SnapshotSummary
+	36, // 43: inventory.v1.DiffSnapshotsResponse.changes:type_name -> inventory.v1.Change
+	36, // 44: inventory.v1.ListChangesResponse.changes:type_name -> inventory.v1.Change
+	38, // 45: inventory.v1.ListConnectedAgentsResponse.agents:type_name -> inventory.v1.ConnectedAgent
+	4,  // 46: inventory.v1.ListHostReportsRequest.view:type_name -> inventory.v1.HostReportView
+	71, // 47: inventory.v1.ListHostReportsResponse.reports:type_name -> inventory.v1.HostReport
+	6,  // 48: inventory.v1.HostReport.host:type_name -> inventory.v1.Host
+	26, // 49: inventory.v1.HostReport.network_interfaces:type_name -> inventory.v1.NetworkInterface
+	28, // 50: inventory.v1.HostReport.virtualization:type_name -> inventory.v1.Virtualization
+	29, // 51: inventory.v1.HostReport.bmc:type_name -> inventory.v1.Bmc
+	31, // 52: inventory.v1.HostReport.hypervisor_guests:type_name -> inventory.v1.HypervisorGuest
+	32, // 53: inventory.v1.HostReport.update_state:type_name -> inventory.v1.UpdateState
+	72, // 54: inventory.v1.HostReport.pending_updates:type_name -> inventory.v1.PendingUpdate
+	33, // 55: inventory.v1.HostReport.truncated:type_name -> inventory.v1.CollectionLimits
+	5,  // 56: inventory.v1.EnrollRequest.identity:type_name -> inventory.v1.Identity
+	9,  // 57: inventory.v1.SubmitRequest.inventory:type_name -> inventory.v1.Inventory
+	3,  // 58: inventory.v1.Command.type:type_name -> inventory.v1.CommandType
+	39, // 59: inventory.v1.InventoryHostService.ListHosts:input_type -> inventory.v1.ListHostsRequest
+	41, // 60: inventory.v1.InventoryHostService.GetHost:input_type -> inventory.v1.GetHostRequest
+	42, // 61: inventory.v1.InventoryHostService.GetHostByIdentity:input_type -> inventory.v1.GetHostByIdentityRequest
+	43, // 62: inventory.v1.InventoryHostService.TagHost:input_type -> inventory.v1.TagHostRequest
+	44, // 63: inventory.v1.InventoryHostService.RetireHost:input_type -> inventory.v1.RetireHostRequest
+	45, // 64: inventory.v1.InventoryHostService.DeleteHost:input_type -> inventory.v1.DeleteHostRequest
+	47, // 65: inventory.v1.InventorySnapshotService.GetSnapshot:input_type -> inventory.v1.GetSnapshotRequest
+	48, // 66: inventory.v1.InventorySnapshotService.ListSnapshots:input_type -> inventory.v1.ListSnapshotsRequest
+	50, // 67: inventory.v1.InventorySnapshotService.GetLatestByHost:input_type -> inventory.v1.GetLatestByHostRequest
+	51, // 68: inventory.v1.InventorySnapshotService.DiffSnapshots:input_type -> inventory.v1.DiffSnapshotsRequest
+	53, // 69: inventory.v1.InventorySnapshotService.ListChanges:input_type -> inventory.v1.ListChangesRequest
+	55, // 70: inventory.v1.InventorySnapshotService.DeleteSnapshot:input_type -> inventory.v1.DeleteSnapshotRequest
+	57, // 71: inventory.v1.InventoryStatisticsService.GetStatistics:input_type -> inventory.v1.GetStatisticsRequest
+	58, // 72: inventory.v1.InventoryAgentService.ListConnectedAgents:input_type -> inventory.v1.ListConnectedAgentsRequest
+	60, // 73: inventory.v1.InventoryAgentService.RefreshInventory:input_type -> inventory.v1.RefreshInventoryRequest
+	62, // 74: inventory.v1.InventoryAgentService.MintEnrollmentToken:input_type -> inventory.v1.MintEnrollmentTokenRequest
+	64, // 75: inventory.v1.InventoryAgentService.RevokeAgent:input_type -> inventory.v1.RevokeAgentRequest
+	66, // 76: inventory.v1.HostReportService.ListReportTenants:input_type -> inventory.v1.ListReportTenantsRequest
+	68, // 77: inventory.v1.HostReportService.ListHostReports:input_type -> inventory.v1.ListHostReportsRequest
+	70, // 78: inventory.v1.HostReportService.GetHostReport:input_type -> inventory.v1.GetHostReportRequest
+	73, // 79: inventory.v1.IngestService.Enroll:input_type -> inventory.v1.EnrollRequest
+	75, // 80: inventory.v1.IngestService.SubmitInventory:input_type -> inventory.v1.SubmitRequest
+	77, // 81: inventory.v1.IngestService.StreamCommands:input_type -> inventory.v1.StreamRequest
+	40, // 82: inventory.v1.InventoryHostService.ListHosts:output_type -> inventory.v1.ListHostsResponse
+	6,  // 83: inventory.v1.InventoryHostService.GetHost:output_type -> inventory.v1.Host
+	6,  // 84: inventory.v1.InventoryHostService.GetHostByIdentity:output_type -> inventory.v1.Host
+	6,  // 85: inventory.v1.InventoryHostService.TagHost:output_type -> inventory.v1.Host
+	6,  // 86: inventory.v1.InventoryHostService.RetireHost:output_type -> inventory.v1.Host
+	46, // 87: inventory.v1.InventoryHostService.DeleteHost:output_type -> inventory.v1.DeleteHostResponse
+	8,  // 88: inventory.v1.InventorySnapshotService.GetSnapshot:output_type -> inventory.v1.Snapshot
+	49, // 89: inventory.v1.InventorySnapshotService.ListSnapshots:output_type -> inventory.v1.ListSnapshotsResponse
+	8,  // 90: inventory.v1.InventorySnapshotService.GetLatestByHost:output_type -> inventory.v1.Snapshot
+	52, // 91: inventory.v1.InventorySnapshotService.DiffSnapshots:output_type -> inventory.v1.DiffSnapshotsResponse
+	54, // 92: inventory.v1.InventorySnapshotService.ListChanges:output_type -> inventory.v1.ListChangesResponse
+	56, // 93: inventory.v1.InventorySnapshotService.DeleteSnapshot:output_type -> inventory.v1.DeleteSnapshotResponse
+	37, // 94: inventory.v1.InventoryStatisticsService.GetStatistics:output_type -> inventory.v1.Stats
+	59, // 95: inventory.v1.InventoryAgentService.ListConnectedAgents:output_type -> inventory.v1.ListConnectedAgentsResponse
+	61, // 96: inventory.v1.InventoryAgentService.RefreshInventory:output_type -> inventory.v1.RefreshInventoryResponse
+	63, // 97: inventory.v1.InventoryAgentService.MintEnrollmentToken:output_type -> inventory.v1.MintEnrollmentTokenResponse
+	65, // 98: inventory.v1.InventoryAgentService.RevokeAgent:output_type -> inventory.v1.RevokeAgentResponse
+	67, // 99: inventory.v1.HostReportService.ListReportTenants:output_type -> inventory.v1.ListReportTenantsResponse
+	69, // 100: inventory.v1.HostReportService.ListHostReports:output_type -> inventory.v1.ListHostReportsResponse
+	71, // 101: inventory.v1.HostReportService.GetHostReport:output_type -> inventory.v1.HostReport
+	74, // 102: inventory.v1.IngestService.Enroll:output_type -> inventory.v1.EnrollResponse
+	76, // 103: inventory.v1.IngestService.SubmitInventory:output_type -> inventory.v1.SubmitResponse
+	78, // 104: inventory.v1.IngestService.StreamCommands:output_type -> inventory.v1.Command
+	82, // [82:105] is the sub-list for method output_type
+	59, // [59:82] is the sub-list for method input_type
+	59, // [59:59] is the sub-list for extension type_name
+	59, // [59:59] is the sub-list for extension extendee
+	0,  // [0:59] is the sub-list for field type_name
 }
 
 func init() { file_inventory_v1_inventory_proto_init() }
@@ -5208,10 +6601,10 @@ func file_inventory_v1_inventory_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_inventory_v1_inventory_proto_rawDesc), len(file_inventory_v1_inventory_proto_rawDesc)),
-			NumEnums:      4,
-			NumMessages:   67,
+			NumEnums:      5,
+			NumMessages:   81,
 			NumExtensions: 0,
-			NumServices:   5,
+			NumServices:   6,
 		},
 		GoTypes:           file_inventory_v1_inventory_proto_goTypes,
 		DependencyIndexes: file_inventory_v1_inventory_proto_depIdxs,

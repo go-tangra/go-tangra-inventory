@@ -78,6 +78,11 @@ type Deps struct {
 	Backup    *backup.Service
 	Enroll    *enroll.Service
 	Registry  registry.Registry
+	// Reports serves HostReportService when set; ReportConsumers and
+	// MaxReportPageBytes come from the host_reports config section.
+	Reports            repo.Store
+	ReportConsumers    []string
+	MaxReportPageBytes int
 }
 
 // Register registers the inventory.v1 mesh servers on the gRPC server. Callers
@@ -94,5 +99,10 @@ func Register(gs grpc.ServiceRegistrar, d Deps) {
 	}
 	if d.Enroll != nil || d.Registry != nil {
 		invv1.RegisterInventoryAgentServiceServer(gs, &AgentServer{Enroll: d.Enroll, Registry: d.Registry})
+	}
+	if d.Reports != nil {
+		invv1.RegisterHostReportServiceServer(gs, &HostReportServer{
+			Store: d.Reports, Consumers: d.ReportConsumers, MaxPageBytes: d.MaxReportPageBytes,
+		})
 	}
 }

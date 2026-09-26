@@ -2,7 +2,7 @@ GO        ?= go
 PKGS      := $(shell $(GO) list ./... | grep -v /ui/)
 COVER_OUT := coverage.out
 
-.PHONY: lint vuln test test-integration cover generate ui-build build build-ui image agent-windows agent-linux agent
+.PHONY: lint vuln test test-integration cover fuzz proto-check generate ui-build build build-ui image agent-windows agent-linux agent packages
 
 lint:
 	$(GO) vet ./...
@@ -30,8 +30,23 @@ cover:
 	$(GO) test -count=1 -coverprofile=$(COVER_OUT) -coverpkg=$(COVERPKG) $(PKGS)
 	./scripts/coverage-gate.sh $(COVER_OUT)
 
+# Run every Fuzz* target of the module for FUZZTIME each (parsers of agent
+# facts, the ingest mapper, the host report projection, enrollment tokens, diff).
+FUZZTIME ?= 10s
+fuzz:
+	@set -e; for pkg in $$($(GO) list ./... | grep -v /ui/); do \
+	  for f in $$($(GO) test -list '^Fuzz' $$pkg | grep '^Fuzz' || true); do \
+	    echo "fuzz $$pkg $$f"; \
+	    $(GO) test -run='^$$' -fuzz="^$$f$$" -fuzztime=$(FUZZTIME) $$pkg; \
+	  done; \
+	done
+
 generate:
 	cd sdk && buf generate
+
+# Proto contract: lint and stay wire-compatible with the released SDK.
+proto-check:
+	cd sdk && buf lint && buf breaking --against '../.git#tag=sdk/v4.0.0,subdir=sdk'
 
 # Build the federated UI remote (produces ui/dist consumed by the -tags ui build).
 ui-build:
@@ -56,6 +71,24 @@ agent-windows:
 	GOOS=windows GOARCH=amd64 $(GO) build -o bin/inventory-agent-windows-amd64.exe ./cmd/inventory-agent
 	GOOS=windows GOARCH=arm64 $(GO) build -o bin/inventory-agent-windows-arm64.exe ./cmd/inventory-agent
 
+# Linux agents are static and stamped with the version the packages carry.
+AGENT_VERSION ?= $(shell git describe --tags --match 'v*' --always 2>/dev/null | sed 's/^v//')
+AGENT_LDFLAGS := -s -w -X main.version=$(AGENT_VERSION)
+
 agent-linux:
-	GOOS=linux GOARCH=amd64 $(GO) build -o bin/inventory-agent-linux-amd64 ./cmd/inventory-agent
-	GOOS=linux GOARCH=arm64 $(GO) build -o bin/inventory-agent-linux-arm64 ./cmd/inventory-agent
+	for arch in amd64 arm64; do \
+		CGO_ENABLED=0 GOOS=linux GOARCH=$$arch $(GO) build -trimpath -ldflags "$(AGENT_LDFLAGS)" -o bin/inventory-agent-linux-$$arch ./cmd/inventory-agent || exit 1; \
+	done
+
+# .deb and .rpm packages of the Linux agent (binary, systemd unit, sample
+# /etc/inventory-agent/agent.yaml) in dist/. nfpm is run at a pinned version.
+NFPM ?= $(GO) run github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.47.0
+
+packages: agent-linux
+	mkdir -p dist
+	for arch in amd64 arm64; do \
+		mkdir -p bin/pkg && cp bin/inventory-agent-linux-$$arch bin/pkg/inventory-agent || exit 1; \
+		for fmt in deb rpm; do \
+			VERSION=$(AGENT_VERSION) ARCH=$$arch $(NFPM) package -f packaging/nfpm.yaml -p $$fmt -t dist/ || exit 1; \
+		done; \
+	done

@@ -93,10 +93,12 @@ jobs:
         run: npm run test:unit
 
   buf:
-    name: Buf lint (sdk)
+    name: Buf lint + breaking (sdk)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # buf breaking compares against the sdk/v4.0.0 tag
 
       - uses: bufbuild/buf-action@v1
         with:
@@ -107,9 +109,13 @@ jobs:
         working-directory: sdk
         run: buf lint
 
-  # The endpoint agent is not part of the image: operators build it for the hosts
-  # they manage (make agent). CI only proves it still cross-compiles; it uploads
-  # nothing and publishes no release.
+      - name: buf breaking (against sdk/v4.0.0)
+        working-directory: sdk
+        run: buf breaking --against '../.git#tag=sdk/v4.0.0,subdir=sdk'
+
+  # The endpoint agent is not part of the image. CI proves it cross-compiles for
+  # every platform; the Linux builds are also packaged (.deb/.rpm, job
+  # `packages`) and attached to the GitHub release of a v* tag (job `release`).
   agent:
     name: Agent cross-compile
     runs-on: ubuntu-latest
@@ -133,6 +139,87 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: '0'
         run: go build -trimpath -o "${RUNNER_TEMP}/inventory-agent" ./cmd/inventory-agent
+
+  # .deb and .rpm of the Linux agent (binary, systemd unit, sample
+  # /etc/inventory-agent/agent.yaml) for amd64 and arm64, built with nfpm
+  # (packaging/nfpm.yaml). Tags package their version; other builds package
+  # `git describe` (e.g. 4.2.0~11-gabc1234). The amd64 .deb is installed and
+  # purged on the runner as a smoke test.
+  packages:
+    name: Agent packages (deb/rpm)
+    runs-on: ubuntu-latest
+    needs:
+      - go
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # git describe needs the tags
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            sdk/go.sum
+
+      - name: Version
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then v="${GITHUB_REF_NAME#v}"; else v="$(git describe --tags --match 'v*' --always | sed 's/^v//')"; fi
+          echo "AGENT_VERSION=${v}" >> "${GITHUB_ENV}"
+
+      - name: Build packages
+        run: make packages AGENT_VERSION="${AGENT_VERSION}"
+
+      - name: Inspect packages
+        run: |
+          sudo apt-get install -y --no-install-recommends rpm >/dev/null
+          for f in dist/*.deb; do dpkg-deb --info "$f" | sed -n '/Package:/,/Architecture:/p'; dpkg-deb -c "$f"; done
+          for f in dist/*.rpm; do rpm -qpi "$f" | grep -E '^(Name|Version|Architecture)'; rpm -qpl "$f"; done
+
+      - name: Install smoke test (amd64 .deb)
+        run: |
+          sudo dpkg -i dist/*_amd64.deb
+          test -x /usr/bin/inventory-agent
+          test "$(sudo stat -c %a /var/lib/inventory-agent)" = 700
+          test "$(systemctl is-enabled inventory-agent.service)" = enabled
+          # Not started: no enrollment token or credential yet (ConditionPathExists).
+          if systemctl is-active --quiet inventory-agent.service; then echo "started without a token" >&2; exit 1; fi
+          sudo dpkg --purge tangra-inventory-agent
+          test ! -e /usr/bin/inventory-agent
+          test ! -e /var/lib/inventory-agent
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-packages
+          path: dist/*
+          if-no-files-found: error
+
+  # A v* tag attaches the agent packages and their SHA256SUMS to the tag's
+  # GitHub release (created when missing).
+  release:
+    name: Agent packages on the GitHub release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    needs:
+      - packages
+      - docker
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: agent-packages
+          path: dist
+
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          cd dist && sha256sum * > SHA256SUMS && cd ..
+          gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1 || \
+            gh release create "${GITHUB_REF_NAME}" --verify-tag --title "${GITHUB_REF_NAME}" --notes "Inventory ${GITHUB_REF_NAME}. Agent packages: tangra-inventory-agent .deb/.rpm for amd64 and arm64; see deploy/README.md (Installing the agent from a package)."
+          gh release upload "${GITHUB_REF_NAME}" dist/* --clobber
 
   docker:
     name: Docker image

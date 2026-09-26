@@ -137,6 +137,15 @@ message Inventory {
   Environment environment = 21;
   repeated NetworkInterface network_interfaces = 22;
   repeated Disk disks = 23;
+  // First global, non-temporary, non-deprecated address of the lowest-metric
+  // default-route interface ("" = unknown / old agent).
+  string primary_ipv4 = 24;
+  string primary_ipv6 = 25;
+  Virtualization virtualization = 26;
+  Bmc bmc = 27;                                      // absent = no BMC or not readable
+  repeated HypervisorGuest hypervisor_guests = 28;   // <= 1000
+  UpdateState update_state = 29;
+  CollectionLimits truncated = 30;                   // entries dropped because a bound was reached
 }
 
 message BIOSInfo {
@@ -235,6 +244,7 @@ message OSInfo {
   int64 install_date = 6;   // unix seconds
   int64 last_boot = 7;      // unix seconds
   uint64 uptime_sec = 8;
+  string family = 9;        // "linux" | "windows" ("" = old agent)
 }
 
 message Program {
@@ -244,6 +254,8 @@ message Program {
   string install_date = 4;
   string install_location = 5;
   uint64 size_bytes = 6;
+  string available_version = 7; // newer version available from the package manager; "" = none/unknown
+  bool security_update = 8;     // the available version is a security update
 }
 
 message Service {
@@ -275,14 +287,85 @@ message Environment {
 message NetworkInterface {
   string name = 1;
   string mac = 2;
-  repeated string ip_addresses = 3;
+  repeated string ip_addresses = 3;     // CIDR strings, kept for old consumers
   string subnet = 4;
-  string gateway = 5;
+  string gateway = 5;                   // default gateway via this interface
   repeated string dns = 6;
-  bool dhcp = 7;
-  uint64 speed_bps = 8;
+  bool dhcp = 7;                        // any IPv4 address is dynamic (DHCP)
+  uint64 speed_bps = 8;                 // 0 = unknown
+  // Interface kind: ethernet|wireless|bond|bridge|vlan|virtual|loopback|other.
   string type = 9;
   bool up = 10;
+  repeated InterfaceAddress addresses = 11;  // <= 64
+  bool default_route = 12;              // this interface carries a default route
+  string master = 13;                   // bond or bridge this interface is enslaved to
+  uint32 vlan_id = 14;                  // for kind vlan
+}
+
+// InterfaceAddress is one address assigned to an interface.
+message InterfaceAddress {
+  string address = 1;        // canonical text, no prefix
+  uint32 prefix_length = 2;
+  string family = 3;         // "ipv4" | "ipv6"
+  bool dhcp = 4;             // dynamically assigned (DHCP/DHCPv6/SLAAC)
+  bool temporary = 5;        // IPv6 privacy address
+  bool deprecated = 6;       // IPv6 preferred lifetime expired
+  string scope = 7;          // "global" | "site" | "link" | "host"
+}
+
+// Virtualization is the host's virtualization role as detected by the agent.
+message Virtualization {
+  string role = 1;   // "physical" | "vm" | "container" | "unknown"
+  string kind = 2;   // kvm|vmware|hyperv|xen|virtualbox|lxc|docker|podman|wsl|aws|gce|... ("" for physical)
+  string source = 3; // detection evidence label, e.g. "dmi", "cgroup", "hypervisor-type"
+}
+
+// Bmc is the host's out-of-band controller LAN configuration. There is
+// deliberately NO credential, user, cipher or community-string field.
+message Bmc {
+  string address = 1;
+  uint32 prefix_length = 2;
+  string gateway = 3;
+  string ip_source = 4;         // "static" | "dhcp" | "bios" | "other" | ""
+  uint32 vlan_id = 5;
+  repeated BmcPort ports = 6;   // <= 8
+}
+
+// BmcPort is one LAN channel of the BMC.
+message BmcPort {
+  uint32 channel = 1;
+  string mac = 2;
+  string address = 3;
+}
+
+// HypervisorGuest is a guest defined on this host (Proxmox).
+message HypervisorGuest {
+  string id = 1;                // VMID
+  string name = 2;
+  string kind = 3;              // "vm" | "container"
+  string platform = 4;          // "proxmox"
+  repeated string macs = 5;     // <= 32
+}
+
+// UpdateState is the host's package update state (Linux).
+message UpdateState {
+  string package_manager = 1;   // apt|dnf|yum|apk|pacman|""
+  string status = 2;            // unknown|up_to_date|updates_available|unsupported|error
+  string reboot_required = 3;   // "unknown" | "true" | "false"
+  string automatic_updates = 4; // "unknown" | "true" | "false"
+  bool security_classified = 5; // manager reports security updates
+  int64 checked_at = 6;         // unix seconds
+  uint32 pending_count = 7;
+  uint32 security_count = 8;
+}
+
+// CollectionLimits counts entries dropped because a bound was reached.
+message CollectionLimits {
+  uint32 interfaces = 1;
+  uint32 addresses = 2;
+  uint32 guests = 3;
+  uint32 packages = 4;
+  uint32 bmc_ports = 5;
 }
 
 message Disk {
@@ -529,6 +612,86 @@ message RevokeAgentRequest {
 }
 
 message RevokeAgentResponse {}
+
+// ---- HostReportService (mesh only; not proxied by the gateway)
+
+// HostReportService serves an IPAM-oriented projection of each host's latest
+// snapshot (identity, interfaces, addresses, virtualization, BMC, guests,
+// update state and pending updates only). Callers are authorised by the
+// inbound mesh policy; ListReportTenants is cross-tenant and additionally
+// restricted by the handler to the service names in host_reports.consumers.
+service HostReportService {
+  // Tenants having at least one host whose report changed after changed_since
+  // (0 = every tenant with hosts).
+  rpc ListReportTenants(ListReportTenantsRequest) returns (ListReportTenantsResponse);
+  // Host reports of one tenant, ordered by (report_changed_at, host id).
+  rpc ListHostReports(ListHostReportsRequest) returns (ListHostReportsResponse);
+  // Latest report of one host.
+  rpc GetHostReport(GetHostReportRequest) returns (HostReport);
+}
+
+message ListReportTenantsRequest {
+  int64 changed_since = 1;           // unix milliseconds (inventory clock)
+}
+
+message ListReportTenantsResponse {
+  repeated string tenant_ids = 1;    // <= 10000
+  int64 max_changed_at = 2;          // unix ms, next watermark
+}
+
+// HostReportView selects how much of each report ListHostReports returns.
+enum HostReportView {
+  HOST_REPORT_VIEW_UNSPECIFIED = 0;  // = FULL
+  HOST_REPORT_VIEW_FULL = 1;
+  HOST_REPORT_VIEW_DIGEST = 2;       // host, status, report_digest, report_changed_at only
+}
+
+message ListHostReportsRequest {
+  string tenant_id = 1;              // uuid, required
+  int64 changed_since = 2;           // unix ms; 0 = all hosts (incl. retired, flagged by status)
+  HostReportView view = 3;
+  int32 limit = 4;                   // 1-200, default 100
+  string cursor = 5;                 // opaque, from next_cursor
+}
+
+message ListHostReportsResponse {
+  repeated HostReport reports = 1;   // page also bounded by host_reports.max_page_bytes
+  string next_cursor = 2;            // "" = last page
+}
+
+message GetHostReportRequest {
+  string tenant_id = 1;
+  string host_id = 2;
+}
+
+// HostReport is the projection of one host's latest snapshot.
+message HostReport {
+  string tenant_id = 1;
+  Host host = 2;
+  string snapshot_id = 3;
+  int64 collected_at = 4;            // unix seconds
+  int64 report_changed_at = 5;       // unix ms
+  string report_digest = 6;          // hex sha256 of the projection
+  string agent_version = 7;
+  string os_family = 8;
+  repeated NetworkInterface network_interfaces = 9;
+  string primary_ipv4 = 10;
+  string primary_ipv6 = 11;
+  Virtualization virtualization = 12;
+  Bmc bmc = 13;
+  repeated HypervisorGuest hypervisor_guests = 14;
+  UpdateState update_state = 15;
+  repeated PendingUpdate pending_updates = 16; // <= 5000
+  CollectionLimits truncated = 17;
+}
+
+// PendingUpdate is an installed package with a newer version available.
+message PendingUpdate {
+  string name = 1;
+  string installed_version = 2;
+  string available_version = 3;
+  bool security = 4;
+}
 
 // ---- IngestService (off-mesh edge; per-agent credential auth)
 

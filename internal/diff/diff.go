@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"reflect"
 	"sort"
+	"time"
 
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/store"
 )
@@ -32,6 +33,12 @@ const (
 	CatOS        = "os"
 	CatUser      = "user"
 	CatPatch     = "patch"
+
+	// Host report categories (feature 020).
+	CatVirtualization = "virtualization"
+	CatBMC            = "bmc"
+	CatGuest          = "guest"
+	CatUpdate         = "update"
 )
 
 // nullSep joins the parts of a composite component key. A NUL byte cannot
@@ -63,8 +70,8 @@ func Diff(prev, next store.Inventory) []store.Change {
 		func(m store.MemoryModule) string { return m.DeviceLocator + nullSep + m.SerialNumber })...)
 	out = append(out, diffList(CatDisk, prev.Disks, next.Disks,
 		func(d store.Disk) string { return d.Serial })...)
-	out = append(out, diffList(CatNetwork, prev.Networks, next.Networks,
-		func(n store.NetIface) string { return n.MAC })...)
+	out = append(out, diffList(CatNetwork, netViews(prev.Networks), netViews(next.Networks),
+		func(n netView) string { return n.Name + nullSep + n.MAC })...)
 	out = append(out, diffList(CatMonitor, prev.Monitors, next.Monitors,
 		func(m store.Monitor) string { return m.SerialNumber })...)
 	out = append(out, diffList(CatSoftware, prev.Programs, next.Programs,
@@ -80,6 +87,57 @@ func Diff(prev, next store.Inventory) []store.Change {
 	out = append(out, diffList(CatPatch, prev.Patches, next.Patches,
 		func(p store.Patch) string { return p.ID })...)
 
+	// Host report parts. The update check time moves on every report and is
+	// not a change.
+	add(diffSingle(CatVirtualization, prev.Virtualization, next.Virtualization))
+	add(diffSingle(CatBMC, prev.Bmc, next.Bmc))
+	out = append(out, diffList(CatGuest, prev.HypervisorGuests, next.HypervisorGuests,
+		func(g store.HypervisorGuest) string { return g.ID })...)
+	pu, nu := prev.UpdateState, next.UpdateState
+	pu.CheckedAt, nu.CheckedAt = time.Time{}, time.Time{}
+	add(diffSingle(CatUpdate, pu, nu))
+
+	return out
+}
+
+// netView is the compared form of an interface: every reported field except
+// IPv6 privacy (temporary) addresses, which rotate daily, and the deprecated
+// flag, which follows address lifetimes. Old agents without per-address data
+// are compared on their CIDR strings.
+type netView struct {
+	Name         string            `json:"name"`
+	MAC          string            `json:"mac,omitempty"`
+	IPAddresses  []string          `json:"ip_addresses,omitempty"`
+	Subnet       string            `json:"subnet,omitempty"`
+	Gateway      string            `json:"gateway,omitempty"`
+	DNS          []string          `json:"dns,omitempty"`
+	DHCP         bool              `json:"dhcp,omitempty"`
+	SpeedBps     uint64            `json:"speed_bps,omitempty"`
+	Type         string            `json:"type,omitempty"`
+	Up           bool              `json:"up,omitempty"`
+	Addresses    []store.IfAddress `json:"addresses,omitempty"`
+	DefaultRoute bool              `json:"default_route,omitempty"`
+	Master       string            `json:"master,omitempty"`
+	VLANID       uint32            `json:"vlan_id,omitempty"`
+}
+
+func netViews(in []store.NetIface) []netView {
+	out := make([]netView, 0, len(in))
+	for _, n := range in {
+		v := netView{Name: n.Name, MAC: n.MAC, Subnet: n.Subnet, Gateway: n.Gateway, DNS: n.DNS, DHCP: n.DHCP,
+			SpeedBps: n.SpeedBps, Type: n.Type, Up: n.Up, DefaultRoute: n.DefaultRoute, Master: n.Master, VLANID: n.VLANID}
+		if len(n.Addresses) == 0 {
+			v.IPAddresses = n.IPAddresses
+		}
+		for _, a := range n.Addresses {
+			if a.Temporary {
+				continue
+			}
+			a.Deprecated = false
+			v.Addresses = append(v.Addresses, a)
+		}
+		out = append(out, v)
+	}
 	return out
 }
 

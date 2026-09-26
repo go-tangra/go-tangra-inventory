@@ -1,0 +1,18 @@
+# go-tangra inventory agent. Set ingest_endpoint, place the enrollment token
+# (minted in the console: Inventory > Agents) in the token_file, then:
+#   systemctl start inventory-agent
+# The token is consumed on first contact; the agent then keeps its credential
+# in credential_file. Options: see deploy/README.md in go-tangra-inventory.
+
+ingest_endpoint: ""                # host:port of the inventory ingest edge, e.g. portal.example.org:9977
+token_file: /etc/inventory-agent/enrollment.token
+credential_file: /var/lib/inventory-agent/credential
+state_file: /var/lib/inventory-agent/state.json
+interval_seconds: 3600             # 60-604800
+# ca_file: /etc/inventory-agent/ca.pem   # pin the CA that signs the ingest certificate (default: system roots)
+# server_name: ""                        # name to verify in the ingest certificate (default: endpoint host)
+
+collect_bmc: true                  # read-only BMC LAN parameters (needs ipmi_devintf + ipmi_si)
+collect_updates: true              # package update state
+refresh_package_lists: false       # never refresh package lists unless enabled
+update_timeout_seconds: 120        # 30-600

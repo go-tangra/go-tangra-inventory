@@ -49,7 +49,7 @@ per-agent credential, then submits snapshots and holds a command stream for refr
 | Module | Path | Consumers |
 |---|---|---|
 | `github.com/go-tangra/go-tangra-inventory/v4` | `/` | the service (`cmd/inventorysvc`), the agent (`cmd/inventory-agent`) and `pkg/inventorymanifest` |
-| `github.com/go-tangra/go-tangra-inventory/sdk/v4` | `sdk/` | other services (asset): the `inventory.v1` protobuf API and `pkg/inventoryclient` |
+| `github.com/go-tangra/go-tangra-inventory/sdk/v4` | `sdk/` | other services (asset, ipam): the `inventory.v1` protobuf API and `pkg/inventoryclient` |
 
 The service builds against the in-repo SDK through
 `replace github.com/go-tangra/go-tangra-inventory/sdk/v4 => ./sdk`. Consumers use the
@@ -60,9 +60,11 @@ SDK's published `sdk/vX.Y.Z` tag.
 | Path | Purpose |
 |------|---------|
 | `cmd/inventorysvc` | service binary (serve, `bootstrap`, `version`) |
-| `cmd/inventory-agent` | endpoint agent for Linux and Windows (one-shot, daemon, Windows service / systemd) |
+| `cmd/inventory-agent` | endpoint agent for Linux and Windows (one-shot, daemon, Windows service; run under systemd on Linux) |
 | `internal/app` | wiring: config, platform, stores, services, HTTP/gRPC, ingest edge |
 | `internal/...` | hosts, snapshots, diff, enrollment, ingest, registry, streams, sealing, authz, audit, events, stats, backup and their SQL bindings; agent-side collector, sender, daemon and Windows service |
+| `internal/agentfacts` | pure, fuzzed parsers behind the agent's host report collection (netlink, sysfs, Windows adapters, virtualization, Proxmox, package managers, BMC LAN parameters) |
+| `internal/hostreport` | the host report projection and digest served to IPAM |
 | `ui` | Vue 3 + FlyonUI federated remote on `@go-tangra/ui` |
 | `api/openapi`, `sdk/api/proto` | contracts (`inventory.yaml`, `inventory.v1`) |
 | `deploy` | operations guide, service policy and the development KEK (never copied into the image) |
@@ -75,9 +77,10 @@ GitHub token with `read:packages` to install `@go-tangra/ui` from GitHub Package
 ```bash
 go build ./... && go vet ./... && go test -race ./...
 (cd sdk && go vet ./... && go test -race ./...)
-(cd sdk && buf lint)
+make proto-check                          # buf lint + buf breaking against sdk/v4.0.0
 make test-integration                     # -tags integration, needs Docker
 make lint cover vuln
+make fuzz                                 # every Fuzz* target, FUZZTIME=10s each
 
 cd ui
 export NODE_AUTH_TOKEN=$(gh auth token)   # ui/.npmrc only references this variable
@@ -85,7 +88,7 @@ npm ci && npm run lint && npm run test:unit && npm run build
 ```
 
 The unit coverage gate requires at least 80 % overall and 100 % for the
-authorization, sealing and enrollment packages. Generated code, SQL bindings,
+authorization, sealing, enrollment and host report projection packages. Generated code, SQL bindings,
 wiring and the agent's platform collectors are covered by the integration suite
 or excluded on purpose.
 
@@ -99,8 +102,26 @@ make agent                                # bin/inventory-agent-{linux,windows}-
 inventory-agent -ingest <host:9977> -token <token-file>        # one-shot enroll + collect + submit
 inventory-agent -config agent.yaml -daemon                      # periodic submit + refresh stream
 inventory-agent -o ./out                                        # collect to JSON, no submit
-inventory-agent -service install                                # Windows service / systemd unit
+inventory-agent -service install                                # Windows only: installs the Windows service
 ```
+
+`-service install` exists on Windows only; it does not create a systemd unit.
+On Linux install the `tangra-inventory-agent` .deb/.rpm attached to each
+release (systemd unit included; `make packages` builds them), see
+[deploy/README.md](deploy/README.md#installing-the-agent-from-a-package), or
+run the daemon under systemd yourself
+([example](deploy/README.md#running-the-agent-under-systemd)).
+
+Besides hardware, software and disks the agent reports what IPAM needs to keep
+its devices current: per-interface kind, speed, bond/bridge master, VLAN id,
+addresses with prefix and DHCP/temporary/deprecated flags, gateway and default
+route, the primary IPv4/IPv6 address, the virtualization role, the BMC LAN
+settings (Linux, read-only, never credentials), Proxmox guests (Linux) and the
+package update state (Linux: pending and security updates, reboot required,
+automatic updates). Every list is bounded and what is dropped is counted.
+`collect_bmc`, `collect_updates`, `refresh_package_lists` (off: the agent never
+refreshes package lists unless told to) and `update_timeout_seconds` tune it;
+see [deploy/README.md](deploy/README.md#host-report-collection).
 
 The ingest edge serves TLS from `ingest.tls_cert_file`/`ingest.tls_key_file`
 (hot-reloaded). Only the development opt-out `ingest.insecure: true` serves
@@ -111,6 +132,22 @@ verified name. See [deploy/README.md](deploy/README.md#ingest-tls).
 
 CI cross-compiles the agent for every supported platform on each change. It does
 not upload or release agent binaries.
+
+## Host reports for IPAM
+
+`inventory.v1.HostReportService` (mesh only, not proxied by the gateway) serves a
+slim projection of each host's latest snapshot: identity, interfaces and
+addresses, primary addresses, virtualization, BMC, guests, update state and only
+the packages with a pending update. Each host keeps a digest of its projection
+and the time it last changed, so a consumer polls "tenants changed since",
+"host reports changed since" (full or digest view, paged) and "one host report"
+without re-reading unchanged hosts. The IPAM host sync is its consumer
+(`pkg/inventoryclient`: `ListReportTenants`, `ListHostReports`, `GetHostReport`).
+
+Access needs both the inbound policy rule `ipam-hostsync` in
+`deploy/policy.yaml` (the three RPCs and health, for `svc/ipam` only) and the
+caller's service name in `host_reports.consumers` (default `[ipam]`), which the
+handler checks for every RPC.
 
 ## Container image
 

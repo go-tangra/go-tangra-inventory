@@ -24,6 +24,7 @@ type Client struct {
 	snapshots invv1.InventorySnapshotServiceClient
 	stats     invv1.InventoryStatisticsServiceClient
 	agents    invv1.InventoryAgentServiceClient
+	reports   invv1.HostReportServiceClient
 }
 
 // New builds a client from a connected (SPIFFE-mTLS) gRPC connection to the
@@ -34,6 +35,7 @@ func New(conn grpc.ClientConnInterface) *Client {
 		snapshots: invv1.NewInventorySnapshotServiceClient(conn),
 		stats:     invv1.NewInventoryStatisticsServiceClient(conn),
 		agents:    invv1.NewInventoryAgentServiceClient(conn),
+		reports:   invv1.NewHostReportServiceClient(conn),
 	}
 }
 

@@ -24,6 +24,7 @@ import (
 
 	inventoryv1 "github.com/go-tangra/go-tangra-inventory/sdk/v4/api/proto/inventory/v1"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/enroll"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/invpb"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/registry"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/repo"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/snapshots"
@@ -115,6 +116,9 @@ func (s *Server) SubmitInventory(ctx context.Context, req *inventoryv1.SubmitReq
 	}
 
 	inv := inventoryFromProto(req.GetInventory())
+	// Bound and sanitise the host report fields (counts, MAC/IP syntax,
+	// closed-set values); excess is counted in inv.Truncated.
+	validateExtended(&inv)
 	// The agent may not report a tenant; the write is bound to the verified
 	// agent's tenant.
 	snap, err := s.snaps.Ingest(ctx, agent.TenantID, inv, store.SourceAgent)
@@ -217,6 +221,7 @@ func inventoryFromProto(pb *inventoryv1.Inventory) store.Inventory {
 			InstallDate: unixToTime(pb.GetOs().GetInstallDate()),
 			LastBoot:    unixToTime(pb.GetOs().GetLastBoot()),
 			UptimeSec:   pb.GetOs().GetUptimeSec(),
+			Family:      pb.GetOs().GetFamily(),
 		},
 		BIOS: store.BIOSInfo{
 			Vendor:      pb.GetBios().GetVendor(),
@@ -290,12 +295,14 @@ func inventoryFromProto(pb *inventoryv1.Inventory) store.Inventory {
 	}
 	for _, p := range pb.GetInstalledPrograms() {
 		inv.Programs = append(inv.Programs, store.Program{
-			Name:            p.GetName(),
-			Version:         p.GetVersion(),
-			Publisher:       p.GetPublisher(),
-			InstallDate:     p.GetInstallDate(),
-			InstallLocation: p.GetInstallLocation(),
-			SizeBytes:       p.GetSizeBytes(),
+			Name:             p.GetName(),
+			Version:          p.GetVersion(),
+			Publisher:        p.GetPublisher(),
+			InstallDate:      p.GetInstallDate(),
+			InstallLocation:  p.GetInstallLocation(),
+			SizeBytes:        p.GetSizeBytes(),
+			AvailableVersion: p.GetAvailableVersion(),
+			SecurityUpdate:   p.GetSecurityUpdate(),
 		})
 	}
 	for _, sv := range pb.GetServices() {
@@ -320,20 +327,14 @@ func inventoryFromProto(pb *inventoryv1.Inventory) store.Inventory {
 			InstalledOn: p.GetInstalledOn(),
 		})
 	}
-	for _, n := range pb.GetNetworkInterfaces() {
-		inv.Networks = append(inv.Networks, store.NetIface{
-			Name:        n.GetName(),
-			MAC:         n.GetMac(),
-			IPAddresses: n.GetIpAddresses(),
-			Subnet:      n.GetSubnet(),
-			Gateway:     n.GetGateway(),
-			DNS:         n.GetDns(),
-			DHCP:        n.GetDhcp(),
-			SpeedBps:    n.GetSpeedBps(),
-			Type:        n.GetType(),
-			Up:          n.GetUp(),
-		})
-	}
+	inv.Networks = invpb.NetIfacesFromPB(pb.GetNetworkInterfaces())
+	inv.PrimaryIPv4 = pb.GetPrimaryIpv4()
+	inv.PrimaryIPv6 = pb.GetPrimaryIpv6()
+	inv.Virtualization = invpb.VirtualizationFromPB(pb.GetVirtualization())
+	inv.Bmc = invpb.BmcFromPB(pb.GetBmc())
+	inv.HypervisorGuests = invpb.GuestsFromPB(pb.GetHypervisorGuests())
+	inv.UpdateState = invpb.UpdateStateFromPB(pb.GetUpdateState())
+	inv.Truncated = invpb.LimitsFromPB(pb.GetTruncated())
 	for _, d := range pb.GetDisks() {
 		disk := store.Disk{
 			Model:     d.GetModel(),
