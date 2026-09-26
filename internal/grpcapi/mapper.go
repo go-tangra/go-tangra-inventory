@@ -5,6 +5,7 @@ import (
 
 	invv1 "github.com/go-tangra/go-tangra-inventory/sdk/v4/api/proto/inventory/v1"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/hosts"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/invpb"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/registry"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/repo"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/snapshots"
@@ -147,7 +148,7 @@ func inventoryToPB(inv store.Inventory) *invv1.Inventory {
 		AgentVersion: inv.AgentVersion,
 		Os: &invv1.OSInfo{
 			Name: inv.OS.Name, Version: inv.OS.Version, Build: inv.OS.Build, Arch: inv.OS.Arch,
-			Kernel: inv.OS.Kernel, UptimeSec: inv.OS.UptimeSec,
+			Kernel: inv.OS.Kernel, UptimeSec: inv.OS.UptimeSec, Family: inv.OS.Family,
 		},
 		Bios: &invv1.BIOSInfo{Vendor: inv.BIOS.Vendor, Version: inv.BIOS.Version, ReleaseDate: inv.BIOS.ReleaseDate},
 		System: &invv1.SystemInfo{
@@ -198,6 +199,7 @@ func inventoryToPB(inv store.Inventory) *invv1.Inventory {
 		pb.InstalledPrograms = append(pb.InstalledPrograms, &invv1.Program{
 			Name: p.Name, Version: p.Version, Publisher: p.Publisher, InstallDate: p.InstallDate,
 			InstallLocation: p.InstallLocation, SizeBytes: p.SizeBytes,
+			AvailableVersion: p.AvailableVersion, SecurityUpdate: p.SecurityUpdate,
 		})
 	}
 	for _, sv := range inv.Services {
@@ -215,12 +217,14 @@ func inventoryToPB(inv store.Inventory) *invv1.Inventory {
 	for _, p := range inv.Patches {
 		pb.Patches = append(pb.Patches, &invv1.Patch{Id: p.ID, InstalledOn: p.InstalledOn})
 	}
-	for _, n := range inv.Networks {
-		pb.NetworkInterfaces = append(pb.NetworkInterfaces, &invv1.NetworkInterface{
-			Name: n.Name, Mac: n.MAC, IpAddresses: n.IPAddresses, Subnet: n.Subnet, Gateway: n.Gateway,
-			Dns: n.DNS, Dhcp: n.DHCP, SpeedBps: n.SpeedBps, Type: n.Type, Up: n.Up,
-		})
-	}
+	pb.NetworkInterfaces = invpb.NetIfacesToPB(inv.Networks)
+	pb.PrimaryIpv4 = inv.PrimaryIPv4
+	pb.PrimaryIpv6 = inv.PrimaryIPv6
+	pb.Virtualization = invpb.VirtualizationToPB(inv.Virtualization)
+	pb.Bmc = invpb.BmcToPB(inv.Bmc)
+	pb.HypervisorGuests = invpb.GuestsToPB(inv.HypervisorGuests)
+	pb.UpdateState = invpb.UpdateStateToPB(inv.UpdateState)
+	pb.Truncated = invpb.LimitsToPB(inv.Truncated)
 	for _, d := range inv.Disks {
 		pd := &invv1.Disk{Model: d.Model, Serial: d.Serial, SizeBytes: d.SizeBytes, MediaType: d.MediaType, Interface: d.Interface}
 		for _, part := range d.Partitions {

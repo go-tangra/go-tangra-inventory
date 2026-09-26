@@ -61,6 +61,12 @@ type Host struct {
 	LastSnapshotID string            `json:"last_snapshot_id,omitempty"`
 	CreatedAt      time.Time         `json:"created_at"`
 	UpdatedAt      time.Time         `json:"updated_at"`
+	// ReportDigest is the hex sha256 of the host's report projection (see
+	// internal/hostreport); "" until the first snapshot after migration 0005 or
+	// after a status change that invalidated it. ReportChangedAt is when the
+	// digest last changed (zero = never recorded).
+	ReportDigest    string    `json:"-"`
+	ReportChangedAt time.Time `json:"-"`
 }
 
 // Snapshot is an immutable inventory report bound to a host. Payload holds the
@@ -105,6 +111,15 @@ type Inventory struct {
 	Environment  Environment   `json:"environment"`
 	Networks     []NetIface    `json:"network_interfaces,omitempty"`
 	Disks        []Disk        `json:"disks,omitempty"`
+
+	// Host report fields (feature 020). Zero values from older agents.
+	PrimaryIPv4      string            `json:"primary_ipv4,omitempty"`
+	PrimaryIPv6      string            `json:"primary_ipv6,omitempty"`
+	Virtualization   Virtualization    `json:"virtualization"`
+	Bmc              *Bmc              `json:"bmc,omitempty"` // nil = no BMC or not readable
+	HypervisorGuests []HypervisorGuest `json:"hypervisor_guests,omitempty"`
+	UpdateState      UpdateState       `json:"update_state"`
+	Truncated        CollectionLimits  `json:"truncated"`
 }
 
 // --- hardware ---
@@ -207,6 +222,7 @@ type OSInfo struct {
 	InstallDate time.Time `json:"install_date,omitempty"`
 	LastBoot    time.Time `json:"last_boot,omitempty"`
 	UptimeSec   uint64    `json:"uptime_sec,omitempty"`
+	Family      string    `json:"family,omitempty"` // linux|windows
 }
 
 type Program struct {
@@ -216,6 +232,10 @@ type Program struct {
 	InstallDate     string `json:"install_date,omitempty"`
 	InstallLocation string `json:"install_location,omitempty"`
 	SizeBytes       uint64 `json:"size_bytes,omitempty"`
+	// AvailableVersion is a newer version offered by the package manager ("" =
+	// none/unknown); SecurityUpdate marks it as a security update.
+	AvailableVersion string `json:"available_version,omitempty"`
+	SecurityUpdate   bool   `json:"security_update,omitempty"`
 }
 
 type Service struct {
@@ -247,17 +267,129 @@ type Environment struct {
 // --- network / storage ---
 
 type NetIface struct {
-	Name        string   `json:"name"`
-	MAC         string   `json:"mac,omitempty"`
-	IPAddresses []string `json:"ip_addresses,omitempty"`
-	Subnet      string   `json:"subnet,omitempty"`
-	Gateway     string   `json:"gateway,omitempty"`
-	DNS         []string `json:"dns,omitempty"`
-	DHCP        bool     `json:"dhcp,omitempty"`
-	SpeedBps    uint64   `json:"speed_bps,omitempty"`
-	Type        string   `json:"type,omitempty"`
-	Up          bool     `json:"up,omitempty"`
+	Name         string      `json:"name"`
+	MAC          string      `json:"mac,omitempty"`
+	IPAddresses  []string    `json:"ip_addresses,omitempty"`
+	Subnet       string      `json:"subnet,omitempty"`
+	Gateway      string      `json:"gateway,omitempty"`
+	DNS          []string    `json:"dns,omitempty"`
+	DHCP         bool        `json:"dhcp,omitempty"`
+	SpeedBps     uint64      `json:"speed_bps,omitempty"`
+	Type         string      `json:"type,omitempty"` // kind, see the Iface* constants
+	Up           bool        `json:"up,omitempty"`
+	Addresses    []IfAddress `json:"addresses,omitempty"`
+	DefaultRoute bool        `json:"default_route,omitempty"`
+	Master       string      `json:"master,omitempty"` // bond/bridge master
+	VLANID       uint32      `json:"vlan_id,omitempty"`
 }
+
+// Interface kinds (NetIface.Type).
+const (
+	IfaceEthernet = "ethernet"
+	IfaceWireless = "wireless"
+	IfaceBond     = "bond"
+	IfaceBridge   = "bridge"
+	IfaceVLAN     = "vlan"
+	IfaceVirtual  = "virtual"
+	IfaceLoopback = "loopback"
+	IfaceOther    = "other"
+)
+
+// IfAddress is one address assigned to an interface.
+type IfAddress struct {
+	Address      string `json:"address"` // netip canonical form, no prefix
+	PrefixLength uint32 `json:"prefix_length"`
+	Family       string `json:"family"` // ipv4|ipv6
+	DHCP         bool   `json:"dhcp,omitempty"`
+	Temporary    bool   `json:"temporary,omitempty"`
+	Deprecated   bool   `json:"deprecated,omitempty"`
+	Scope        string `json:"scope,omitempty"` // global|site|link|host
+}
+
+// Virtualization is the detected virtualization role of a host.
+type Virtualization struct {
+	Role   string `json:"role,omitempty"` // physical|vm|container|unknown
+	Kind   string `json:"kind,omitempty"`
+	Source string `json:"source,omitempty"`
+}
+
+// Virtualization roles.
+const (
+	RolePhysical  = "physical"
+	RoleVM        = "vm"
+	RoleContainer = "container"
+	RoleUnknown   = "unknown"
+)
+
+// Bmc is the out-of-band controller LAN configuration. It deliberately has no
+// credential-bearing field (SR-005).
+type Bmc struct {
+	Address      string    `json:"address,omitempty"`
+	PrefixLength uint32    `json:"prefix_length,omitempty"`
+	Gateway      string    `json:"gateway,omitempty"`
+	IPSource     string    `json:"ip_source,omitempty"` // static|dhcp|bios|other|""
+	VLANID       uint32    `json:"vlan_id,omitempty"`
+	Ports        []BmcPort `json:"ports,omitempty"`
+}
+
+// BmcPort is one BMC LAN channel.
+type BmcPort struct {
+	Channel uint32 `json:"channel"`
+	MAC     string `json:"mac,omitempty"`
+	Address string `json:"address,omitempty"`
+}
+
+// HypervisorGuest is a guest defined on a hypervisor host.
+type HypervisorGuest struct {
+	ID       string   `json:"id"`
+	Name     string   `json:"name,omitempty"`
+	Kind     string   `json:"kind,omitempty"`     // vm|container
+	Platform string   `json:"platform,omitempty"` // proxmox
+	MACs     []string `json:"macs,omitempty"`
+}
+
+// UpdateState is the host's package update state.
+type UpdateState struct {
+	PackageManager     string    `json:"package_manager,omitempty"`
+	Status             string    `json:"status,omitempty"`            // unknown|up_to_date|updates_available|unsupported|error
+	RebootRequired     string    `json:"reboot_required,omitempty"`   // unknown|true|false
+	AutomaticUpdates   string    `json:"automatic_updates,omitempty"` // unknown|true|false
+	SecurityClassified bool      `json:"security_classified,omitempty"`
+	CheckedAt          time.Time `json:"checked_at,omitempty"`
+	PendingCount       uint32    `json:"pending_count,omitempty"`
+	SecurityCount      uint32    `json:"security_count,omitempty"`
+}
+
+// Update statuses.
+const (
+	UpdateUnknown     = "unknown"
+	UpdateUpToDate    = "up_to_date"
+	UpdateAvailable   = "updates_available"
+	UpdateUnsupported = "unsupported"
+	UpdateError       = "error"
+	TriUnknown        = "unknown"
+	TriTrue           = "true"
+	TriFalse          = "false"
+)
+
+// CollectionLimits counts entries dropped because a bound was reached.
+type CollectionLimits struct {
+	Interfaces uint32 `json:"interfaces,omitempty"`
+	Addresses  uint32 `json:"addresses,omitempty"`
+	Guests     uint32 `json:"guests,omitempty"`
+	Packages   uint32 `json:"packages,omitempty"`
+	BmcPorts   uint32 `json:"bmc_ports,omitempty"`
+}
+
+// Collection bounds shared by the agent, the ingest edge and the projection.
+const (
+	MaxInterfaces     = 256
+	MaxIfaceAddresses = 64
+	MaxGuests         = 1000
+	MaxGuestMACs      = 32
+	MaxPendingUpdates = 5000
+	MaxBmcPorts       = 8
+)
 
 type Disk struct {
 	Model      string      `json:"model,omitempty"`
