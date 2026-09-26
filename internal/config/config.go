@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -41,6 +42,44 @@ type Config struct {
 	Enroll     Enroll     `yaml:"enroll"`
 	MeshEnroll MeshEnroll `yaml:"mesh_enroll"`
 	Limits     Limits     `yaml:"limits_inventory"`
+	// HostReports configures the mesh-only HostReportService (feature 020).
+	HostReports HostReports `yaml:"host_reports"`
+}
+
+// HostReports configures HostReportService. Consumers are the mesh service
+// names (last SPIFFE path segment, e.g. "ipam") allowed to call it; the
+// inbound policy must admit them as well. MaxPageBytes bounds the encoded
+// size of one ListHostReports page.
+type HostReports struct {
+	Consumers    []string `yaml:"consumers"`
+	MaxPageBytes int      `yaml:"max_page_bytes"`
+}
+
+// IsConsumer reports whether service may call HostReportService.
+func (h HostReports) IsConsumer(service string) bool {
+	for _, c := range h.Consumers {
+		if c == service && service != "" {
+			return true
+		}
+	}
+	return false
+}
+
+var serviceNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
+
+func (h HostReports) validate() error {
+	if len(h.Consumers) > 32 {
+		return errors.New("config: host_reports.consumers allows at most 32 services")
+	}
+	for _, c := range h.Consumers {
+		if !serviceNameRE.MatchString(c) {
+			return fmt.Errorf("config: host_reports.consumers entry %q is not a service name", c)
+		}
+	}
+	if h.MaxPageBytes < 64<<10 || h.MaxPageBytes > 7<<20 {
+		return errors.New("config: host_reports.max_page_bytes must be within [64 KiB, 7 MiB]")
+	}
+	return nil
 }
 
 // DB configures TimescaleDB.
@@ -149,18 +188,19 @@ type Limits struct {
 // Default returns secure defaults on top of the Freya defaults.
 func Default() Config {
 	return Config{
-		Config:    fconfig.Default(),
-		DB:        DB{MaxConns: 16},
-		KEK:       KEK{Source: "file"},
-		Ingest:    Ingest{},
-		Registry:  Registry{HeartbeatSeconds: 30},
-		Retention: Retention{Days: 90},
-		Stale:     Stale{AfterSeconds: 86400},
-		Jobs:      Jobs{Workers: 4, IntervalSeconds: 60, PurgeIntervalSeconds: 3600},
-		Events:    Events{Enabled: true},
-		Gateway:   Gateway{Service: "gateway"},
-		Enroll:    Enroll{TokenTTLSeconds: 3600},
-		Limits:    Limits{MaxRequestBytes: 1 << 20, MaxSnapshotBytes: 8 << 20},
+		Config:      fconfig.Default(),
+		DB:          DB{MaxConns: 16},
+		KEK:         KEK{Source: "file"},
+		Ingest:      Ingest{},
+		Registry:    Registry{HeartbeatSeconds: 30},
+		Retention:   Retention{Days: 90},
+		Stale:       Stale{AfterSeconds: 86400},
+		Jobs:        Jobs{Workers: 4, IntervalSeconds: 60, PurgeIntervalSeconds: 3600},
+		Events:      Events{Enabled: true},
+		Gateway:     Gateway{Service: "gateway"},
+		Enroll:      Enroll{TokenTTLSeconds: 3600},
+		Limits:      Limits{MaxRequestBytes: 1 << 20, MaxSnapshotBytes: 8 << 20},
+		HostReports: HostReports{Consumers: []string{"ipam"}, MaxPageBytes: 3 << 20},
 	}
 }
 
@@ -249,7 +289,7 @@ func (c Config) Validate() error {
 	if c.Limits.MaxSnapshotBytes < 1<<10 || c.Limits.MaxSnapshotBytes > 128<<20 {
 		return errors.New("config: limits_inventory.max_snapshot_bytes must be within [1 KiB, 128 MiB]")
 	}
-	return nil
+	return c.HostReports.validate()
 }
 
 // validate checks the ingest transport: plaintext only as a non-production
@@ -355,11 +395,22 @@ type AgentConfig struct {
 	// ServerName overrides the name verified against the server certificate
 	// (default: the host part of ingest_endpoint).
 	ServerName string `yaml:"server_name"`
+
+	// Host report collection (feature 020). CollectBMC reads the BMC LAN
+	// settings (IPMI LAN parameters 3/4/5/6/12/20 only, never credentials;
+	// Linux, root, ipmi_devintf + ipmi_si). CollectUpdates reads the package
+	// update state without refreshing the package lists unless
+	// RefreshPackageLists is set (then at most once per 24 h).
+	// UpdateTimeoutSeconds bounds the whole update collection.
+	CollectBMC           bool `yaml:"collect_bmc"`
+	CollectUpdates       bool `yaml:"collect_updates"`
+	RefreshPackageLists  bool `yaml:"refresh_package_lists"`
+	UpdateTimeoutSeconds int  `yaml:"update_timeout_seconds"`
 }
 
 // DefaultAgent returns the endpoint agent's secure defaults.
 func DefaultAgent() AgentConfig {
-	return AgentConfig{IntervalSeconds: 3600}
+	return AgentConfig{IntervalSeconds: 3600, CollectBMC: true, CollectUpdates: true, UpdateTimeoutSeconds: 120}
 }
 
 // LoadAgent reads the endpoint agent's YAML over DefaultAgent(); unknown fields
@@ -386,6 +437,9 @@ func (a AgentConfig) Validate() error {
 	if a.IntervalSeconds < 60 || a.IntervalSeconds > 604800 {
 		return errors.New("config: agent interval_seconds must be within [60, 604800]")
 	}
+	if a.UpdateTimeoutSeconds < 30 || a.UpdateTimeoutSeconds > 600 {
+		return errors.New("config: agent update_timeout_seconds must be within [30, 600]")
+	}
 	if a.TokenFile == "" && a.CredentialFile == "" {
 		return errors.New("config: agent token_file or credential_file is required")
 	}
@@ -411,6 +465,11 @@ func checkCABundle(path string) error {
 		return fmt.Errorf("config: agent ca_file %s: no PEM certificate found", path)
 	}
 	return nil
+}
+
+// UpdateTimeout bounds the agent's whole package update collection.
+func (a AgentConfig) UpdateTimeout() time.Duration {
+	return time.Duration(a.UpdateTimeoutSeconds) * time.Second
 }
 
 // AgentInterval is the endpoint agent's collection tick.

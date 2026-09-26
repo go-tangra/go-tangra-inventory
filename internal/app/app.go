@@ -206,6 +206,9 @@ func Build(ctx context.Context, cfg config.Config, o Options) (a *App, err error
 	grpcapi.Register(a.Freya.GRPC(), grpcapi.Deps{
 		Hosts: hostsSvc, Snapshots: snapsSvc, Stats: statsSvc, Backup: backupSvc,
 		Enroll: a.Enroll, Registry: a.Registry,
+		// HostReportService (IPAM host sync): mesh only; the inbound policy
+		// and host_reports.consumers both have to admit the caller.
+		Reports: a.Repo, ReportConsumers: cfg.HostReports.Consumers, MaxReportPageBytes: cfg.HostReports.MaxPageBytes,
 	})
 
 	// Off-mesh INGEST EDGE: a separate, network-isolated gRPC listener that

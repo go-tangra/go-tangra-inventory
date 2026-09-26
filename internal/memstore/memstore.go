@@ -459,6 +459,9 @@ func (m *Mem) ListSnapshotsForHost(_ context.Context, tenantID, hostID string, l
 func (m *Mem) GetLatestForHost(_ context.Context, tenantID, hostID string) (store.Snapshot, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if err := m.fail("GetLatestForHost"); err != nil {
+		return store.Snapshot{}, err
+	}
 	var latest store.Snapshot
 	found := false
 	for _, s := range m.snaps {
