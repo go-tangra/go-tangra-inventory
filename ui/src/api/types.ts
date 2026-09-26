@@ -130,6 +130,7 @@ export interface OSInfo {
   install_date?: string
   last_boot?: string
   uptime_sec?: number
+  family?: string // linux | windows
 }
 
 export interface Program {
@@ -139,6 +140,8 @@ export interface Program {
   install_date?: string
   install_location?: string
   size_bytes?: number
+  available_version?: string // newer version offered by the package manager
+  security_update?: boolean
 }
 
 export interface Service {
@@ -178,8 +181,65 @@ export interface NetIface {
   dns?: string[]
   dhcp?: boolean
   speed_bps?: number
-  type?: string
+  type?: string // kind: ethernet|wireless|bond|bridge|vlan|virtual|loopback|other
   up?: boolean
+  addresses?: IfAddress[]
+  default_route?: boolean
+  master?: string
+  vlan_id?: number
+}
+
+export interface IfAddress {
+  address: string
+  prefix_length: number
+  family: 'ipv4' | 'ipv6'
+  dhcp?: boolean
+  temporary?: boolean
+  deprecated?: boolean
+  scope?: string
+}
+
+export interface Virtualization {
+  role?: string // physical|vm|container|unknown
+  kind?: string
+  source?: string
+}
+
+// Bmc is the out-of-band controller's LAN configuration (never credentials).
+export interface Bmc {
+  address?: string
+  prefix_length?: number
+  gateway?: string
+  ip_source?: string
+  vlan_id?: number
+  ports?: { channel: number; mac?: string; address?: string }[]
+}
+
+export interface HypervisorGuest {
+  id: string
+  name?: string
+  kind?: string
+  platform?: string
+  macs?: string[]
+}
+
+export interface UpdateState {
+  package_manager?: string
+  status?: string // unknown|up_to_date|updates_available|unsupported|error
+  reboot_required?: string // unknown|true|false
+  automatic_updates?: string // unknown|true|false
+  security_classified?: boolean
+  checked_at?: string
+  pending_count?: number
+  security_count?: number
+}
+
+export interface CollectionLimits {
+  interfaces?: number
+  addresses?: number
+  guests?: number
+  packages?: number
+  bmc_ports?: number
 }
 
 export interface Partition {
@@ -228,6 +288,13 @@ export interface Inventory {
   environment: Environment
   network_interfaces?: NetIface[]
   disks?: Disk[]
+  primary_ipv4?: string
+  primary_ipv6?: string
+  virtualization?: Virtualization
+  bmc?: Bmc
+  hypervisor_guests?: HypervisorGuest[]
+  update_state?: UpdateState
+  truncated?: CollectionLimits
 }
 
 // Snapshot is an immutable inventory report bound to a host.
