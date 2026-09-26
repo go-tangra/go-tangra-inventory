@@ -20,6 +20,15 @@ func FuzzDiff(f *testing.F) {
 		Disks: []store.Disk{{Serial: "D2", SizeBytes: 200}},
 	})
 	f.Add(seedA, seedB)
+	rich, _ := json.Marshal(store.Inventory{
+		Networks: []store.NetIface{{Name: "eth0", MAC: "00:11:22:33:44:55", Type: "ethernet", SpeedBps: 1e9, Gateway: "192.0.2.1",
+			DHCP: true, Addresses: []store.IfAddress{{Address: "192.0.2.10", PrefixLength: 24, Family: "ipv4", Temporary: true}}}},
+		Bmc:              &store.Bmc{Address: "10.0.0.5"},
+		HypervisorGuests: []store.HypervisorGuest{{ID: "100"}},
+		UpdateState:      store.UpdateState{Status: "up_to_date"},
+		Virtualization:   store.Virtualization{Role: "vm"},
+	})
+	f.Add(rich, seedA)
 	f.Add([]byte(`{}`), []byte(`{}`))
 	f.Add([]byte("not json"), []byte("also not json"))
 	f.Add([]byte(``), []byte(``))

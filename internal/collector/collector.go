@@ -44,7 +44,7 @@ func Collect(ctx context.Context) (store.Inventory, error) {
 
 	// OS / network / disks via gopsutil (cross-platform).
 	collectOS(ctx, &inv)
-	collectNetworks(&inv)
+	collectNetworks(ctx, &inv)
 	collectDisks(ctx, &inv)
 
 	// Software: installed programs, services, local users (build-tagged,
