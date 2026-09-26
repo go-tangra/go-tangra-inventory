@@ -63,6 +63,27 @@ monitors (EDID, Windows), OS/software/services/users/patches, network interfaces
 and disks, and the host report data described below. Categories unavailable on
 a platform yield empty sections, never failures.
 
+### Installing the agent from a package
+
+Every `v*` release carries `tangra-inventory-agent` packages for amd64 and
+arm64 (`.deb` and `.rpm`, with `SHA256SUMS`); `make packages` builds the same
+into `dist/`. The package installs `/usr/bin/inventory-agent`, the systemd
+unit below as `/usr/lib/systemd/system/inventory-agent.service` (enabled), a
+sample `/etc/inventory-agent/agent.yaml` (kept on upgrade) and
+`/var/lib/inventory-agent` (0700).
+
+```sh
+sudo apt install ./tangra-inventory-agent_<version>_amd64.deb   # or: sudo dnf install ./tangra-inventory-agent-<version>-1.x86_64.rpm
+sudoedit /etc/inventory-agent/agent.yaml                        # ingest_endpoint (and ca_file if pinned)
+sudo install -m 0600 /dev/stdin /etc/inventory-agent/enrollment.token <<< '<token from Inventory > Agents>'
+sudo systemctl start inventory-agent
+```
+
+The unit only starts once `/etc/inventory-agent/enrollment.token` or the
+stored credential `/var/lib/inventory-agent/credential` exists, so an
+unconfigured install stays idle instead of restarting in a loop. Upgrades
+restart a running agent; `apt purge` also removes the credential and state.
+
 ### Running the agent under systemd
 
 ```ini

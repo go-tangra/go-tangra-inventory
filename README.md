@@ -106,8 +106,11 @@ inventory-agent -service install                                # Windows only: 
 ```
 
 `-service install` exists on Windows only; it does not create a systemd unit.
-On Linux run the daemon under systemd yourself (example in
-[deploy/README.md](deploy/README.md#running-the-agent-under-systemd)).
+On Linux install the `tangra-inventory-agent` .deb/.rpm attached to each
+release (systemd unit included; `make packages` builds them), see
+[deploy/README.md](deploy/README.md#installing-the-agent-from-a-package), or
+run the daemon under systemd yourself
+([example](deploy/README.md#running-the-agent-under-systemd)).
 
 Besides hardware, software and disks the agent reports what IPAM needs to keep
 its devices current: per-interface kind, speed, bond/bridge master, VLAN id,

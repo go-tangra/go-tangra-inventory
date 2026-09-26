@@ -1,0 +1,24 @@
+[Unit]
+Description=go-tangra inventory agent
+Documentation=https://github.com/go-tangra/go-tangra-inventory
+Wants=network-online.target
+After=network-online.target
+# Start only once the agent can authenticate: an enrollment token to consume,
+# or the credential a previous enrollment stored (either one).
+ConditionPathExists=|/etc/inventory-agent/enrollment.token
+ConditionPathExists=|/var/lib/inventory-agent/credential
+
+[Service]
+ExecStart=/usr/bin/inventory-agent -config /etc/inventory-agent/agent.yaml -daemon
+Restart=on-failure
+RestartSec=30
+# root reads SMBIOS, /dev/ipmi0 (BMC) and the package managers' state.
+User=root
+StateDirectory=inventory-agent
+StateDirectoryMode=0700
+NoNewPrivileges=yes
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
