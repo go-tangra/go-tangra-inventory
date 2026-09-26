@@ -2,7 +2,7 @@
  * module's own templates use. The theme tokens, preflight and the kit's
  * component CSS come from the shell (@go-tangra/ui/theme.css). */
 @import "tailwindcss/theme.css" reference;
-@import "tailwindcss/utilities.css";
+@import "tailwindcss/utilities.css" layer(utilities);
 @plugin "flyonui" {
   themes: false;
   exclude: rootcolor, rootscrollgutter, scrollbar, svg, properties;
