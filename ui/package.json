@@ -15,7 +15,7 @@
   "dependencies": {
     "@casl/ability": "^7.0.1",
     "@casl/vue": "^3.0.1",
-    "@go-tangra/ui": "^4.0.0",
+    "@go-tangra/ui": "^4.2.1",
     "pinia": "^4.0.3",
     "vue": "^3.5.42",
     "vue-router": "^5.3.1",
