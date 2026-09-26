@@ -1,13 +1,10 @@
 package inventorymanifest
 
 import (
-	"context"
-	"errors"
 	"strings"
 	"testing"
 
 	"github.com/getkin/kin-openapi/openapi3"
-	"google.golang.org/grpc"
 )
 
 // docWith builds a one-operation OpenAPI doc whose GET /x carries the given
@@ -62,23 +59,6 @@ func TestRoutesValidationBranches(t *testing.T) {
 	}
 }
 
-func TestSeedRequest(t *testing.T) {
-	req := SeedRequest()
-	if len(req.GetPermissions()) != len(Permissions) {
-		t.Fatalf("permissions = %d, want %d", len(req.GetPermissions()), len(Permissions))
-	}
-	if len(req.GetBuiltinGrants()) != 5 {
-		t.Fatalf("builtin grants = %d, want 5", len(req.GetBuiltinGrants()))
-	}
-	// owner/admin get every permission ref.
-	all := PermissionRefs()
-	for _, g := range req.GetBuiltinGrants() {
-		if g.GetRole() == "owner" && len(g.GetPermissions()) != len(all) {
-			t.Fatalf("owner grants = %d, want %d", len(g.GetPermissions()), len(all))
-		}
-	}
-}
-
 func TestPermissionRefs(t *testing.T) {
 	refs := PermissionRefs()
 	if len(refs) != len(Permissions) {
@@ -86,23 +66,5 @@ func TestPermissionRefs(t *testing.T) {
 	}
 	if refs[0] != "inventory:read" {
 		t.Fatalf("first ref = %q", refs[0])
-	}
-}
-
-// stubConn is a grpc.ClientConnInterface whose Invoke always fails, so
-// SeedPermissions runs end-to-end and surfaces the error.
-type stubConn struct{ err error }
-
-func (s stubConn) Invoke(context.Context, string, any, any, ...grpc.CallOption) error {
-	return s.err
-}
-func (s stubConn) NewStream(context.Context, *grpc.StreamDesc, string, ...grpc.CallOption) (grpc.ClientStream, error) {
-	return nil, s.err
-}
-
-func TestSeedPermissions(t *testing.T) {
-	want := errors.New("rpc down")
-	if err := SeedPermissions(context.Background(), stubConn{err: want}); !errors.Is(err, want) {
-		t.Fatalf("SeedPermissions error = %v, want %v", err, want)
 	}
 }

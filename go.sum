@@ -70,8 +70,6 @@ github.com/go-playground/assert/v2 v2.2.0 h1:JvknZsQTYeFEAhQwI4qEt9cyV5ONwRHC+lY
 github.com/go-playground/assert/v2 v2.2.0/go.mod h1:VDjEfimB/XKnb+ZQfWdccd7VUvScMdVu0Titje2rxJ4=
 github.com/go-playground/form/v4 v4.3.0 h1:OVttojbQv2WNCs4P+VnjPtrt/+30Ipw4890W3OaFlvk=
 github.com/go-playground/form/v4 v4.3.0/go.mod h1:Cpe1iYJKoXb1vILRXEwxpWMGWyQuqplQ/4cvPecy+Jo=
-github.com/go-tangra/go-tangra-auth/sdk/v4 v4.0.0 h1:H8SGCYevgHRJOfABCPaVXpDirQeykSmbW54r459EaGw=
-github.com/go-tangra/go-tangra-auth/sdk/v4 v4.0.0/go.mod h1:kzKB/d8rnaEIYH2ZS5kQWAXXz8zdhfndytNs/dvQfOM=
 github.com/go-tangra/go-tangra-lcm/sdk/v4 v4.1.0 h1:KjAVJn8jAZbcIyL6B3yasngtFTxwBA1s9y7TW1ylqjc=
 github.com/go-tangra/go-tangra-lcm/sdk/v4 v4.1.0/go.mod h1:j/24DHoyBPfYcHzehJKkQLL/s1jDPToGr/LqV/qA/HM=
 github.com/go-tangra/go-tangra-portal/sdk/v4 v4.0.0 h1:THNjBM31OknVg0TJey5EuntROMaCY1ndozbN5ZBlLlg=
