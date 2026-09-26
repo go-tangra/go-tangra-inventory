@@ -129,6 +129,24 @@ material: the deployment mounts `deploy/container.yaml` and the key-encryption k
 (the go-tangra platform stack mounts its dev KEK at `/app/deploy/kek.dev`) and
 publishes the ingest edge port.
 
+## API permissions and module roles
+
+`inventory:read/write`, `hosts:manage`, `agents:manage`,
+`snapshots:read/manage`, `stats:read`, `backup:manage`. The gateway enforces the
+per-route permission from the manifest; the module checks it again.
+
+The module registers its permissions, its module roles and the built-in role
+grants (`pkg/inventorymanifest.Grants`, scoped to inventory by auth) with auth
+at start and every five minutes (`pkg/inventorymanifest.Registration`). Module
+roles are provided in every tenant; administrators assign them or clone them
+into custom roles:
+
+| Role | Display name | Permissions |
+|---|---|---|
+| `administrator` | Inventory administrator | all inventory permissions |
+| `editor` | Inventory editor | `inventory:read`, `inventory:write`, `snapshots:read` |
+| `viewer` | Inventory viewer | `inventory:read`, `snapshots:read`, `stats:read` |
+
 ## Versioning
 
 - Service releases are tagged `vX.Y.Z`. CI publishes the image as `X.Y.Z`,
