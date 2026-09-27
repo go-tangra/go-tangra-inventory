@@ -3,9 +3,16 @@
 package upgrader
 
 import (
+	"io/fs"
 	"os"
 	"syscall"
 )
+
+// restrictDir sets the directory's mode (an existing directory is tightened too).
+func restrictDir(path string, perm fs.FileMode) error { return os.Chmod(path, perm) }
+
+// private: no group or other permission bits.
+func private(_ string, st os.FileInfo) bool { return st.Mode().Perm()&0o077 == 0 }
 
 // ownedByAdmin: owned by root.
 func ownedByAdmin(_ string, st os.FileInfo) bool {

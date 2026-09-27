@@ -88,9 +88,14 @@ type Candidate struct {
 // request and an available artifact whose version is older than target (or
 // newer, when the target is a pin), skipping agents whose last request for
 // this target already failed. Oldest version first, then agent id, at most
-// max_concurrent - active.
-func PlanAuto(now time.Time, p store.AgentUpgradePolicy, target string, pinned bool, cands []Candidate, active int) []string {
+// max_concurrent - active. Until the target is proven (some agent runs it)
+// the rollout is a canary: one agent at a time, so a broken release pauses
+// the policy after one host instead of max_concurrent.
+func PlanAuto(now time.Time, p store.AgentUpgradePolicy, target string, pinned, proven bool, cands []Candidate, active int) []string {
 	capacity := p.MaxConcurrent - active
+	if !proven {
+		capacity = 1 - active
+	}
 	if !p.Enabled || p.Paused || target == "" || capacity <= 0 || !InWindow(now, p) {
 		return nil
 	}

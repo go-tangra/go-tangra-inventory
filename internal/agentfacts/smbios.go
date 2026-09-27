@@ -285,11 +285,12 @@ func memoryInfo(arrays []store.MemoryArray, modules []store.MemoryModule) store.
 }
 
 // portLabel builds a port connector designation, preferring "internal /
-// external" and falling back to whichever exists.
+// external" and falling back to whichever exists; the joined label is
+// bounded like any other SMBIOS string.
 func portLabel(in, ext string) string {
 	switch {
 	case in != "" && ext != "":
-		return in + " / " + ext
+		return clipString(in+" / "+ext, maxSMBIOSString)
 	case ext != "":
 		return ext
 	default:

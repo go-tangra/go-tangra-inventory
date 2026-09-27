@@ -61,15 +61,19 @@ func TestUpgradePolicyAndScheduler(t *testing.T) {
 			db0 = db
 		}
 	}
-	for i := 1; i <= 5; i++ {
+	for i := 0; i <= 5; i++ {
+		version := "4.4.0"
+		if i == 0 {
+			version = "4.5.0" // already on the target: the rollout is past its canary
+		}
 		id := fmt.Sprintf("018f0000-0000-7000-8000-%012d", i)
-		if err := db0.CreateAgent(ctx, store.Agent{ID: id, TenantID: tenant, AgentVersion: "4.4.0", CredentialSealed: []byte("sealed"), EnrolledAt: time.Now(), LastSeen: time.Now()}); err != nil {
+		if err := db0.CreateAgent(ctx, store.Agent{ID: id, TenantID: tenant, AgentVersion: version, CredentialSealed: []byte("sealed"), EnrolledAt: time.Now(), LastSeen: time.Now()}); err != nil {
 			t.Fatal(err)
 		}
 		if err := db0.SetAgentPlatform(ctx, id, "linux", "amd64", "deb", []string{store.CapUpgradeV1}, time.Now()); err != nil {
 			t.Fatal(err)
 		}
-		if _, _, err := reg.Register(ctx, registry.ConnectedAgent{AgentID: id, TenantID: tenant, Version: "4.4.0"}); err != nil {
+		if _, _, err := reg.Register(ctx, registry.ConnectedAgent{AgentID: id, TenantID: tenant, Version: version}); err != nil {
 			t.Fatal(err)
 		}
 	}

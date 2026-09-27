@@ -117,25 +117,25 @@ func TestPlanAuto(t *testing.T) {
 		}),
 	}
 	// Oldest version first, then agent id; capacity = max_concurrent - active.
-	if got := PlanAuto(now, p, "4.5.0", false, cands, 0); !slices.Equal(got, []string{"a-old", "a-a", "a-z"}) {
+	if got := PlanAuto(now, p, "4.5.0", false, true, cands, 0); !slices.Equal(got, []string{"a-old", "a-a", "a-z"}) {
 		t.Fatalf("plan = %v", got)
 	}
-	if got := PlanAuto(now, p, "4.5.0", false, cands, 1); !slices.Equal(got, []string{"a-old", "a-a"}) {
+	if got := PlanAuto(now, p, "4.5.0", false, true, cands, 1); !slices.Equal(got, []string{"a-old", "a-a"}) {
 		t.Fatalf("plan with 1 active = %v", got)
 	}
-	if got := PlanAuto(now, p, "4.5.0", false, cands, 3); got != nil {
+	if got := PlanAuto(now, p, "4.5.0", false, true, cands, 3); got != nil {
 		t.Fatalf("plan at capacity = %v", got)
 	}
 	p.MaxConcurrent = 100
-	if got := PlanAuto(now, p, "4.5.0", false, cands, 0); !slices.Equal(got, []string{"a-old", "a-a", "a-z", "a-b"}) {
+	if got := PlanAuto(now, p, "4.5.0", false, true, cands, 0); !slices.Equal(got, []string{"a-old", "a-a", "a-z", "a-b"}) {
 		t.Fatalf("plan all = %v", got)
 	}
 	// A lower pin downgrades newer agents (only the pin path allows it).
-	if got := PlanAuto(now, p, "4.4.1", true, cands, 0); !slices.Equal(got, []string{"a-old", "a-a", "a-failed", "a-z", "a-uptodate", "a-newer"}) {
+	if got := PlanAuto(now, p, "4.4.1", true, true, cands, 0); !slices.Equal(got, []string{"a-old", "a-a", "a-failed", "a-z", "a-uptodate", "a-newer"}) {
 		t.Fatalf("pinned plan = %v", got)
 	}
 	// Outside the window, disabled, paused or without a target: nothing.
-	if got := PlanAuto(now.Add(2*time.Hour), p, "4.5.0", false, cands, 0); got != nil {
+	if got := PlanAuto(now.Add(2*time.Hour), p, "4.5.0", false, true, cands, 0); got != nil {
 		t.Fatalf("outside window = %v", got)
 	}
 	off := p
@@ -143,11 +143,18 @@ func TestPlanAuto(t *testing.T) {
 	paused := p
 	paused.Paused = true
 	for _, q := range []store.AgentUpgradePolicy{off, paused} {
-		if got := PlanAuto(now, q, "4.5.0", false, cands, 0); got != nil {
+		if got := PlanAuto(now, q, "4.5.0", false, true, cands, 0); got != nil {
 			t.Fatalf("policy %+v planned %v", q, got)
 		}
 	}
-	if got := PlanAuto(now, p, "", false, cands, 0); got != nil {
+	if got := PlanAuto(now, p, "", false, true, cands, 0); got != nil {
 		t.Fatalf("no target planned %v", got)
+	}
+	// Canary: an unproven target goes to one agent at a time.
+	if got := PlanAuto(now, p, "4.5.0", false, false, cands, 0); !slices.Equal(got, []string{"a-old"}) {
+		t.Fatalf("canary = %v", got)
+	}
+	if got := PlanAuto(now, p, "4.5.0", false, false, cands, 1); got != nil {
+		t.Fatalf("canary while one is active = %v", got)
 	}
 }

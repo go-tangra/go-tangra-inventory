@@ -109,7 +109,39 @@ func schedFixture(t *testing.T) *fixture {
 		f.reg.online[id] = true
 	}
 	f.enroll(t, "a4", "4.4.0", deb, store.CapUpgradeV1) // offline
+	f.enroll(t, "a0", "4.5.0", deb, store.CapUpgradeV1) // already runs the target: past the canary
 	return f
+}
+
+// Until an agent runs the target, the policy upgrades one agent at a time.
+func TestSchedulerCanary(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	if _, err := f.svc.UpdatePolicy(ctx, tenant, admin, policyInput()); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"a1", "a2", "a3"} {
+		f.enroll(t, id, "4.4.0", deb, store.CapUpgradeV1)
+		f.reg.online[id] = true
+	}
+	if n, _ := f.svc.RunPolicies(ctx); n != 1 {
+		t.Fatalf("canary run = %d", n)
+	}
+	if n, _ := f.svc.RunPolicies(ctx); n != 0 {
+		t.Fatalf("second run while the canary is active = %d", n)
+	}
+	list, _ := f.svc.List(ctx, tenant, repoFilter())
+	c := list[0]
+	report(t, f, c.AgentID, c.ID, StateDownloading, "")
+	report(t, f, c.AgentID, c.ID, StateInstalling, "")
+	if err := f.mem.TouchAgent(ctx, c.AgentID, "4.5.0", "h-"+c.AgentID, t0); err != nil {
+		t.Fatal(err)
+	}
+	report(t, f, c.AgentID, c.ID, StateSucceeded, "")
+	// Proven: the rest go up to max_concurrent (2).
+	if n, _ := f.svc.RunPolicies(ctx); n != 2 {
+		t.Fatalf("after the canary = %d", n)
+	}
 }
 
 func TestSchedulerCreatesPolicyRequestsUpToCapacity(t *testing.T) {

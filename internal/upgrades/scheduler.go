@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/agentrelease"
 )
 
 // PolicyLockKey names the cluster-wide lock of a tenant's policy run, so one
@@ -67,15 +69,19 @@ func (s *Service) runPolicy(ctx context.Context, tenantID string) (int, error) {
 		online[c.AgentID] = true
 	}
 	active := 0
+	proven := false // some agent of the tenant already runs the target
 	cands := make([]Candidate, 0, len(agents))
 	for _, a := range agents {
 		last := latest[a.ID]
 		if last.Active() {
 			active++
 		}
+		if c, ok := agentrelease.Compare(a.AgentVersion, target); ok && c == 0 {
+			proven = true
+		}
 		cands = append(cands, Candidate{Agent: a, Online: online[a.ID], Last: last, Available: s.rel.HasArtifact(ctx, target, platformOf(a))})
 	}
-	ids := PlanAuto(s.now(), p, target, pinned, cands, active)
+	ids := PlanAuto(s.now(), p, target, pinned, proven, cands, active)
 	if len(ids) == 0 {
 		return 0, nil
 	}

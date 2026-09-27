@@ -37,6 +37,9 @@ type ExecRunner struct{}
 // Run implements Runner; env is added to the process environment.
 func (ExecRunner) Run(ctx context.Context, env []string, name string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...) // #nosec G204 -- fixed command names and argument lists
+	// Later entries win on duplicate keys, so env overrides the inherited
+	// environment. Callers pass fixed literals only (never request or
+	// manifest data): these commands run as root.
 	cmd.Env = append(os.Environ(), env...)
 	return cmd.CombinedOutput()
 }
@@ -85,7 +88,7 @@ func (OSFS) MkdirAll(path string, perm fs.FileMode) error {
 	if err := os.MkdirAll(path, perm); err != nil {
 		return err
 	}
-	return os.Chmod(path, perm) // an existing directory is tightened too
+	return restrictDir(path, perm) // Unix: mode (also of an existing directory); Windows: SYSTEM/Administrators-only DACL
 }
 
 func (OSFS) Create(path string, perm fs.FileMode) (io.WriteCloser, error) {
@@ -146,7 +149,19 @@ func (OSFS) Stat(path string) (selfupdate.FileInfo, error) {
 	if !st.Mode().IsRegular() {
 		return selfupdate.FileInfo{}, fmt.Errorf("upgrader: %s is not a regular file", path)
 	}
-	return selfupdate.FileInfo{Mode: st.Mode(), Size: st.Size(), ModTime: st.ModTime(), OwnerRoot: ownedByAdmin(path, st)}, nil
+	return selfupdate.FileInfo{Mode: st.Mode(), Size: st.Size(), ModTime: st.ModTime(), OwnerRoot: ownedByAdmin(path, st), Private: private(path, st)}, nil
+}
+
+// StatDir describes a directory (not a symlink to one).
+func (OSFS) StatDir(path string) (selfupdate.FileInfo, error) {
+	st, err := os.Lstat(path)
+	if err != nil {
+		return selfupdate.FileInfo{}, err
+	}
+	if !st.IsDir() {
+		return selfupdate.FileInfo{}, fmt.Errorf("upgrader: %s is not a directory", path)
+	}
+	return selfupdate.FileInfo{Mode: st.Mode(), ModTime: st.ModTime(), OwnerRoot: ownedByAdmin(path, st), Private: private(path, st)}, nil
 }
 
 func (OSFS) ReadDir(path string) ([]string, error) {

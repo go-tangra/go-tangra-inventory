@@ -106,6 +106,7 @@ type FileInfo struct {
 	Size      int64
 	ModTime   time.Time
 	OwnerRoot bool // owned by root (Linux) / SYSTEM or Administrators (Windows)
+	Private   bool // no access for anyone else (Unix: no group/other bits; Windows: DACL of SYSTEM/Administrators only)
 }
 
 // FS is the file system glue (internal/upgrader implements it on the host).
@@ -119,6 +120,7 @@ type FS interface {
 	Remove(path string) error
 	RemoveAll(path string) error
 	Stat(path string) (FileInfo, error)
+	StatDir(path string) (FileInfo, error) // a directory, not a symlink to one
 	ReadDir(path string) ([]string, error)
 	CopyFile(src, dst string, perm fs.FileMode) error
 	Free(path string) (uint64, error)

@@ -219,9 +219,43 @@ func TestOSFS(t *testing.T) {
 		t.Fatal(err)
 	}
 	st, err := f.Stat(filepath.Join(dir, "state.json"))
-	if err != nil || st.Mode.Perm() != 0o600 || st.Size != 2 {
+	if err != nil || st.Mode.Perm() != 0o600 || st.Size != 2 || !st.Private {
 		t.Fatalf("stat = %+v %v", st, err)
 	}
+	// The staging directory: private, a real directory, no symlink.
+	d, err := f.StatDir(dir)
+	if err != nil || !d.Private || !d.Mode.IsDir() || (runtime.GOOS != "windows" && d.OwnerRoot != (os.Getuid() == 0)) {
+		t.Fatalf("stat dir = %+v %v", d, err)
+	}
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := f.StatDir(dir); d.Private {
+		t.Fatal("0755 staging directory counted as private")
+	}
+	if err := f.MkdirAll(dir, 0o700); err != nil { // an existing directory is tightened again
+		t.Fatal(err)
+	}
+	if d, _ := f.StatDir(dir); !d.Private {
+		t.Fatal("existing directory not tightened")
+	}
+	link := filepath.Join(filepath.Dir(dir), "link")
+	if err := os.Symlink(dir, link); err == nil {
+		if _, err := f.StatDir(link); err == nil {
+			t.Fatal("symlink accepted as the staging directory")
+		}
+	}
+	if _, err := f.StatDir(filepath.Join(dir, "state.json")); err == nil {
+		t.Fatal("a file is not a directory")
+	}
+	if _, err := f.StatDir(filepath.Join(dir, "missing")); err == nil {
+		t.Fatal("missing directory")
+	}
+	_ = os.Chmod(filepath.Join(dir, "state.json"), 0o644)
+	if st, _ := f.Stat(filepath.Join(dir, "state.json")); st.Private {
+		t.Fatal("0644 file counted as private")
+	}
+	_ = os.Chmod(filepath.Join(dir, "state.json"), 0o600)
 	if runtime.GOOS != "windows" && st.OwnerRoot != (os.Getuid() == 0) {
 		t.Fatalf("owner root = %v", st.OwnerRoot)
 	}

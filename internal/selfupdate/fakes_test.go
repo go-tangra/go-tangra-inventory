@@ -38,11 +38,13 @@ type memFS struct {
 	free   uint64
 	failOn map[string]error // "op:path" or "op:*"
 	now    func() time.Time
+	// dirNotRoot marks directories owned by someone else.
+	dirNotRoot map[string]bool
 }
 
 func newMemFS() *memFS {
 	return &memFS{files: map[string]*memFile{}, dirs: map[string]fs.FileMode{}, free: 1 << 40, failOn: map[string]error{},
-		now: func() time.Time { return t0 }}
+		now: func() time.Time { return t0 }, dirNotRoot: map[string]bool{}}
 }
 
 func (m *memFS) fault(op, path string) error {
@@ -209,7 +211,20 @@ func (m *memFS) Stat(path string) (FileInfo, error) {
 	if !ok {
 		return FileInfo{}, fs.ErrNotExist
 	}
-	return FileInfo{Mode: f.mode, Size: int64(len(f.data)), ModTime: f.mod, OwnerRoot: f.ownerRoot}, nil
+	return FileInfo{Mode: f.mode, Size: int64(len(f.data)), ModTime: f.mod, OwnerRoot: f.ownerRoot, Private: f.mode.Perm()&0o077 == 0}, nil
+}
+
+func (m *memFS) StatDir(path string) (FileInfo, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.fault("statdir", path); err != nil {
+		return FileInfo{}, err
+	}
+	perm, ok := m.dirs[filepath.Clean(path)]
+	if !ok {
+		return FileInfo{}, fs.ErrNotExist
+	}
+	return FileInfo{Mode: perm | fs.ModeDir, ModTime: m.now(), OwnerRoot: !m.dirNotRoot[filepath.Clean(path)], Private: perm&0o077 == 0}, nil
 }
 
 func (m *memFS) ReadDir(path string) ([]string, error) {

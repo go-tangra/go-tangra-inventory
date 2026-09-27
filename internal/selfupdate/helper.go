@@ -14,12 +14,13 @@ import (
 var (
 	ErrStateLocation = errors.New("selfupdate: state file outside the staging directory")
 	ErrStateMode     = errors.New("selfupdate: state file must be owned by root/SYSTEM with mode 0600")
+	ErrStagingMode   = errors.New("selfupdate: staging directory must be owned by root/SYSTEM and private")
 )
 
 // Apply is the helper (`inventory-agent upgrade-apply -state <file>`),
 // started outside the agent's service by the agent itself. It refuses a
-// state file outside the staging directory or not owned by root/SYSTEM
-// with mode 0600, re-verifies the artifact (signature, platform, sha256),
+// staging directory that is not root/SYSTEM-owned and private, and a state
+// file outside it or not owned by root/SYSTEM and private (0600), re-verifies the artifact (signature, platform, sha256),
 // installs it (dpkg/rpm, or an atomic binary swap and a restart), waits for
 // the new version to confirm within the deadline and otherwise rolls back:
 // the previous package, or the previous binary (package_db_mismatch).
@@ -27,11 +28,18 @@ func (u *Updater) Apply(ctx context.Context, statePath string) error {
 	if filepath.Clean(statePath) != u.path(stateFile) {
 		return ErrStateLocation
 	}
+	dir, err := u.fs.StatDir(u.cfg.StagingDir)
+	if err != nil {
+		return err
+	}
+	if !dir.OwnerRoot || !dir.Private {
+		return ErrStagingMode
+	}
 	info, err := u.fs.Stat(statePath)
 	if err != nil {
 		return err
 	}
-	if info.Mode.Perm() != 0o600 || !info.OwnerRoot {
+	if !info.Private || !info.OwnerRoot {
 		return ErrStateMode
 	}
 	st, err := u.loadState()

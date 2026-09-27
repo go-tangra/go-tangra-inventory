@@ -195,6 +195,22 @@ func TestApplyRefusals(t *testing.T) {
 	if err := f.u.Apply(context.Background(), filepath.Join(staging, "..", "upgrade", "x", "..", "..", "state.json")); !errors.Is(err, ErrStateLocation) {
 		t.Fatalf("traversal = %v", err)
 	}
+	// The staging directory itself: not root-owned, not private, unreadable.
+	f.fs.dirNotRoot[staging] = true
+	if err := f.u.Apply(context.Background(), statePath); !errors.Is(err, ErrStagingMode) {
+		t.Fatalf("staging owner = %v", err)
+	}
+	f.fs.dirNotRoot[staging] = false
+	f.fs.dirs[staging] = 0o755
+	if err := f.u.Apply(context.Background(), statePath); !errors.Is(err, ErrStagingMode) {
+		t.Fatalf("staging mode = %v", err)
+	}
+	f.fs.dirs[staging] = 0o700
+	f.fs.failOn["statdir:"+staging] = errors.New("ELOOP")
+	if err := f.u.Apply(context.Background(), statePath); err == nil || errors.Is(err, ErrStagingMode) {
+		t.Fatalf("staging stat error = %v", err)
+	}
+	delete(f.fs.failOn, "statdir:"+staging)
 	f.fs.files[statePath].mode = 0o644
 	if err := f.u.Apply(context.Background(), statePath); !errors.Is(err, ErrStateMode) {
 		t.Fatalf("mode = %v", err)

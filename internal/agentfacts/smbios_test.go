@@ -503,6 +503,10 @@ func TestSmallEdges(t *testing.T) {
 	if got := clipString(strings.Repeat("é", 200), 5); got != "éé" {
 		t.Fatalf("clip = %q", got)
 	}
+	// Two maximal port designations joined stay within the string bound (fuzz 650c7fd52dd3536c).
+	if got := portLabel(strings.Repeat("a", maxSMBIOSString), strings.Repeat("b", maxSMBIOSString)); len(got) != maxSMBIOSString {
+		t.Fatalf("port label = %d bytes", len(got))
+	}
 	// go-smbios nil entries are skipped and the structure count is bounded.
 	tbl, err := smbiosDecode(encode(qemuTable()), SMBIOSVersion{2, 8})
 	if err != nil {
