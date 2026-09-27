@@ -24,7 +24,7 @@ test-integration:
 # Generated protobuf, SQL bindings (internal/store, */*db), wiring (internal/app,
 # cmd) and test packages are exercised by the tagged integration suite and are
 # excluded from the unit gate on purpose.
-COVERPKG := $(shell $(GO) list ./... | grep -v -E '/api/|/internal/store$$|db$$|/internal/app$$|/valkeykv$$|/cmd/|/tests/|/ui|/internal/collector|/internal/sender|/internal/daemon|/internal/winsvc|/internal/stream' | paste -sd, -)
+COVERPKG := $(shell $(GO) list ./... | grep -v -E '/api/|/internal/store$$|db$$|/internal/app$$|/valkeykv$$|/cmd/|/tests/|/ui|/internal/collector|/internal/upgrader|/internal/sender|/internal/daemon|/internal/winsvc|/internal/stream' | paste -sd, -)
 
 cover:
 	$(GO) test -count=1 -coverprofile=$(COVER_OUT) -coverpkg=$(COVERPKG) $(PKGS)
@@ -32,6 +32,10 @@ cover:
 
 # Run every Fuzz* target of the module for FUZZTIME each (parsers of agent
 # facts, the ingest mapper, the host report projection, enrollment tokens, diff).
+# Feature 023 adds FuzzSMBIOSStructures, FuzzSysBlock, FuzzWindowsDisks
+# (internal/agentfacts), FuzzManifest, FuzzVersion (internal/agentrelease) and
+# extends FuzzSubmitMapper, FuzzHostReport and FuzzDiff; the loop below picks up
+# every target automatically.
 FUZZTIME ?= 10s
 fuzz:
 	@set -e; for pkg in $$($(GO) list ./... | grep -v /ui/); do \

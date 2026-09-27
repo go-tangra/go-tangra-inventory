@@ -32,10 +32,10 @@ host access) require explicit user confirmation before they are executed.
 
 **Purpose**: gates, tooling, fixtures and package skeletons.
 
-- [ ] T001 [P] Add `internal/agentrelease`, `internal/selfupdate`, `internal/upgrades` to `SECURITY_PKGS` in `scripts/coverage-gate.sh`; exclude `internal/upgrader` (OS glue) from `COVERPKG` in `Makefile` next to `internal/collector`; add the new fuzz targets of this feature to the `fuzz` target in `Makefile`
-- [ ] T002 [P] Add `FuzzNormalizeHardware` and `FuzzHardwareDiff` to the `fuzz` target in `go-tangra-ipam-v4/Makefile` (100 % gate for `internal/hostreport`, `internal/hostplan` already present in `go-tangra-ipam-v4/scripts/coverage-gate.sh`)
-- [ ] T003 Add a temporary `replace github.com/go-tangra/go-tangra-inventory/sdk/v4 => ../go-tangra-inventory-v4/sdk` to `go-tangra-ipam-v4/go.mod` for development (removed in T121); `GOWORK=off go build ./...`
-- [ ] T004 [P] Package skeletons with doc comments stating their security role: `internal/agentrelease/doc.go`, `internal/selfupdate/doc.go`, `internal/upgrader/doc.go`, `internal/releases/doc.go`, `internal/upgrades/doc.go`, `cmd/agent-release/main.go` (usage only)
+- [x] T001 [P] Add `internal/agentrelease`, `internal/selfupdate`, `internal/upgrades` to `SECURITY_PKGS` in `scripts/coverage-gate.sh`; exclude `internal/upgrader` (OS glue) from `COVERPKG` in `Makefile` next to `internal/collector`; add the new fuzz targets of this feature to the `fuzz` target in `Makefile`
+- [x] T002 [P] Add `FuzzNormalizeHardware` and `FuzzHardwareDiff` to the `fuzz` target in `go-tangra-ipam-v4/Makefile` (100 % gate for `internal/hostreport`, `internal/hostplan` already present in `go-tangra-ipam-v4/scripts/coverage-gate.sh`)
+- [x] T003 Add a temporary `replace github.com/go-tangra/go-tangra-inventory/sdk/v4 => ../go-tangra-inventory-v4/sdk` to `go-tangra-ipam-v4/go.mod` for development (removed in T121); `GOWORK=off go build ./...`
+- [x] T004 [P] Package skeletons with doc comments stating their security role: `internal/agentrelease/doc.go`, `internal/selfupdate/doc.go`, `internal/upgrader/doc.go`, `internal/releases/doc.go`, `internal/upgrades/doc.go`, `cmd/agent-release/main.go` (usage only)
 - [ ] T005 [P] Capture scripts `scripts/capture-smbios.sh` (copies `/sys/firmware/dmi/tables/DMI` + `smbios_entry_point` and `dmidecode -t 0,1,2,3,4,16,17` text as oracle) and `scripts/capture-sysblock.sh` (copies the relevant `/sys/block/*` attribute files, resolved device paths and `/run/udev/data/b*` into a tree); fixtures from a QEMU VM, a Hyper-V VM and a desktop into `internal/agentfacts/testdata/smbios/` and `internal/agentfacts/testdata/sysblock/`
 - [ ] T006 Capture the node-1 SMBIOS table and sysblock tree with the T005 scripts into `internal/agentfacts/testdata/smbios/node-1.*` and `testdata/sysblock/node-1/` (**confirm with the user: production host access**; serials may be replaced by synthetic values of equal length before commit)
 
