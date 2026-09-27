@@ -281,12 +281,13 @@ upgrade only inside the window, never more than the configured number at once.
   with reason, rolled back, manual upgrade required) and last change time.
 - **FR-016**: Upgrade requests, results and rollbacks MUST be audited (actor,
   host, from/to version, outcome, reason).
-- **FR-017**: [NEEDS CLARIFICATION: How should agents installed from the deb/rpm
-  packages upgrade — (A) download the matching deb/rpm from the platform and
-  install it through the system package manager, keeping the package database
-  consistent (recommended), or (B) replace the agent binary in place like v3,
-  leaving the installed package version stale?] Windows installs and
-  non-package installs replace the binary in place.
+- **FR-017**: Agents installed from the deb/rpm packages MUST upgrade by
+  downloading the matching signed package from the platform and installing it
+  through the system package manager, so the package database always shows
+  the running version and uninstall/reinstall keep working; rollback
+  reinstalls the previous package. Windows installs and non-package installs
+  replace the binary in place (atomic swap with rollback).
+  *(Decided with the user 2026-09-27.)*
 
 **Upgrade policy**
 
