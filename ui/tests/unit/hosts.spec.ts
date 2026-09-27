@@ -96,3 +96,68 @@ describe('host detail: host report data', () => {
     u.unmount()
   })
 })
+
+const node1Memory = {
+  total_physical_bytes: 17179869184, slots_total: 2, slots_populated: 1,
+  array: { location: 'System board or motherboard', use: 'System memory', error_correction: 'Single-bit ECC', maximum_capacity: 13194139533312, number_of_devices: 2, handle: 64 },
+  arrays: [{ location: 'System board or motherboard', use: 'System memory', error_correction: 'Single-bit ECC', maximum_capacity: 13194139533312, number_of_devices: 2, handle: 64 }],
+  modules: [
+    { device_locator: 'P1-DIMMA1', bank_locator: 'P0_Node0_Channel0_Dimm0', capacity_bytes: 17179869184, form_factor: 'DIMM', memory_type: 'DDR4', speed_mt_s: 3200, configured_speed_mt_s: 2666, manufacturer: 'Samsung', part_number: 'M393A2K43EB3-CWE', populated: true, type_detail: ['Synchronous', 'Registered (Buffered)'], rank_count: 2 },
+    { device_locator: 'P1-DIMMB1', bank_locator: 'P0_Node0_Channel1_Dimm0' },
+  ],
+}
+
+describe('host detail: hardware (feature 023)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.stubGlobal('EventSource', FakeSource)
+  })
+
+  it('memory: arrays, populated/total slots, empty slots, type detail, rated and configured speed', async () => {
+    const w = await openTab(0, { hardware_schema: 2, memory: node1Memory })
+    const card = w.find('[data-test=memory-card]')
+    expect(card.text()).toContain('1 / 2 slots')
+    expect(card.text()).toContain('System board or motherboard')
+    expect(card.text()).toContain('System memory')
+    expect(card.text()).toContain('Single-bit ECC')
+    expect(card.text()).toContain('12.0 TB')
+    expect(card.text()).toContain('DDR4')
+    expect(card.text()).toContain('Registered (Buffered)')
+    expect(card.text()).toContain('3200 (configured 2666)')
+    expect(card.text()).toContain('M393A2K43EB3-CWE')
+    const empty = w.findAll('[data-test=slot-empty]')
+    expect(empty.length).toBe(1)
+    expect(w.find('[data-test=legacy-hardware]').exists()).toBe(false)
+    w.unmount()
+  })
+
+  it('chassis type, boot-up state and processor family/socket', async () => {
+    const w = await openTab(0, {
+      hardware_schema: 2,
+      chassis: { manufacturer: 'Supermicro', type: 'Rack Mount Chassis', bootup_state: 'Safe' },
+      processors: [{ socket_designation: 'CPU1', version: 'Intel(R) Xeon(R) Silver 4310 CPU @ 2.10GHz', family: 'Intel Xeon processor', upgrade: 'Socket LGA4189', core_count: 12, thread_count: 24 }],
+    })
+    const text = w.text()
+    expect(text).toContain('Rack Mount Chassis')
+    expect(text).toContain('Safe')
+    expect(text).toContain('Intel Xeon processor')
+    expect(text).toContain('Socket LGA4189')
+    w.unmount()
+  })
+
+  it('legacy agents get a notice and their modules count as populated', async () => {
+    const w = await openTab(0, { memory: { total_physical_bytes: 8589934592, array: { use: 'Video memory' }, modules: [{ device_locator: 'DIMM_A1', capacity_bytes: 8589934592, memory_type: 'LPDDR3' }] } })
+    expect(w.find('[data-test=legacy-hardware]').text()).toContain('upgrade the agent')
+    expect(w.findAll('[data-test=slot-empty]').length).toBe(0)
+    w.unmount()
+  })
+
+  it('reported strings are rendered as text, never as HTML', async () => {
+    const w = await openTab(0, { hardware_schema: 2, bios: { vendor: '<img src=x onerror=alert(1)>' }, memory: { array: {}, modules: [{ device_locator: '<b>A1</b>', populated: true }] } })
+    expect(w.find('img').exists()).toBe(false)
+    expect(w.find('b').exists()).toBe(false)
+    expect(w.text()).toContain('<img src=x onerror=alert(1)>')
+    expect(w.text()).toContain('<b>A1</b>')
+    w.unmount()
+  })
+})

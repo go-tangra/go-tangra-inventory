@@ -1,0 +1,440 @@
+{
+  "BIOS": {
+    "vendor": "American Megatrends International, LLC.",
+    "version": "2.5",
+    "release_date": "11/26/2025"
+  },
+  "System": {
+    "manufacturer": "Supermicro",
+    "product_name": "Super Server",
+    "version": "0123456789",
+    "serial_number": "A000000000001",
+    "uuid": "3c8b6900-1e4a-11c5-8000-3cecef000001",
+    "wake_up_type": "Power Switch"
+  },
+  "Baseboard": {
+    "manufacturer": "Supermicro",
+    "product": "X12DPi-NT6",
+    "version": "1.02",
+    "serial_number": "BB000000000001",
+    "asset_tag": "Base Board Asset Tagging",
+    "location_in_chassis": "Part Component",
+    "board_type": "Motherboard (includes processor, memory, and I/O)"
+  },
+  "Chassis": {
+    "manufacturer": "Supermicro",
+    "version": "0123456789",
+    "serial_number": "C000000000001",
+    "asset_tag": "Chassis Asset Tag",
+    "type": "Rack Mount Chassis",
+    "bootup_state": "Safe"
+  },
+  "Processors": [
+    {
+      "socket_designation": "CPU1",
+      "manufacturer": "Intel(R) Corporation",
+      "version": "Intel(R) Xeon(R) Silver 4310 CPU @ 2.10GHz",
+      "max_speed_mhz": 4000,
+      "current_speed_mhz": 2100,
+      "core_count": 12,
+      "core_enabled": 12,
+      "thread_count": 24,
+      "socket_populated": true,
+      "family": "Intel Xeon processor",
+      "type": "Central Processor",
+      "upgrade": "Socket LGA4189"
+    },
+    {
+      "socket_designation": "CPU2",
+      "manufacturer": "Intel(R) Corporation",
+      "version": "Intel(R) Xeon(R) Silver 4310 CPU @ 2.10GHz",
+      "max_speed_mhz": 4000,
+      "current_speed_mhz": 2100,
+      "core_count": 12,
+      "core_enabled": 12,
+      "thread_count": 24,
+      "socket_populated": true,
+      "family": "Intel Xeon processor",
+      "type": "Central Processor",
+      "upgrade": "Socket LGA4189"
+    }
+  ],
+  "Cache": [
+    {
+      "socket_designation": "L1-Cache"
+    },
+    {
+      "socket_designation": "L2-Cache"
+    },
+    {
+      "socket_designation": "L3-Cache"
+    },
+    {
+      "socket_designation": "L1-Cache"
+    },
+    {
+      "socket_designation": "L2-Cache"
+    },
+    {
+      "socket_designation": "L3-Cache"
+    }
+  ],
+  "Memory": {
+    "total_physical_bytes": 274877906944,
+    "array": {
+      "location": "System board or motherboard",
+      "use": "System memory",
+      "error_correction": "Single-bit ECC",
+      "maximum_capacity": 13194139533312,
+      "number_of_devices": 16,
+      "handle": 64
+    },
+    "modules": [
+      {
+        "device_locator": "P1-DIMMA1",
+        "bank_locator": "P0_Node0_Channel0_Dimm0",
+        "capacity_bytes": 17179869184,
+        "form_factor": "DIMM",
+        "memory_type": "DDR4",
+        "speed_mt_s": 3200,
+        "configured_speed_mt_s": 2666,
+        "manufacturer": "Samsung",
+        "serial_number": "10000001",
+        "part_number": "M393A2K43EB3-CWE",
+        "populated": true,
+        "type_detail": [
+          "Synchronous",
+          "Registered (Buffered)"
+        ],
+        "array_handle": 64,
+        "asset_tag": "P1-DIMMA1_AssetTag (date:21/07)",
+        "rank_count": 2
+      },
+      {
+        "device_locator": "P1-DIMMB1",
+        "bank_locator": "P0_Node0_Channel1_Dimm0",
+        "capacity_bytes": 17179869184,
+        "form_factor": "DIMM",
+        "memory_type": "DDR4",
+        "speed_mt_s": 3200,
+        "configured_speed_mt_s": 2666,
+        "manufacturer": "Samsung",
+        "serial_number": "10000002",
+        "part_number": "M393A2K43EB3-CWE",
+        "populated": true,
+        "type_detail": [
+          "Synchronous",
+          "Registered (Buffered)"
+        ],
+        "array_handle": 64,
+        "asset_tag": "P1-DIMMB1_AssetTag (date:21/07)",
+        "rank_count": 2
+      },
+      {
+        "device_locator": "P1-DIMMC1",
+        "bank_locator": "P0_Node0_Channel2_Dimm0",
+        "capacity_bytes": 17179869184,
+        "form_factor": "DIMM",
+        "memory_type": "DDR4",
+        "speed_mt_s": 3200,
+        "configured_speed_mt_s": 2666,
+        "manufacturer": "Samsung",
+        "serial_number": "10000003",
+        "part_number": "M393A2K43EB3-CWE",
+        "populated": true,
+        "type_detail": [
+          "Synchronous",
+          "Registered (Buffered)"
+        ],
+        "array_handle": 64,
+        "asset_tag": "P1-DIMMC1_AssetTag (date:21/07)",
+        "rank_count": 2
+      },
+      {
+        "device_locator": "P1-DIMMD1",
+        "bank_locator": "P0_Node0_Channel3_Dimm0",
+        "capacity_bytes": 17179869184,
+        "form_factor": "DIMM",
+        "memory_type": "DDR4",
+        "speed_mt_s": 3200,
+        "configured_speed_mt_s": 2666,
+        "manufacturer": "Samsung",
+        "serial_number": "10000004",
+        "part_number": "M393A2K43EB3-CWE",
+        "populated": true,
+        "type_detail": [
+          "Synchronous",
+          "Registered (Buffered)"
+        ],
+        "array_handle": 64,
+        "asset_tag": "P1-DIMMD1_AssetTag (date:21/07)",
+        "rank_count": 2
+      },
+      {
+        "device_locator": "P1-DIMME1",
+        "bank_locator": "P0_Node0_Channel4_Dimm0",
+        "capacity_bytes": 17179869184,
+        "form_factor": "DIMM",
+        "memory_type": "DDR4",
+        "speed_mt_s": 3200,
+        "configured_speed_mt_s": 2666,
+        "manufacturer": "Samsung",
+        "serial_number": "10000005",
+        "part_number": "M393A2K43EB3-CWE",
+        "populated": true,
+        "type_detail": [
+          "Synchronous",
+          "Registered (Buffered)"
+        ],
+        "array_handle": 64,
+        "asset_tag": "P1-DIMME1_AssetTag (date:21/07)",
+        "rank_count": 2
+      },
+      {
+        "device_locator": "P1-DIMMF1",
+        "bank_locator": "P0_Node0_Channel5_Dimm0",
+        "capacity_bytes": 17179869184,
+        "form_factor": "DIMM",
+        "memory_type": "DDR4",
+        "speed_mt_s": 3200,
+        "configured_speed_mt_s": 2666,
+        "manufacturer": "Samsung",
+        "serial_number": "10000006",
+        "part_number": "M393A2K43EB3-CWE",
+        "populated": true,
+        "type_detail": [
+          "Synchronous",
+          "Registered (Buffered)"
+        ],
+        "array_handle": 64,
+        "asset_tag": "P1-DIMMF1_AssetTag (date:21/07)",
+        "rank_count": 2
+      },
+      {
+        "device_locator": "P1-DIMMG1",
+        "bank_locator": "P0_Node0_Channel6_Dimm0",
+        "capacity_bytes": 17179869184,
+        "form_factor": "DIMM",
+        "memory_type": "DDR4",
+        "speed_mt_s": 3200,
+        "configured_speed_mt_s": 2666,
+        "manufacturer": "Samsung",
+        "serial_number": "10000007",
+        "part_number": "M393A2K43EB3-CWE",
+        "populated": true,
+        "type_detail": [
+          "Synchronous",
+          "Registered (Buffered)"
+        ],
+        "array_handle": 64,
+        "asset_tag": "P1-DIMMG1_AssetTag (date:21/07)",
+        "rank_count": 2
+      },
+      {
+        "device_locator": "P1-DIMMH1",
+        "bank_locator": "P0_Node0_Channel7_Dimm0",
+        "capacity_bytes": 17179869184,
+        "form_factor": "DIMM",
+        "memory_type": "DDR4",
+        "speed_mt_s": 3200,
+        "configured_speed_mt_s": 2666,
+        "manufacturer": "Samsung",
+        "serial_number": "10000008",
+        "part_number": "M393A2K43EB3-CWE",
+        "populated": true,
+        "type_detail": [
+          "Synchronous",
+          "Registered (Buffered)"
+        ],
+        "array_handle": 64,
+        "asset_tag": "P1-DIMMH1_AssetTag (date:21/07)",
+        "rank_count": 2
+      },
+      {
+        "device_locator": "P2-DIMMA1",
+        "bank_locator": "P1_Node1_Channel0_Dimm0",
+        "capacity_bytes": 17179869184,
+        "form_factor": "DIMM",
+        "memory_type": "DDR4",
+        "speed_mt_s": 3200,
+        "configured_speed_mt_s": 2666,
+        "manufacturer": "Samsung",
+        "serial_number": "10000009",
+        "part_number": "M393A2K43EB3-CWE",
+        "populated": true,
+        "type_detail": [
+          "Synchronous",
+          "Registered (Buffered)"
+        ],
+        "array_handle": 64,
+        "asset_tag": "P2-DIMMA1_AssetTag (date:21/07)",
+        "rank_count": 2
+      },
+      {
+        "device_locator": "P2-DIMMB1",
+        "bank_locator": "P1_Node1_Channel1_Dimm0",
+        "capacity_bytes": 17179869184,
+        "form_factor": "DIMM",
+        "memory_type": "DDR4",
+        "speed_mt_s": 3200,
+        "configured_speed_mt_s": 2666,
+        "manufacturer": "Samsung",
+        "serial_number": "1000000A",
+        "part_number": "M393A2K43EB3-CWE",
+        "populated": true,
+        "type_detail": [
+          "Synchronous",
+          "Registered (Buffered)"
+        ],
+        "array_handle": 64,
+        "asset_tag": "P2-DIMMB1_AssetTag (date:21/07)",
+        "rank_count": 2
+      },
+      {
+        "device_locator": "P2-DIMMC1",
+        "bank_locator": "P1_Node1_Channel2_Dimm0",
+        "capacity_bytes": 17179869184,
+        "form_factor": "DIMM",
+        "memory_type": "DDR4",
+        "speed_mt_s": 3200,
+        "configured_speed_mt_s": 2666,
+        "manufacturer": "Samsung",
+        "serial_number": "1000000B",
+        "part_number": "M393A2K43EB3-CWE",
+        "populated": true,
+        "type_detail": [
+          "Synchronous",
+          "Registered (Buffered)"
+        ],
+        "array_handle": 64,
+        "asset_tag": "P2-DIMMC1_AssetTag (date:21/07)",
+        "rank_count": 2
+      },
+      {
+        "device_locator": "P2-DIMMD1",
+        "bank_locator": "P1_Node1_Channel3_Dimm0",
+        "capacity_bytes": 17179869184,
+        "form_factor": "DIMM",
+        "memory_type": "DDR4",
+        "speed_mt_s": 3200,
+        "configured_speed_mt_s": 2666,
+        "manufacturer": "Samsung",
+        "serial_number": "1000000C",
+        "part_number": "M393A2K43EB3-CWE",
+        "populated": true,
+        "type_detail": [
+          "Synchronous",
+          "Registered (Buffered)"
+        ],
+        "array_handle": 64,
+        "asset_tag": "P2-DIMMD1_AssetTag (date:21/07)",
+        "rank_count": 2
+      },
+      {
+        "device_locator": "P2-DIMME1",
+        "bank_locator": "P1_Node1_Channel4_Dimm0",
+        "capacity_bytes": 17179869184,
+        "form_factor": "DIMM",
+        "memory_type": "DDR4",
+        "speed_mt_s": 3200,
+        "configured_speed_mt_s": 2666,
+        "manufacturer": "Samsung",
+        "serial_number": "1000000D",
+        "part_number": "M393A2K43EB3-CWE",
+        "populated": true,
+        "type_detail": [
+          "Synchronous",
+          "Registered (Buffered)"
+        ],
+        "array_handle": 64,
+        "asset_tag": "P2-DIMME1_AssetTag (date:21/07)",
+        "rank_count": 2
+      },
+      {
+        "device_locator": "P2-DIMMF1",
+        "bank_locator": "P1_Node1_Channel5_Dimm0",
+        "capacity_bytes": 17179869184,
+        "form_factor": "DIMM",
+        "memory_type": "DDR4",
+        "speed_mt_s": 3200,
+        "configured_speed_mt_s": 2666,
+        "manufacturer": "Samsung",
+        "serial_number": "1000000E",
+        "part_number": "M393A2K43EB3-CWE",
+        "populated": true,
+        "type_detail": [
+          "Synchronous",
+          "Registered (Buffered)"
+        ],
+        "array_handle": 64,
+        "asset_tag": "P2-DIMMF1_AssetTag (date:21/07)",
+        "rank_count": 2
+      },
+      {
+        "device_locator": "P2-DIMMG1",
+        "bank_locator": "P1_Node1_Channel6_Dimm0",
+        "capacity_bytes": 17179869184,
+        "form_factor": "DIMM",
+        "memory_type": "DDR4",
+        "speed_mt_s": 3200,
+        "configured_speed_mt_s": 2666,
+        "manufacturer": "Samsung",
+        "serial_number": "1000000F",
+        "part_number": "M393A2K43EB3-CWE",
+        "populated": true,
+        "type_detail": [
+          "Synchronous",
+          "Registered (Buffered)"
+        ],
+        "array_handle": 64,
+        "asset_tag": "P2-DIMMG1_AssetTag (date:21/07)",
+        "rank_count": 2
+      },
+      {
+        "device_locator": "P2-DIMMH1",
+        "bank_locator": "P1_Node1_Channel7_Dimm0",
+        "capacity_bytes": 17179869184,
+        "form_factor": "DIMM",
+        "memory_type": "DDR4",
+        "speed_mt_s": 3200,
+        "configured_speed_mt_s": 2666,
+        "manufacturer": "Samsung",
+        "serial_number": "10000010",
+        "part_number": "M393A2K43EB3-CWE",
+        "populated": true,
+        "type_detail": [
+          "Synchronous",
+          "Registered (Buffered)"
+        ],
+        "array_handle": 64,
+        "asset_tag": "P2-DIMMH1_AssetTag (date:21/07)",
+        "rank_count": 2
+      }
+    ],
+    "arrays": [
+      {
+        "location": "System board or motherboard",
+        "use": "System memory",
+        "error_correction": "Single-bit ECC",
+        "maximum_capacity": 13194139533312,
+        "number_of_devices": 16,
+        "handle": 64
+      }
+    ],
+    "slots_total": 16,
+    "slots_populated": 16
+  },
+  "Ports": [
+    "JUSB1 / Rear USB 3.0"
+  ],
+  "Slots": [
+    "CPU1 SLOT1 PCI-E 4.0 X16"
+  ],
+  "OEMStrings": [
+    "Intel Ice Lake/Whitley",
+    "Supermicro motherboard-X12 Series"
+  ],
+  "BIOSLanguage": "en|US|iso8859-1",
+  "Truncated": {},
+  "Availability": "ok"
+}

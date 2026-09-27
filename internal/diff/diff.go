@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"reflect"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/store"
@@ -39,6 +40,10 @@ const (
 	CatBMC            = "bmc"
 	CatGuest          = "guest"
 	CatUpdate         = "update"
+
+	// CatHardwareSchema records a change of the agent's hardware decoding
+	// (feature 023): Before/After are the schema numbers.
+	CatHardwareSchema = "hardware_schema"
 )
 
 // nullSep joins the parts of a composite component key. A NUL byte cannot
@@ -57,19 +62,17 @@ func Diff(prev, next store.Inventory) []store.Change {
 		}
 	}
 
-	// Singleton components: one row per category, compared as a whole.
-	add(diffSingle(CatBIOS, prev.BIOS, next.BIOS))
-	add(diffSingle(CatSystem, prev.System, next.System))
-	add(diffSingle(CatBaseboard, prev.Baseboard, next.Baseboard))
-	add(diffSingle(CatChassis, prev.Chassis, next.Chassis))
-
-	// Keyed collections.
-	out = append(out, diffList(CatProcessor, prev.Processors, next.Processors,
-		func(p store.Processor) string { return p.SocketDesignation })...)
-	out = append(out, diffList(CatMemory, prev.Memory.Modules, next.Memory.Modules,
-		func(m store.MemoryModule) string { return m.DeviceLocator + nullSep + m.SerialNumber })...)
-	out = append(out, diffList(CatDisk, prev.Disks, next.Disks,
-		func(d store.Disk) string { return d.Serial })...)
+	// Hardware decoding (feature 023, research D2): the first report of an
+	// agent with the corrected SMBIOS decoding would otherwise "change" every
+	// wrongly decoded value; the transition is recorded once instead and the
+	// hardware categories are compared from the next report on.
+	if prev.HardwareSchema != next.HardwareSchema {
+		out = append(out, store.Change{Category: CatHardwareSchema, ChangeType: store.ChangeModified, ComponentKey: CatHardwareSchema,
+			Before: strconv.FormatUint(uint64(prev.HardwareSchema), 10), After: strconv.FormatUint(uint64(next.HardwareSchema), 10)})
+	}
+	if prev.HardwareSchema >= store.HardwareSchemaCurrent || next.HardwareSchema < store.HardwareSchemaCurrent {
+		out = append(out, diffHardware(prev, next)...)
+	}
 	out = append(out, diffList(CatNetwork, netViews(prev.Networks), netViews(next.Networks),
 		func(n netView) string { return n.Name + nullSep + n.MAC })...)
 	out = append(out, diffList(CatMonitor, prev.Monitors, next.Monitors,
@@ -97,6 +100,34 @@ func Diff(prev, next store.Inventory) []store.Change {
 	pu.CheckedAt, nu.CheckedAt = time.Time{}, time.Time{}
 	add(diffSingle(CatUpdate, pu, nu))
 
+	return out
+}
+
+// diffHardware compares the SMBIOS-derived components and the disks.
+func diffHardware(prev, next store.Inventory) []store.Change {
+	var out []store.Change
+	for _, c := range []*store.Change{
+		diffSingle(CatBIOS, prev.BIOS, next.BIOS),
+		diffSingle(CatSystem, prev.System, next.System),
+		diffSingle(CatBaseboard, prev.Baseboard, next.Baseboard),
+		diffSingle(CatChassis, prev.Chassis, next.Chassis),
+	} {
+		if c != nil {
+			out = append(out, *c)
+		}
+	}
+	out = append(out, diffList(CatProcessor, prev.Processors, next.Processors,
+		func(p store.Processor) string { return p.SocketDesignation })...)
+	// From hardware schema 2 on every slot is reported, so slots are keyed by
+	// their locators (a replaced module or a populated empty slot is a change
+	// of that slot); legacy reports keep the populated-module key.
+	memKey := func(m store.MemoryModule) string { return m.DeviceLocator + nullSep + m.SerialNumber }
+	if next.HardwareSchema >= store.HardwareSchemaCurrent {
+		memKey = func(m store.MemoryModule) string { return m.DeviceLocator + nullSep + m.BankLocator }
+	}
+	out = append(out, diffList(CatMemory, prev.Memory.Modules, next.Memory.Modules, memKey)...)
+	out = append(out, diffList(CatDisk, prev.Disks, next.Disks,
+		func(d store.Disk) string { return d.Serial })...)
 	return out
 }
 

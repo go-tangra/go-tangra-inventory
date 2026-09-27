@@ -1,0 +1,74 @@
+{
+  "BIOS": {
+    "vendor": "American Megatrends Inc.",
+    "version": "090008",
+    "release_date": "12/07/2018"
+  },
+  "System": {
+    "manufacturer": "Microsoft Corporation",
+    "product_name": "Virtual Machine",
+    "version": "7.0",
+    "serial_number": "0000-0001-0002-0003-0004-0005-00",
+    "uuid": "d12a4b98-5e0f-464b-a188-61770210a35f",
+    "wake_up_type": "Power Switch"
+  },
+  "Baseboard": {
+    "manufacturer": "Microsoft Corporation",
+    "product": "Virtual Machine",
+    "version": "7.0",
+    "serial_number": "0000-0002-0003-0004-0005-0006-00"
+  },
+  "Chassis": {
+    "manufacturer": "Microsoft Corporation",
+    "version": "7.0",
+    "serial_number": "0000-0003-0004-0005-0006-0007-00",
+    "asset_tag": "7777-7777-7777-7777-7777-7777-77",
+    "type": "Desktop",
+    "bootup_state": "Safe"
+  },
+  "Processors": [
+    {
+      "socket_designation": "None",
+      "manufacturer": "GenuineIntel",
+      "version": "Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz",
+      "max_speed_mhz": 3700,
+      "current_speed_mhz": 2000,
+      "part_number": "None",
+      "serial_number": "None",
+      "socket_populated": true,
+      "family": "Intel Xeon processor",
+      "type": "Central Processor",
+      "upgrade": "Other"
+    }
+  ],
+  "Cache": null,
+  "Memory": {
+    "total_physical_bytes": 2147483648,
+    "array": {},
+    "modules": [
+      {
+        "device_locator": "M0001",
+        "bank_locator": "BANK 0",
+        "capacity_bytes": 2147483648,
+        "form_factor": "DIMM",
+        "memory_type": "Unknown",
+        "manufacturer": "Microsoft Corporation",
+        "serial_number": "None",
+        "part_number": "None",
+        "populated": true,
+        "type_detail": [
+          "Other"
+        ],
+        "array_handle": 65534
+      }
+    ],
+    "slots_total": 1,
+    "slots_populated": 1
+  },
+  "Ports": null,
+  "Slots": null,
+  "OEMStrings": null,
+  "BIOSLanguage": "",
+  "Truncated": {},
+  "Availability": "partial"
+}

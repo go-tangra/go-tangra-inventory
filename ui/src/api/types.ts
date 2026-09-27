@@ -69,7 +69,8 @@ export interface ChassisInfo {
   serial_number?: string
   asset_tag?: string
   sku_number?: string
-  type?: string
+  type?: string // DSP0134 name, e.g. "Rack Mount Chassis"
+  bootup_state?: string
 }
 
 export interface Processor {
@@ -84,6 +85,9 @@ export interface Processor {
   part_number?: string
   serial_number?: string
   socket_populated?: boolean
+  family?: string // DSP0134 name, e.g. "Intel Xeon processor"
+  type?: string // e.g. "Central Processor"
+  upgrade?: string // socket, e.g. "Socket LGA4189"
 }
 
 export interface MemoryArray {
@@ -92,6 +96,7 @@ export interface MemoryArray {
   error_correction?: string
   maximum_capacity?: number
   number_of_devices?: number
+  handle?: number
 }
 
 export interface MemoryModule {
@@ -105,12 +110,22 @@ export interface MemoryModule {
   manufacturer?: string
   serial_number?: string
   part_number?: string
+  // Feature 023 (hardware_schema >= 2): every slot is listed; an empty slot
+  // has populated false/absent. Older agents listed populated modules only.
+  populated?: boolean
+  type_detail?: string[]
+  array_handle?: number
+  asset_tag?: string
+  rank_count?: number
 }
 
 export interface MemoryInfo {
   total_physical_bytes?: number
   array: MemoryArray
   modules?: MemoryModule[]
+  arrays?: MemoryArray[]
+  slots_total?: number
+  slots_populated?: number
 }
 
 export interface Monitor {
@@ -240,6 +255,11 @@ export interface CollectionLimits {
   guests?: number
   packages?: number
   bmc_ports?: number
+  disks?: number
+  memory_slots?: number
+  memory_arrays?: number
+  processors?: number
+  filesystems?: number
 }
 
 export interface Partition {
@@ -249,13 +269,34 @@ export interface Partition {
   free_bytes?: number
 }
 
+// Disk is a physical disk (hardware_schema >= 2); older agents reported
+// mounted partitions grouped by device in `partitions` only.
 export interface Disk {
   model?: string
   serial?: string
   size_bytes?: number
-  media_type?: string
-  interface?: string
+  media_type?: string // ssd | hdd | nvme_ssd | unknown
+  interface?: string // nvme | sata | sas | scsi | usb | virtio | hyperv | xen | mmc | other
   partitions?: Partition[]
+  name?: string
+  removable?: boolean
+  vendor?: string
+}
+
+// Filesystem is a mounted filesystem and the disks (Disk.name) it lives on.
+export interface Filesystem {
+  mount: string
+  fs?: string
+  device?: string
+  size_bytes?: number
+  free_bytes?: number
+  disks?: string[]
+}
+
+// HardwareAvailability: ok | partial | unavailable | unsupported | unknown.
+export interface HardwareAvailability {
+  smbios?: string
+  disks?: string
 }
 
 export interface Identity {
@@ -295,6 +336,9 @@ export interface Inventory {
   hypervisor_guests?: HypervisorGuest[]
   update_state?: UpdateState
   truncated?: CollectionLimits
+  filesystems?: Filesystem[]
+  hardware_schema?: number // < 2 (or absent): legacy decoding with known errors
+  hardware_availability?: HardwareAvailability
 }
 
 // Snapshot is an immutable inventory report bound to a host.
