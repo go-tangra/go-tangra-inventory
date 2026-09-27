@@ -265,8 +265,10 @@ func TestTenantStatsAggregation(t *testing.T) {
 	inv := store.Inventory{
 		Memory:     store.MemoryInfo{TotalPhysicalBytes: 16 << 30},
 		Processors: []store.Processor{{CoreCount: 8}},
-		Disks:      []store.Disk{{SizeBytes: 512 << 30}},
+		Disks:      []store.Disk{{Name: "sda", SizeBytes: 512 << 30}},
 		Programs:   []store.Program{{Name: "Chrome"}, {Name: "Chrome"}, {Name: "vim"}},
+		// Physical disks count towards the total from hardware schema 2 on.
+		HardwareSchema: store.HardwareSchemaCurrent,
 	}
 	// Older snapshot with modules-based memory (exercises the module fallback path).
 	if err := m.InsertSnapshot(ctx(), store.Snapshot{TenantID: tenant, HostID: h.ID, CollectedAt: time.Now().Add(-time.Hour),

@@ -484,6 +484,22 @@ type Disk struct {
 	Vendor     string      `json:"vendor,omitempty"`
 }
 
+// PhysicalDiskBytes is the capacity of the non-removable physical disks of
+// a hardware-schema-2 payload; legacy payloads (partition groups without
+// sizes) count 0.
+func PhysicalDiskBytes(inv Inventory) uint64 {
+	if inv.HardwareSchema < HardwareSchemaCurrent {
+		return 0
+	}
+	var total uint64
+	for _, d := range inv.Disks {
+		if !d.Removable {
+			total += d.SizeBytes
+		}
+	}
+	return total
+}
+
 // Filesystem is a mounted filesystem and the physical disks (Disk.Name) it
 // lives on — several for LVM or software RAID.
 type Filesystem struct {

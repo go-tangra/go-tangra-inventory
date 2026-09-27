@@ -142,6 +142,27 @@ const memoryColumns: Column<Record<string, unknown>>[] = [
   { key: 'speed_mt_s', label: 'Speed MT/s', hideOnStack: true, format: speedText }, { key: 'manufacturer', label: 'Manufacturer', hideOnStack: true },
   { key: 'part_number', label: 'Part number', hideOnStack: true },
 ]
+const mediaLabels: Record<string, string> = { nvme_ssd: 'NVMe SSD', ssd: 'SSD', hdd: 'HDD', unknown: 'unknown' }
+const ifaceLabels: Record<string, string> = { nvme: 'NVMe', sata: 'SATA', sas: 'SAS', scsi: 'SCSI', usb: 'USB', virtio: 'virtio', hyperv: 'Hyper-V', xen: 'Xen', mmc: 'MMC', other: 'other' }
+const diskColumns: Column<Record<string, unknown>>[] = [
+  { key: 'name', label: 'Disk' }, { key: 'model', label: 'Model', format: (d) => [d.vendor, d.model].filter(Boolean).join(' ') },
+  { key: 'serial', label: 'Serial', hideOnStack: true }, { key: 'size_bytes', label: 'Size', align: 'end', format: (d) => humanBytes(d.size_bytes as number) },
+  { key: 'media_type', label: 'Media', format: (d) => mediaLabels[String(d.media_type ?? '')] ?? String(d.media_type ?? '') },
+  { key: 'interface', label: 'Interface', hideOnStack: true, format: (d) => ifaceLabels[String(d.interface ?? '')] ?? String(d.interface ?? '') },
+]
+function usage(f: Record<string, unknown>): string {
+  const size = f.size_bytes as number | undefined
+  const free = f.free_bytes as number | undefined
+  if (!size) return ''
+  return String(Math.round((100 * (size - (free ?? 0))) / size)) + '%'
+}
+const filesystemColumns: Column<Record<string, unknown>>[] = [
+  { key: 'mount', label: 'Mount' }, { key: 'fs', label: 'FS', width: 'sm' }, { key: 'device', label: 'Device', hideOnStack: true },
+  { key: 'disks', label: 'Disks', format: (f) => ((f.disks as string[] | undefined) ?? []).join(', ') },
+  { key: 'size_bytes', label: 'Size', align: 'end', format: (f) => humanBytes(f.size_bytes as number) },
+  { key: 'free_bytes', label: 'Free', align: 'end', hideOnStack: true, format: (f) => humanBytes(f.free_bytes as number) },
+  { key: 'used', label: 'Used', align: 'end', format: usage },
+]
 const memoryArrays = computed(() => {
   const m = inv.value?.memory
   if (!m) return []
@@ -194,7 +215,8 @@ const guestColumns: Column<Record<string, unknown>>[] = [
 const guestRows = computed(() => rows((inv.value?.hypervisor_guests ?? []).map((g) => ({ ...g, guest_id: g.id }))))
 const truncatedText = computed(() => {
   const t = inv.value?.truncated ?? {}
-  const parts: [number | undefined, string][] = [[t.interfaces, 'interfaces'], [t.addresses, 'addresses'], [t.guests, 'guests'], [t.packages, 'pending updates'], [t.bmc_ports, 'BMC ports']]
+  const parts: [number | undefined, string][] = [[t.interfaces, 'interfaces'], [t.addresses, 'addresses'], [t.guests, 'guests'], [t.packages, 'pending updates'], [t.bmc_ports, 'BMC ports'],
+    [t.disks, 'disks'], [t.memory_slots, 'memory slots'], [t.memory_arrays, 'memory arrays'], [t.processors, 'processors'], [t.filesystems, 'filesystems']]
   return parts.filter(([n]) => (n ?? 0) > 0).map(([n, what]) => String(n) + ' ' + what).join(', ')
 })
 const snapshotColumns: Column<Snapshot>[] = [
@@ -248,6 +270,7 @@ const changeColors = { added: 'success', removed: 'error', modified: 'warning' }
     <UiAlert v-if="tab !== 'history' && !inv" kind="info">No snapshot collected yet.</UiAlert>
 
     <div v-if="tab === 'hardware' && inv" class="flex flex-col gap-4">
+      <UiAlert v-if="truncatedText" kind="warning" data-test="hardware-truncated-notice">The agent dropped entries above its limits: {{ truncatedText }}.</UiAlert>
       <UiAlert v-if="legacyHardware" kind="warning" data-test="legacy-hardware">Collected by an agent with known hardware decoding errors (memory type, form factor, array and ECC names may be wrong) — upgrade the agent.</UiAlert>
       <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <UiCard title="BIOS"><UiKeyValueTable :items="kv([['Vendor', inv.bios.vendor], ['Version', inv.bios.version], ['Release date', inv.bios.release_date]])" /></UiCard>
@@ -266,7 +289,17 @@ const changeColors = { added: 'success', removed: 'error', modified: 'warning' }
           </template>
         </UiDataTable>
       </UiCard>
-      <UiCard title="Disks">
+      <template v-if="!legacyHardware">
+        <UiCard title="Disks" :subtitle="inv.hardware_availability?.disks && inv.hardware_availability.disks !== 'ok' ? 'collection ' + inv.hardware_availability.disks : ''" :padded="false" data-test="disks-card">
+          <UiDataTable :items="rows(inv.disks)" :columns="diskColumns" caption="Physical disks" empty-title="No physical disks reported">
+            <template #cell-name="{ row }"><span class="flex flex-wrap items-center gap-1">{{ row.name }}<UiBadge v-if="row.removable" size="xs" soft color="warning" data-test="disk-removable">removable</UiBadge></span></template>
+          </UiDataTable>
+        </UiCard>
+        <UiCard title="Filesystems" :padded="false" data-test="filesystems-card">
+          <UiDataTable :items="rows(inv.filesystems)" :columns="filesystemColumns" caption="Filesystems" empty-title="Not collected" />
+        </UiCard>
+      </template>
+      <UiCard v-else title="Disks">
         <UiEmptyState v-if="!(inv.disks ?? []).length" title="Not collected" />
         <div v-for="(d, i) in inv.disks ?? []" :key="i" class="mb-3">
           <div class="mb-1 flex flex-wrap items-center gap-1">

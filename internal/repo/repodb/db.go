@@ -946,9 +946,7 @@ func (d *DB) TenantStats(ctx context.Context, tenantID string, staleBefore time.
 			for _, proc := range inv.Processors {
 				out.TotalCPUCores += int64(proc.CoreCount)
 			}
-			for _, dk := range inv.Disks {
-				out.TotalDiskBytes += dk.SizeBytes
-			}
+			out.TotalDiskBytes += store.PhysicalDiskBytes(inv)
 			for _, prog := range inv.Programs {
 				if prog.Name != "" {
 					programs[prog.Name]++

@@ -297,3 +297,31 @@ func mustFail(t *testing.T, db *sql.DB, name, q string, args ...any) {
 		t.Fatalf("%s refused for another reason: %v", name, err)
 	}
 }
+
+// TestStatsPhysicalDiskTotal mirrors the memstore rule in SQL-backed stats.
+func TestStatsPhysicalDiskTotal(t *testing.T) {
+	db := openRepo(t)
+	ctx := context.Background()
+	h1, err := db.ResolveHost(ctx, tenantA, store.Host{Hostname: "d1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h2, err := db.ResolveHost(ctx, tenantA, store.Host{Hostname: "d2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	for _, s := range []store.Snapshot{
+		{ID: store.NewID(), TenantID: tenantA, HostID: h1.ID, CollectedAt: now, Payload: store.Inventory{HardwareSchema: 2,
+			Disks: []store.Disk{{Name: "nvme0n1", SizeBytes: 1000}, {Name: "sdc", SizeBytes: 64, Removable: true}}}},
+		{ID: store.NewID(), TenantID: tenantA, HostID: h2.ID, CollectedAt: now, Payload: store.Inventory{Disks: []store.Disk{{SizeBytes: 999}}}},
+	} {
+		if err := db.InsertSnapshot(ctx, s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	st, err := db.TenantStats(ctx, tenantA, now.Add(-time.Hour))
+	if err != nil || st.TotalDiskBytes != 1000 {
+		t.Fatalf("total disk bytes = %d %v", st.TotalDiskBytes, err)
+	}
+}

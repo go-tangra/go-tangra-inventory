@@ -463,3 +463,15 @@ func selfSignedPEM(t *testing.T) []byte {
 	}
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 }
+
+// TestPackagedAgentConfigLoads keeps packaging/agent.yaml valid for the
+// strict agent config loader (unknown fields are rejected).
+func TestPackagedAgentConfigLoads(t *testing.T) {
+	cfg, err := LoadAgent("../../packaging/agent.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.CollectDisks || !cfg.CollectBMC {
+		t.Fatalf("packaged defaults = %+v", cfg)
+	}
+}

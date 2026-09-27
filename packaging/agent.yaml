@@ -16,3 +16,4 @@ collect_bmc: true                  # read-only BMC LAN parameters (needs ipmi_de
 collect_updates: true              # package update state
 refresh_package_lists: false       # never refresh package lists unless enabled
 update_timeout_seconds: 120        # 30-600
+collect_disks: true                # physical disks: model, serial, size, SSD/HDD/NVMe, interface (sysfs)

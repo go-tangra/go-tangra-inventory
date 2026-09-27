@@ -126,8 +126,14 @@ func diffHardware(prev, next store.Inventory) []store.Change {
 		memKey = func(m store.MemoryModule) string { return m.DeviceLocator + nullSep + m.BankLocator }
 	}
 	out = append(out, diffList(CatMemory, prev.Memory.Modules, next.Memory.Modules, memKey)...)
-	out = append(out, diffList(CatDisk, prev.Disks, next.Disks,
-		func(d store.Disk) string { return d.Serial })...)
+	// Physical disks (schema 2) are keyed by kernel name and serial (disks
+	// without a readable serial by name alone); legacy partition groups by
+	// serial as before.
+	diskKey := func(d store.Disk) string { return d.Serial }
+	if next.HardwareSchema >= store.HardwareSchemaCurrent {
+		diskKey = func(d store.Disk) string { return d.Name + nullSep + d.Serial }
+	}
+	out = append(out, diffList(CatDisk, prev.Disks, next.Disks, diskKey)...)
 	return out
 }
 

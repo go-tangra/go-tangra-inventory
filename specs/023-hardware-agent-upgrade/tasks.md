@@ -122,19 +122,19 @@ host access) require explicit user confirmation before they are executed.
 
 ### Tests for User Story 2 (MANDATORY) ⚠️
 
-- [ ] T042 [P] [US2] sysfs parser tests `internal/agentfacts/disks_test.go` over `testdata/sysblock/*`: NVMe (`nvme_ssd`, nvme), SATA SSD (`ssd`, sata), SATA HDD (`hdd`, sata), SAS, virtio (`unknown`, virtio), Hyper-V, USB (removable), mmc; excluded `loop*`, `ram*`, `zram*`, `dm-*`, `md*`, `nbd*`, `sr*`, `fd*`, size-0 devices; serial fallbacks `device/serial` → `vpd_pg80` → udev `ID_SERIAL_SHORT`; vendor prefix; attribute reads capped at 4 KiB; 257 disks → 256 + truncated
-- [ ] T043 [P] [US2] Filesystem resolution tests `internal/agentfacts/disks_resolve_test.go`: partition → parent disk; LVM `dm-0` → `slaves/sda3` → `sda`; md RAID1 → two disks; LVM on md; depth > 8 and slave cycles stop without panic; unknown device → no disks; 65 disks on one filesystem → 64 + truncated
-- [ ] T044 [P] [US2] Windows parser tests `internal/agentfacts/disks_windows_test.go` (pure, all platforms): `Get-PhysicalDisk` JSON (single object and array), `MediaType`/`BusType` codes and strings → closed sets, `Win32_DiskDrive` fallback JSON, drive-letter → disk mapping; `FuzzWindowsDisks` and `FuzzSysBlock` in `internal/agentfacts/disks_fuzz_test.go`
-- [ ] T045 [P] [US2] Collector tests `internal/collector/disks_linux_test.go` with an `fs.FS` fake root: whole collection ≤ 5 s budget honoured (slow FS fake), `collect_disks: false` → no disks and availability `unsupported`, read errors → availability `partial`, filesystems still reported
-- [ ] T046 [P] [US2] Diff and statistics tests: disks keyed by `name|serial` in `internal/diff/diff_test.go`; `total_disk_bytes` sums non-removable physical disks of schema-2 snapshots (legacy snapshots contribute 0 as today) in `internal/repo/repodb/hardware_upgrades_integration_test.go` and `internal/stats/stats_test.go`
-- [ ] T047 [P] [US2] UI tests `ui/tests/unit/hosts.spec.ts`: disks table (name, model, serial, size, media, interface, removable badge) and filesystems table with disk column and usage
+- [x] T042 [P] [US2] sysfs parser tests `internal/agentfacts/disks_test.go` over `testdata/sysblock/*`: NVMe (`nvme_ssd`, nvme), SATA SSD (`ssd`, sata), SATA HDD (`hdd`, sata), SAS, virtio (`unknown`, virtio), Hyper-V, USB (removable), mmc; excluded `loop*`, `ram*`, `zram*`, `dm-*`, `md*`, `nbd*`, `sr*`, `fd*`, size-0 devices; serial fallbacks `device/serial` → `vpd_pg80` → udev `ID_SERIAL_SHORT`; vendor prefix; attribute reads capped at 4 KiB; 257 disks → 256 + truncated
+- [x] T043 [P] [US2] Filesystem resolution tests `internal/agentfacts/disks_resolve_test.go`: partition → parent disk; LVM `dm-0` → `slaves/sda3` → `sda`; md RAID1 → two disks; LVM on md; depth > 8 and slave cycles stop without panic; unknown device → no disks; 65 disks on one filesystem → 64 + truncated
+- [x] T044 [P] [US2] Windows parser tests `internal/agentfacts/disks_windows_test.go` (pure, all platforms): `Get-PhysicalDisk` JSON (single object and array), `MediaType`/`BusType` codes and strings → closed sets, `Win32_DiskDrive` fallback JSON, drive-letter → disk mapping; `FuzzWindowsDisks` and `FuzzSysBlock` in `internal/agentfacts/disks_fuzz_test.go`
+- [x] T045 [P] [US2] Collector tests `internal/collector/disks_linux_test.go` with an `fs.FS` fake root: whole collection ≤ 5 s budget honoured (slow FS fake), `collect_disks: false` → no disks and availability `unsupported`, read errors → availability `partial`, filesystems still reported
+- [x] T046 [P] [US2] Diff and statistics tests: disks keyed by `name|serial` in `internal/diff/diff_test.go`; `total_disk_bytes` sums non-removable physical disks of schema-2 snapshots (legacy snapshots contribute 0 as today) in `internal/repo/repodb/hardware_upgrades_integration_test.go` and `internal/stats/stats_test.go`
+- [x] T047 [P] [US2] UI tests `ui/tests/unit/hosts.spec.ts`: disks table (name, model, serial, size, media, interface, removable badge) and filesystems table with disk column and usage
 
 ### Implementation for User Story 2
 
-- [ ] T048 [P] [US2] `internal/agentfacts/disks.go` (sysfs parser, resolution, Windows JSON parser; research D3)
-- [ ] T049 [US2] Collectors `internal/collector/disks_linux.go`, `internal/collector/disks_windows.go` (PowerShell, 30 s timeout, no shell interpolation), `internal/collector/disks_other.go`; replace `collectDisks` in `internal/collector/osinfo.go`; `AgentConfig.CollectDisks` in `internal/config/config.go`; `packaging/agent.yaml` comment
-- [ ] T050 [P] [US2] Disk key in `internal/diff/diff.go`; physical-disk total in the statistics query in `internal/repo/repodb/db.go` and `internal/memstore/memstore.go`
-- [ ] T051 [P] [US2] Disks and filesystems sections in `ui/src/views/hosts/detail.vue`
+- [x] T048 [P] [US2] `internal/agentfacts/disks.go` (sysfs parser, resolution, Windows JSON parser; research D3)
+- [x] T049 [US2] Collectors `internal/collector/disks_linux.go`, `internal/collector/disks_windows.go` (PowerShell, 30 s timeout, no shell interpolation), `internal/collector/disks_other.go`; replace `collectDisks` in `internal/collector/osinfo.go`; `AgentConfig.CollectDisks` in `internal/config/config.go`; `packaging/agent.yaml` comment
+- [x] T050 [P] [US2] Disk key in `internal/diff/diff.go`; physical-disk total in the statistics query in `internal/repo/repodb/db.go` and `internal/memstore/memstore.go`
+- [x] T051 [P] [US2] Disks and filesystems sections in `ui/src/views/hosts/detail.vue`
 
 **Checkpoint**: inventory shows complete, correct hardware for new agents (FR-009); the host report carries the full hardware profile.
 

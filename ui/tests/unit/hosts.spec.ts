@@ -161,3 +161,46 @@ describe('host detail: hardware (feature 023)', () => {
     w.unmount()
   })
 })
+
+describe('host detail: disks and filesystems (feature 023)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.stubGlobal('EventSource', FakeSource)
+  })
+
+  it('disks table with media, interface and removable badge; filesystems with disks and usage', async () => {
+    const w = await openTab(0, {
+      hardware_schema: 2,
+      disks: [
+        { name: 'nvme0n1', model: 'SAMSUNG MZQL23T8HCLS-00A07', serial: 'S64HNE0T000001', size_bytes: 3840755982336, media_type: 'nvme_ssd', interface: 'nvme' },
+        { name: 'sdb', model: 'ST4000NM000A-2HZ', serial: 'ZC100003', size_bytes: 4000787030016, media_type: 'hdd', interface: 'sata' },
+        { name: 'sdc', model: 'Ultra Fit', vendor: 'SanDisk', size_bytes: 30752000000, media_type: 'unknown', interface: 'usb', removable: true },
+      ],
+      filesystems: [
+        { mount: '/', fs: 'ext4', device: '/dev/mapper/vg0-root', size_bytes: 1000, free_bytes: 250, disks: ['nvme0n1'] },
+        { mount: '/srv', fs: 'xfs', device: '/dev/md0', size_bytes: 2000, free_bytes: 2000, disks: ['sda', 'sdb'] },
+      ],
+    })
+    const disks = w.find('[data-test=disks-card]')
+    expect(disks.text()).toContain('nvme0n1')
+    expect(disks.text()).toContain('SAMSUNG MZQL23T8HCLS-00A07')
+    expect(disks.text()).toContain('S64HNE0T000001')
+    expect(disks.text()).toContain('3.5 TB')
+    expect(disks.text()).toContain('NVMe SSD')
+    expect(disks.text()).toContain('HDD')
+    expect(disks.text()).toContain('SATA')
+    expect(w.findAll('[data-test=disk-removable]').length).toBe(1)
+    const fs = w.find('[data-test=filesystems-card]')
+    expect(fs.text()).toContain('/dev/mapper/vg0-root')
+    expect(fs.text()).toContain('sda, sdb')
+    expect(fs.text()).toContain('75%')
+    w.unmount()
+  })
+
+  it('legacy agents keep their partition groups', async () => {
+    const w = await openTab(0, { disks: [{ partitions: [{ mount: '/', fs: 'ext4', size_bytes: 1024, free_bytes: 512 }] }] })
+    expect(w.find('[data-test=disks-card]').exists()).toBe(false)
+    expect(w.text()).toContain('Partitions')
+    w.unmount()
+  })
+})

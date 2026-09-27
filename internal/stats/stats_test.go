@@ -114,3 +114,33 @@ func TestSystem_PerTenantBreakdown(t *testing.T) {
 		t.Errorf("t2 HostsTotal = %d, want 2", all[t2].HostsTotal)
 	}
 }
+
+// TestTenant_DiskTotalPhysicalOnly: total_disk_bytes sums the non-removable
+// physical disks of hardware-schema-2 snapshots; legacy snapshots (partition
+// groups without sizes) contribute nothing.
+func TestTenant_DiskTotalPhysicalOnly(t *testing.T) {
+	m := memstore.New()
+	tenant := store.NewID()
+	now := time.Unix(1_700_000_000, 0).UTC()
+	a := seedHost(t, m, tenant, "a", "uuid-a", now)
+	b := seedHost(t, m, tenant, "b", "uuid-b", now)
+	for _, s := range []store.Snapshot{
+		{ID: store.NewID(), TenantID: tenant, HostID: a.ID, CollectedAt: now, Payload: store.Inventory{HardwareSchema: 2,
+			Disks: []store.Disk{{Name: "nvme0n1", SizeBytes: 1000}, {Name: "sdc", SizeBytes: 64, Removable: true}}}},
+		{ID: store.NewID(), TenantID: tenant, HostID: b.ID, CollectedAt: now, Payload: store.Inventory{
+			Disks: []store.Disk{{SizeBytes: 999, Partitions: []store.Partition{{Mount: "/"}}}}}},
+	} {
+		if err := m.InsertSnapshot(context.Background(), s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	svc := stats.New(m)
+	svc.SetClock(func() time.Time { return now })
+	st, err := svc.Tenant(context.Background(), authz.Subjects{TenantID: tenant, Roles: []string{"admin"}, ActorKind: authz.ActorUser})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.TotalDiskBytes != 1000 {
+		t.Fatalf("total disk bytes = %d, want 1000", st.TotalDiskBytes)
+	}
+}

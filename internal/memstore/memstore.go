@@ -763,9 +763,7 @@ func (m *Mem) TenantStats(_ context.Context, tenantID string, staleBefore time.T
 		for _, proc := range p.Processors {
 			st.TotalCPUCores += int64(proc.CoreCount)
 		}
-		for _, d := range p.Disks {
-			st.TotalDiskBytes += d.SizeBytes
-		}
+		st.TotalDiskBytes += store.PhysicalDiskBytes(p)
 		for _, prog := range p.Programs {
 			if prog.Name != "" {
 				programs[prog.Name]++

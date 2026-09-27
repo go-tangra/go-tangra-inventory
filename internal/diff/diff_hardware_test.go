@@ -111,3 +111,29 @@ func TestDiff_ProcessorFamilyChange(t *testing.T) {
 		t.Fatalf("identical schema-2 inventories: %+v", got)
 	}
 }
+
+func TestDiff_DisksKeyedByNameAndSerial(t *testing.T) {
+	prev, next := currentHW(), currentHW()
+	prev.Disks = append(prev.Disks, store.Disk{Name: "sdc", Model: "USB"}, store.Disk{Name: "sdd", Model: "USB2"})
+	next.Disks = append(next.Disks, store.Disk{Name: "sdc", Model: "USB"})
+	next.Disks[0].SizeBytes++ // same disk, changed field -> modified
+	changes := diff.Diff(prev, next)
+	if c, ok := find(changes, diff.CatDisk, "nvme0n1\x00S64"); !ok || c.ChangeType != store.ChangeModified {
+		t.Fatalf("nvme change = %+v %v", c, ok)
+	}
+	if c, ok := find(changes, diff.CatDisk, "sdd\x00"); !ok || c.ChangeType != store.ChangeRemoved {
+		t.Fatalf("serial-less disks keyed by name: %+v %v", c, ok)
+	}
+	if _, ok := find(changes, diff.CatDisk, "sdc\x00"); ok {
+		t.Fatal("unchanged serial-less disk reported")
+	}
+	// A disk replaced under the same name (new serial) is removed + added.
+	next = currentHW()
+	next.Disks[0].Serial = "S65"
+	changes = diff.Diff(currentHW(), next)
+	_, removed := find(changes, diff.CatDisk, "nvme0n1\x00S64")
+	_, added := find(changes, diff.CatDisk, "nvme0n1\x00S65")
+	if !removed || !added {
+		t.Fatalf("replaced disk = %+v", changes)
+	}
+}

@@ -406,11 +406,15 @@ type AgentConfig struct {
 	CollectUpdates       bool `yaml:"collect_updates"`
 	RefreshPackageLists  bool `yaml:"refresh_package_lists"`
 	UpdateTimeoutSeconds int  `yaml:"update_timeout_seconds"`
+
+	// CollectDisks reports the physical disks (feature 023: model, serial,
+	// size, media, interface; Linux sysfs, Windows Get-PhysicalDisk).
+	CollectDisks bool `yaml:"collect_disks"`
 }
 
 // DefaultAgent returns the endpoint agent's secure defaults.
 func DefaultAgent() AgentConfig {
-	return AgentConfig{IntervalSeconds: 3600, CollectBMC: true, CollectUpdates: true, UpdateTimeoutSeconds: 120}
+	return AgentConfig{IntervalSeconds: 3600, CollectBMC: true, CollectUpdates: true, UpdateTimeoutSeconds: 120, CollectDisks: true}
 }
 
 // LoadAgent reads the endpoint agent's YAML over DefaultAgent(); unknown fields
