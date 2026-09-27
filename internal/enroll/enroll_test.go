@@ -18,6 +18,9 @@ import (
 // paths implemented (the rest satisfy the interface as no-ops). ---
 
 type fakeStore struct {
+	// Release and upgrade storage is unused by enrollment (nil: calls panic).
+	repo.ReleaseStore
+	repo.UpgradeStore
 	mu             sync.Mutex
 	tokens         map[string]store.EnrollmentToken
 	agents         map[string]store.Agent

@@ -1,8 +1,9 @@
 // Package hostreport builds the host report projection IPAM consumes: a pure
 // function of a host row and its latest snapshot carrying only identity,
 // interfaces, primary addresses, virtualization, BMC LAN settings, hypervisor
-// guests, update state, pending updates and truncation counters — never the
-// full software list, users, services or any credential. Its digest is the
+// guests, update state, pending updates, truncation counters and (feature
+// 023, agents with the corrected hardware decoding only) the hardware
+// profile — never the full software list, users, services or any credential. Its digest is the
 // change signal behind HostReportService watermarks.
 //
 // Security role: this is the only data inventory hands to IPAM through the

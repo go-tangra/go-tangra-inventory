@@ -33,6 +33,7 @@ func Project(host store.Host, snap store.Snapshot) *invv1.HostReport {
 		HypervisorGuests:  invpb.GuestsToPB(inv.HypervisorGuests),
 		UpdateState:       invpb.UpdateStateToPB(inv.UpdateState),
 		Truncated:         invpb.LimitsToPB(inv.Truncated),
+		Hardware:          projectHardware(inv),
 	}
 	for _, p := range inv.Programs {
 		if p.AvailableVersion == "" {
@@ -62,8 +63,9 @@ func DigestView(host store.Host) *invv1.HostReport {
 
 // Digest is the hex sha256 of the deterministic encoding of r without the
 // fields that change on every report although nothing IPAM uses changed:
-// host.last_seen, snapshot_id, collected_at, update_state.checked_at (and the
-// digest/changed-at fields themselves).
+// host.last_seen, snapshot_id, collected_at, update_state.checked_at,
+// hardware filesystem free bytes (and the digest/changed-at fields
+// themselves).
 func Digest(r *invv1.HostReport) string {
 	c := proto.CloneOf(r)
 	c.SnapshotId, c.CollectedAt, c.ReportChangedAt, c.ReportDigest = "", 0, 0, ""
@@ -73,9 +75,55 @@ func Digest(r *invv1.HostReport) string {
 	if c.UpdateState != nil {
 		c.UpdateState.CheckedAt = 0
 	}
+	for _, f := range c.GetHardware().GetFilesystems() {
+		f.FreeBytes = 0
+	}
 	b, _ := proto.MarshalOptions{Deterministic: true}.Marshal(c) // a well-formed message always marshals
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
+}
+
+// projectHardware is the hardware section (feature 023): present only for
+// payloads of agents with the DSP0134-correct decoding (research D2), so
+// wrongly decoded values of older agents never reach IPAM. Lists are bounded
+// again and disks never carry the legacy partition groups.
+func projectHardware(inv store.Inventory) *invv1.HardwareProfile {
+	if inv.HardwareSchema < store.HardwareSchemaCurrent {
+		return nil
+	}
+	mem := inv.Memory
+	mem.Modules = first(mem.Modules, store.MaxMemorySlots)
+	mem.Arrays = first(mem.Arrays, store.MaxMemoryArrays)
+	disks := make([]store.Disk, 0, min(len(inv.Disks), store.MaxDisks))
+	for _, d := range first(inv.Disks, store.MaxDisks) {
+		d.Partitions = nil
+		disks = append(disks, d)
+	}
+	fss := make([]store.Filesystem, 0, min(len(inv.Filesystems), store.MaxFilesystems))
+	for _, f := range first(inv.Filesystems, store.MaxFilesystems) {
+		f.Disks = first(f.Disks, store.MaxFSDisks)
+		fss = append(fss, f)
+	}
+	return &invv1.HardwareProfile{
+		Bios:         invpb.BIOSToPB(inv.BIOS),
+		System:       invpb.SystemToPB(inv.System),
+		Baseboard:    invpb.BaseboardToPB(inv.Baseboard),
+		Chassis:      invpb.ChassisToPB(inv.Chassis),
+		Processors:   invpb.ProcessorsToPB(first(inv.Processors, store.MaxProcessors)),
+		Memory:       invpb.MemoryToPB(mem),
+		Disks:        invpb.DisksToPB(disks),
+		Filesystems:  invpb.FilesystemsToPB(fss),
+		Availability: invpb.AvailabilityToPB(inv.Availability),
+		Schema:       inv.HardwareSchema,
+	}
+}
+
+// first returns at most the first n entries of in.
+func first[T any](in []T, n int) []T {
+	if len(in) > n {
+		return in[:n]
+	}
+	return in
 }
 
 // OSFamily is the reported OS family, falling back (older agents) to

@@ -120,6 +120,13 @@ type Inventory struct {
 	HypervisorGuests []HypervisorGuest `json:"hypervisor_guests,omitempty"`
 	UpdateState      UpdateState       `json:"update_state"`
 	Truncated        CollectionLimits  `json:"truncated"`
+
+	// Hardware details (feature 023). Filesystems replaces Disk.Partitions
+	// for new agents; HardwareSchema 0/1 marks the legacy (shifted) SMBIOS
+	// decoding of older agents, HardwareSchemaCurrent the DSP0134-correct one.
+	Filesystems    []Filesystem         `json:"filesystems,omitempty"`
+	HardwareSchema uint32               `json:"hardware_schema,omitempty"`
+	Availability   HardwareAvailability `json:"hardware_availability"`
 }
 
 // --- hardware ---
@@ -157,7 +164,8 @@ type ChassisInfo struct {
 	SerialNumber string `json:"serial_number,omitempty"`
 	AssetTag     string `json:"asset_tag,omitempty"`
 	SKUNumber    string `json:"sku_number,omitempty"`
-	Type         string `json:"type,omitempty"`
+	Type         string `json:"type,omitempty"`         // DSP0134 7.4.1 name
+	BootupState  string `json:"bootup_state,omitempty"` // DSP0134 7.4.2 name
 }
 
 type Processor struct {
@@ -172,16 +180,27 @@ type Processor struct {
 	PartNumber        string `json:"part_number,omitempty"`
 	SerialNumber      string `json:"serial_number,omitempty"`
 	SocketPopulated   bool   `json:"socket_populated,omitempty"`
+	Family            string `json:"family,omitempty"`  // DSP0134 7.5.2, e.g. "Xeon"
+	Type              string `json:"type,omitempty"`    // DSP0134 7.5.1, e.g. "Central Processor"
+	Upgrade           string `json:"upgrade,omitempty"` // DSP0134 7.5.5 socket, e.g. "Socket LGA4189"
 }
 
 type CacheInfo struct {
 	SocketDesignation string `json:"socket_designation,omitempty"`
 }
 
+// MemoryInfo is the memory subsystem. From HardwareSchemaCurrent on Modules
+// lists every slot (empty ones with Populated false), Array is the primary
+// array (the first of use "System memory") and TotalPhysicalBytes sums the
+// populated modules of "System memory" arrays; older agents reported
+// populated modules only.
 type MemoryInfo struct {
 	TotalPhysicalBytes uint64         `json:"total_physical_bytes,omitempty"`
 	Array              MemoryArray    `json:"array"`
 	Modules            []MemoryModule `json:"modules,omitempty"`
+	Arrays             []MemoryArray  `json:"arrays,omitempty"`
+	SlotsTotal         uint32         `json:"slots_total,omitempty"`
+	SlotsPopulated     uint32         `json:"slots_populated,omitempty"`
 }
 
 type MemoryArray struct {
@@ -190,6 +209,7 @@ type MemoryArray struct {
 	ErrorCorrection string `json:"error_correction,omitempty"`
 	MaximumCapacity uint64 `json:"maximum_capacity,omitempty"`
 	NumberOfDevices uint32 `json:"number_of_devices,omitempty"`
+	Handle          uint32 `json:"handle,omitempty"` // SMBIOS handle; MemoryModule.ArrayHandle refers to it
 }
 
 type MemoryModule struct {
@@ -203,6 +223,14 @@ type MemoryModule struct {
 	Manufacturer       string `json:"manufacturer,omitempty"`
 	SerialNumber       string `json:"serial_number,omitempty"`
 	PartNumber         string `json:"part_number,omitempty"`
+	// Feature 023. Populated is meaningful only for HardwareSchemaCurrent
+	// payloads (older agents reported populated modules only and leave it
+	// false).
+	Populated   bool     `json:"populated,omitempty"`
+	TypeDetail  []string `json:"type_detail,omitempty"` // e.g. ["Synchronous", "Registered (Buffered)"]
+	ArrayHandle uint32   `json:"array_handle,omitempty"`
+	AssetTag    string   `json:"asset_tag,omitempty"`
+	RankCount   uint32   `json:"rank_count,omitempty"` // 0 = unknown
 }
 
 type Monitor struct {
@@ -379,6 +407,12 @@ type CollectionLimits struct {
 	Guests     uint32 `json:"guests,omitempty"`
 	Packages   uint32 `json:"packages,omitempty"`
 	BmcPorts   uint32 `json:"bmc_ports,omitempty"`
+	// Feature 023. Disks also counts dropped filesystem->disk references.
+	Disks        uint32 `json:"disks,omitempty"`
+	MemorySlots  uint32 `json:"memory_slots,omitempty"`
+	MemoryArrays uint32 `json:"memory_arrays,omitempty"`
+	Processors   uint32 `json:"processors,omitempty"`
+	Filesystems  uint32 `json:"filesystems,omitempty"`
 }
 
 // Collection bounds shared by the agent, the ingest edge and the projection.
@@ -389,15 +423,98 @@ const (
 	MaxGuestMACs      = 32
 	MaxPendingUpdates = 5000
 	MaxBmcPorts       = 8
+
+	// Hardware bounds (feature 023).
+	MaxDisks        = 256
+	MaxMemorySlots  = 1024
+	MaxMemoryArrays = 64
+	MaxProcessors   = 256
+	MaxFilesystems  = 1024
+	MaxFSDisks      = 64
+	MaxHWString     = 256 // bytes, after control-character removal
+
+	// HardwareSchemaCurrent marks DSP0134-correct SMBIOS decoding and
+	// physical disks (feature 023); 0/1 is the legacy decoding.
+	HardwareSchemaCurrent = 2
 )
 
+// Hardware availability values (HardwareAvailability.SMBIOS/Disks).
+// AvailUnknown is what ingest stores for a value outside the closed set.
+const (
+	AvailOK          = "ok"
+	AvailPartial     = "partial"
+	AvailUnavailable = "unavailable"
+	AvailUnsupported = "unsupported"
+	AvailUnknown     = "unknown"
+)
+
+// Disk media types (closed set).
+const (
+	MediaSSD     = "ssd"
+	MediaHDD     = "hdd"
+	MediaNVMeSSD = "nvme_ssd"
+	MediaUnknown = "unknown"
+)
+
+// Disk interfaces (closed set).
+const (
+	IfNVMe   = "nvme"
+	IfSATA   = "sata"
+	IfSAS    = "sas"
+	IfSCSI   = "scsi"
+	IfUSB    = "usb"
+	IfVirtio = "virtio"
+	IfHyperV = "hyperv"
+	IfXen    = "xen"
+	IfMMC    = "mmc"
+	IfOther  = "other"
+)
+
+// Disk is a physical disk (feature 023). Agents before 023 reported mounted
+// partitions grouped by device in Partitions and left the rest empty.
 type Disk struct {
 	Model      string      `json:"model,omitempty"`
 	Serial     string      `json:"serial,omitempty"`
 	SizeBytes  uint64      `json:"size_bytes,omitempty"`
-	MediaType  string      `json:"media_type,omitempty"`
-	Interface  string      `json:"interface,omitempty"`
-	Partitions []Partition `json:"partitions,omitempty"`
+	MediaType  string      `json:"media_type,omitempty"` // ssd | hdd | nvme_ssd | unknown
+	Interface  string      `json:"interface,omitempty"`  // nvme | sata | sas | scsi | usb | virtio | hyperv | xen | mmc | other
+	Partitions []Partition `json:"partitions,omitempty"` // legacy
+	Name       string      `json:"name,omitempty"`       // sda | nvme0n1 | PhysicalDrive0
+	Removable  bool        `json:"removable,omitempty"`
+	Vendor     string      `json:"vendor,omitempty"`
+}
+
+// PhysicalDiskBytes is the capacity of the non-removable physical disks of
+// a hardware-schema-2 payload; legacy payloads (partition groups without
+// sizes) count 0.
+func PhysicalDiskBytes(inv Inventory) uint64 {
+	if inv.HardwareSchema < HardwareSchemaCurrent {
+		return 0
+	}
+	var total uint64
+	for _, d := range inv.Disks {
+		if !d.Removable {
+			total += d.SizeBytes
+		}
+	}
+	return total
+}
+
+// Filesystem is a mounted filesystem and the physical disks (Disk.Name) it
+// lives on — several for LVM or software RAID.
+type Filesystem struct {
+	Mount     string   `json:"mount"`
+	FS        string   `json:"fs,omitempty"`
+	Device    string   `json:"device,omitempty"`
+	SizeBytes uint64   `json:"size_bytes,omitempty"`
+	FreeBytes uint64   `json:"free_bytes,omitempty"`
+	Disks     []string `json:"disks,omitempty"`
+}
+
+// HardwareAvailability says how complete the hardware collection was.
+type HardwareAvailability struct {
+	SMBIOS string `json:"smbios,omitempty"`
+	Disks  string `json:"disks,omitempty"`
 }
 
 type Partition struct {
@@ -435,6 +552,132 @@ type Agent struct {
 	AgentVersion     string    `json:"agent_version,omitempty"`
 	Revoked          bool      `json:"revoked"`
 	IdentityHint     string    `json:"identity_hint,omitempty"`
+	// Platform reported on StreamCommands (feature 023).
+	OS             string    `json:"os,omitempty"`           // linux | windows
+	Arch           string    `json:"arch,omitempty"`         // amd64 | arm64
+	InstallType    string    `json:"install_type,omitempty"` // deb | rpm | binary
+	Capabilities   []string  `json:"capabilities,omitempty"` // e.g. upgrade.v1
+	PlatformSeenAt time.Time `json:"platform_seen_at"`
+}
+
+// HasCapability reports whether the agent announced capability c.
+func (a Agent) HasCapability(c string) bool {
+	for _, x := range a.Capabilities {
+		if x == c {
+			return true
+		}
+	}
+	return false
+}
+
+// Agent capabilities.
+const CapUpgradeV1 = "upgrade.v1"
+
+// --- agent releases and upgrades (feature 023) ---
+
+// AgentRelease is a signed agent release stored in the database (global:
+// public binaries, not tenant data).
+type AgentRelease struct {
+	Version        string          `json:"version"`
+	Manifest       []byte          `json:"-"` // exact signed bytes
+	Signature      []byte          `json:"-"` // 64-byte Ed25519
+	KeyID          string          `json:"key_id"`
+	ManifestSHA256 string          `json:"manifest_sha256"`
+	Source         string          `json:"source"` // bundled | import
+	ImportedAt     time.Time       `json:"imported_at"`
+	Artifacts      []AgentArtifact `json:"artifacts,omitempty"`
+}
+
+// Release sources.
+const (
+	ReleaseBundled = "bundled"
+	ReleaseImport  = "import"
+)
+
+// AgentArtifact is one platform artifact of a release.
+type AgentArtifact struct {
+	Version     string `json:"version"`
+	OS          string `json:"os"`
+	Arch        string `json:"arch"`
+	InstallType string `json:"install_type"`
+	File        string `json:"file"`
+	Size        int64  `json:"size"`
+	SHA256      string `json:"sha256"`
+	Complete    bool   `json:"complete"`
+}
+
+// AgentUpgrade is a persisted upgrade request (tenant-scoped).
+type AgentUpgrade struct {
+	ID             string     `json:"id"`
+	TenantID       string     `json:"-"`
+	AgentID        string     `json:"agent_id"`
+	HostID         string     `json:"host_id,omitempty"`
+	FromVersion    string     `json:"from_version"`
+	TargetVersion  string     `json:"target_version"`
+	AllowDowngrade bool       `json:"allow_downgrade"`
+	State          string     `json:"state"`
+	Origin         string     `json:"origin"`
+	RequestedBy    string     `json:"requested_by"`
+	Reason         string     `json:"reason,omitempty"`
+	Attempts       int        `json:"attempts"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+	ExpiresAt      time.Time  `json:"expires_at"`
+	DeliveredAt    *time.Time `json:"delivered_at,omitempty"`
+	StartedAt      *time.Time `json:"started_at,omitempty"`
+	FinishedAt     *time.Time `json:"finished_at,omitempty"`
+}
+
+// Upgrade request states.
+const (
+	UpgradePending     = "pending"
+	UpgradeDelivered   = "delivered"
+	UpgradeDownloading = "downloading"
+	UpgradeInstalling  = "installing"
+	UpgradeSucceeded   = "succeeded"
+	UpgradeFailed      = "failed"
+	UpgradeRolledBack  = "rolled_back"
+	UpgradeExpired     = "expired"
+	UpgradeCancelled   = "cancelled"
+)
+
+// Active reports whether the request still occupies the agent (the partial
+// unique index agent_upgrades_one_active).
+func (u AgentUpgrade) Active() bool {
+	switch u.State {
+	case UpgradePending, UpgradeDelivered, UpgradeDownloading, UpgradeInstalling:
+		return true
+	}
+	return false
+}
+
+// Upgrade request origins.
+const (
+	OriginUser   = "user"
+	OriginPolicy = "policy"
+	OriginAgent  = "agent"
+)
+
+// AgentUpgradePolicy is a tenant's automatic upgrade policy (one row per
+// tenant; defaults apply when there is none).
+type AgentUpgradePolicy struct {
+	TenantID      string    `json:"-"`
+	Enabled       bool      `json:"enabled"`
+	WindowStart   string    `json:"window_start"`
+	WindowEnd     string    `json:"window_end"`
+	Timezone      string    `json:"timezone"`
+	MaxConcurrent int       `json:"max_concurrent"`
+	TargetVersion string    `json:"target_version"`
+	Paused        bool      `json:"paused"`
+	PausedReason  string    `json:"paused_reason"`
+	UpdatedBy     string    `json:"updated_by"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+// DefaultUpgradePolicy is the policy of a tenant without a stored row:
+// automatic upgrades off.
+func DefaultUpgradePolicy(tenantID string) AgentUpgradePolicy {
+	return AgentUpgradePolicy{TenantID: tenantID, WindowStart: "02:00", WindowEnd: "04:00", Timezone: "UTC", MaxConcurrent: 5}
 }
 
 type EnrollmentToken struct {

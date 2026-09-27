@@ -1,185 +1,106 @@
 package collector
 
 import (
-	"strings"
+	"os"
 
-	"github.com/go-tangra/go-tangra-inventory/v4/internal/store"
 	"github.com/siderolabs/go-smbios/smbios"
+
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/agentfacts"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/store"
 )
 
-// hardware holds the SMBIOS-derived pieces of an inventory before they are
-// applied onto a store.Inventory.
-type hardware struct {
-	BIOS         store.BIOSInfo
-	System       store.SystemInfo
-	Baseboard    store.BaseboardInfo
-	Chassis      store.ChassisInfo
-	Processors   []store.Processor
-	Cache        []store.CacheInfo
-	Memory       store.MemoryInfo
-	Ports        []string
-	Slots        []string
-	OEMStrings   []string
-	BIOSLanguage string
+// Linux exposes the raw SMBIOS table and its entry point in sysfs.
+const (
+	dmiEntryPoint = "/sys/firmware/dmi/tables/smbios_entry_point"
+	dmiTable      = "/sys/firmware/dmi/tables/DMI"
+	// maxDMITable bounds the table read (real tables are a few KiB).
+	maxDMITable = 1 << 20
+)
+
+// tableSource returns a split SMBIOS table (the go-smbios firmware table
+// path used where sysfs has none, i.e. Windows).
+type tableSource func() (agentfacts.SMBIOSVersion, []agentfacts.SMBIOSStructure, error)
+
+// goSMBIOSSource finds the table through go-smbios (GetSystemFirmwareTable on
+// Windows); a panic of its typed decoding on a malformed table becomes an
+// error. Only the raw structures are used.
+func goSMBIOSSource() (agentfacts.SMBIOSVersion, []agentfacts.SMBIOSStructure, error) {
+	s, err := agentfacts.OpenGoSMBIOS(smbios.New)
+	if err != nil {
+		return agentfacts.SMBIOSVersion{}, nil, err
+	}
+	v, structs := agentfacts.FromGoSMBIOS(s)
+	return v, structs, nil
 }
 
-// collectHardware opens the local SMBIOS tables and maps them. It reports ok
-// false (with an empty hardware) when SMBIOS is unavailable, e.g. insufficient
-// privileges or an unsupported platform.
-func collectHardware() (hardware, bool) {
-	s, err := smbios.New()
-	if err != nil || s == nil {
-		return hardware{}, false
-	}
-	return mapHardware(s), true
+// collectHardware reads and decodes the local SMBIOS table (feature 023:
+// DSP0134 names from the raw structures, every memory slot, arrays, chassis
+// type, processor family and socket). ok is false when no table is readable
+// (insufficient privileges, unsupported platform); collection goes on.
+func collectHardware() (agentfacts.SMBIOSHardware, bool) {
+	return readHardware(dmiEntryPoint, dmiTable, goSMBIOSSource)
 }
 
-// mapHardware is the pure SMBIOS -> store mapper. It is exercised by tests via a
-// decoded fixture and is free of any platform I/O.
-func mapHardware(s *smbios.SMBIOS) hardware {
-	hw := hardware{
-		BIOS: store.BIOSInfo{
-			Vendor:      s.BIOSInformation.Vendor,
-			Version:     s.BIOSInformation.Version,
-			ReleaseDate: s.BIOSInformation.ReleaseDate,
-		},
-		System: store.SystemInfo{
-			Manufacturer: s.SystemInformation.Manufacturer,
-			ProductName:  s.SystemInformation.ProductName,
-			Version:      s.SystemInformation.Version,
-			SerialNumber: s.SystemInformation.SerialNumber,
-			UUID:         s.SystemInformation.UUID,
-			WakeUpType:   s.SystemInformation.WakeUpType.String(),
-			SKUNumber:    s.SystemInformation.SKUNumber,
-			Family:       s.SystemInformation.Family,
-		},
-		Baseboard: store.BaseboardInfo{
-			Manufacturer:      s.BaseboardInformation.Manufacturer,
-			Product:           s.BaseboardInformation.Product,
-			Version:           s.BaseboardInformation.Version,
-			SerialNumber:      s.BaseboardInformation.SerialNumber,
-			AssetTag:          s.BaseboardInformation.AssetTag,
-			LocationInChassis: s.BaseboardInformation.LocationInChassis,
-			BoardType:         s.BaseboardInformation.BoardType.String(),
-		},
-		Chassis: store.ChassisInfo{
-			Manufacturer: s.SystemEnclosure.Manufacturer,
-			Version:      s.SystemEnclosure.Version,
-			SerialNumber: s.SystemEnclosure.SerialNumber,
-			AssetTag:     s.SystemEnclosure.AssetTagNumber,
-			SKUNumber:    s.SystemEnclosure.SKUNumber,
-		},
-		Processors:   mapProcessors(s),
-		Memory:       mapMemory(s),
-		OEMStrings:   s.OEMStrings.Strings,
-		BIOSLanguage: s.BIOSLanguageInformation.CurrentLanguage,
-	}
-
-	for _, c := range s.CacheInformation {
-		hw.Cache = append(hw.Cache, store.CacheInfo{SocketDesignation: c.SocketDesignation})
-	}
-	for _, p := range s.PortConnectorInformation {
-		if d := portLabel(p); d != "" {
-			hw.Ports = append(hw.Ports, d)
+// readHardware decodes the sysfs table at tablePath (version from the entry
+// point at epPath, SMBIOS 3.0 when unreadable) and otherwise the fallback
+// source.
+func readHardware(epPath, tablePath string, fallback tableSource) (agentfacts.SMBIOSHardware, bool) {
+	if table, err := readBounded(tablePath, maxDMITable); err == nil && len(table) > 0 {
+		v := agentfacts.SMBIOSVersion{Major: 3}
+		if ep, eerr := readBounded(epPath, 64); eerr == nil {
+			if pv, ok := agentfacts.ParseEntryPoint(ep); ok {
+				v = pv
+			}
+		}
+		if hw, derr := agentfacts.DecodeSMBIOSTable(table, v); derr == nil {
+			return hw, true
 		}
 	}
-	for _, sl := range s.SystemSlots {
-		if d := strings.TrimSpace(sl.SlotDesignation); d != "" {
-			hw.Slots = append(hw.Slots, d)
+	if fallback == nil {
+		return agentfacts.SMBIOSHardware{}, false
+	}
+	v, structs, err := fallback()
+	if err != nil || len(structs) == 0 {
+		return agentfacts.SMBIOSHardware{}, false
+	}
+	return agentfacts.DecodeSMBIOS(v, structs), true
+}
+
+// readBounded reads at most n bytes of path.
+func readBounded(path string, n int64) ([]byte, error) {
+	f, err := os.Open(path) // #nosec G304 -- fixed sysfs paths (tests: fixtures)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	buf := make([]byte, n)
+	total := 0
+	for total < len(buf) {
+		m, rerr := f.Read(buf[total:])
+		total += m
+		if rerr != nil {
+			break
 		}
 	}
-	return hw
+	return buf[:total], nil
 }
 
-// portLabel builds a human-readable designation for a port connector, preferring
-// the external reference designator and falling back to the internal one.
-func portLabel(p smbios.PortConnectorInformation) string {
-	ext := strings.TrimSpace(p.ExternalReferenceDesignator)
-	in := strings.TrimSpace(p.InternalReferenceDesignator)
-	switch {
-	case ext != "" && in != "":
-		return in + " / " + ext
-	case ext != "":
-		return ext
-	default:
-		return in
-	}
-}
-
-func mapProcessors(s *smbios.SMBIOS) []store.Processor {
-	var out []store.Processor
-	for _, p := range s.ProcessorInformation {
-		out = append(out, store.Processor{
-			SocketDesignation: p.SocketDesignation,
-			Manufacturer:      p.ProcessorManufacturer,
-			Version:           p.ProcessorVersion,
-			MaxSpeedMHz:       uint32(p.MaxSpeed),
-			CurrentSpeedMHz:   uint32(p.CurrentSpeed),
-			CoreCount:         uint32(p.CoreCount),
-			CoreEnabled:       uint32(p.CoreEnabled),
-			ThreadCount:       uint32(p.ThreadCount),
-			PartNumber:        strings.TrimSpace(p.PartNumber),
-			SerialNumber:      strings.TrimSpace(p.SerialNumber),
-			SocketPopulated:   p.Status.SocketPopulated(),
-		})
-	}
-	return out
-}
-
-func mapMemory(s *smbios.SMBIOS) store.MemoryInfo {
-	pma := s.PhysicalMemoryArray
-	info := store.MemoryInfo{
-		Array: store.MemoryArray{
-			Location:        pma.Location.String(),
-			Use:             pma.Use.String(),
-			ErrorCorrection: pma.MemoryErrorCorrection.String(),
-			MaximumCapacity: maxCapacityBytes(pma),
-			NumberOfDevices: uint32(pma.NumberOfMemoryDevices),
-		},
-	}
-
-	var total uint64
-	for _, d := range s.MemoryDevices {
-		capBytes := moduleCapacityBytes(d)
-		if capBytes == 0 {
-			continue // empty slot
-		}
-		total += capBytes
-		info.Modules = append(info.Modules, store.MemoryModule{
-			DeviceLocator:      d.DeviceLocator,
-			BankLocator:        d.BankLocator,
-			CapacityBytes:      capBytes,
-			FormFactor:         d.FormFactor.String(),
-			MemoryType:         d.MemoryType.String(),
-			SpeedMTs:           uint32(d.Speed),
-			ConfiguredSpeedMTs: uint32(d.ConfiguredMemorySpeed),
-			Manufacturer:       strings.TrimSpace(d.Manufacturer),
-			SerialNumber:       strings.TrimSpace(d.SerialNumber),
-			PartNumber:         strings.TrimSpace(d.PartNumber),
-		})
-	}
-	info.TotalPhysicalBytes = total
-	return info
-}
-
-// moduleCapacityBytes returns a memory device's capacity in bytes, honoring the
-// SMBIOS extended-size escape (0x7FFF) for DIMMs of 32 GB-1 MB or larger.
-func moduleCapacityBytes(d smbios.MemoryDevice) uint64 {
-	sizeMB := d.Size.Megabytes()
-	if sizeMB == 0 {
-		return 0
-	}
-	if uint16(d.Size) == 0x7FFF {
-		return uint64(d.ExtendedSize) * 1024 * 1024
-	}
-	return uint64(sizeMB) * 1024 * 1024
-}
-
-// maxCapacityBytes returns the array maximum capacity in bytes, preferring the
-// 64-bit extended field and otherwise converting the 32-bit kilobyte field.
-func maxCapacityBytes(pma smbios.PhysicalMemoryArray) uint64 {
-	if pma.ExtendedMaximumCapacity != 0 {
-		return uint64(pma.ExtendedMaximumCapacity)
-	}
-	return uint64(pma.MaximumCapacity) * 1024
+// applyHardware copies the decoded hardware onto the inventory and records
+// the SMBIOS availability and truncation counters.
+func applyHardware(inv *store.Inventory, hw agentfacts.SMBIOSHardware) {
+	inv.BIOS = hw.BIOS
+	inv.System = hw.System
+	inv.Baseboard = hw.Baseboard
+	inv.Chassis = hw.Chassis
+	inv.Processors = hw.Processors
+	inv.Cache = hw.Cache
+	inv.Memory = hw.Memory
+	inv.Ports = hw.Ports
+	inv.Slots = hw.Slots
+	inv.OEMStrings = hw.OEMStrings
+	inv.BIOSLanguage = hw.BIOSLanguage
+	inv.Truncated.Processors += hw.Truncated.Processors
+	inv.Truncated.MemorySlots += hw.Truncated.MemorySlots
+	inv.Truncated.MemoryArrays += hw.Truncated.MemoryArrays
+	inv.Availability.SMBIOS = hw.Availability
 }

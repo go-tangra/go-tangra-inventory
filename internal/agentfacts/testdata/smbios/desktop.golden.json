@@ -1,0 +1,125 @@
+{
+  "BIOS": {
+    "vendor": "Dell Inc.",
+    "version": "1.21.0",
+    "release_date": "03/10/2025"
+  },
+  "System": {
+    "manufacturer": "Dell Inc.",
+    "product_name": "OptiPlex 7090",
+    "serial_number": "DSK0001",
+    "uuid": "44454c4c-3000-1031-8035-b4c04f303031",
+    "wake_up_type": "Power Switch",
+    "sku_number": "0A5B",
+    "family": "OptiPlex"
+  },
+  "Baseboard": {
+    "manufacturer": "Dell Inc.",
+    "product": "0K2WJ4",
+    "version": "A00",
+    "serial_number": "/DSK0001/CNFCW0000000A/",
+    "board_type": "Motherboard (includes processor, memory, and I/O)"
+  },
+  "Chassis": {
+    "manufacturer": "Dell Inc.",
+    "serial_number": "DSK0001",
+    "type": "Desktop",
+    "bootup_state": "Safe"
+  },
+  "Processors": [
+    {
+      "socket_designation": "CPU 1",
+      "manufacturer": "Intel(R) Corporation",
+      "version": "Intel(R) Core(TM) i7-10700 CPU @ 2.90GHz",
+      "max_speed_mhz": 4800,
+      "current_speed_mhz": 2900,
+      "core_count": 8,
+      "core_enabled": 8,
+      "thread_count": 16,
+      "socket_populated": true,
+      "family": "Intel Core i7 processor",
+      "type": "Central Processor",
+      "upgrade": "Socket LGA1200"
+    }
+  ],
+  "Cache": null,
+  "Memory": {
+    "total_physical_bytes": 34359738368,
+    "array": {
+      "location": "System board or motherboard",
+      "use": "System memory",
+      "error_correction": "None",
+      "maximum_capacity": 137438953472,
+      "number_of_devices": 4,
+      "handle": 4096
+    },
+    "modules": [
+      {
+        "device_locator": "DIMM1",
+        "bank_locator": "BANK 0",
+        "capacity_bytes": 17179869184,
+        "form_factor": "DIMM",
+        "memory_type": "DDR4",
+        "speed_mt_s": 2933,
+        "configured_speed_mt_s": 2933,
+        "manufacturer": "SK Hynix",
+        "serial_number": "2B000000",
+        "part_number": "HMA82GU6DJR8N-WM",
+        "populated": true,
+        "type_detail": [
+          "Synchronous",
+          "Unbuffered (Unregistered)"
+        ],
+        "array_handle": 4096,
+        "rank_count": 2
+      },
+      {
+        "device_locator": "DIMM2",
+        "bank_locator": "BANK 1",
+        "array_handle": 4096
+      },
+      {
+        "device_locator": "DIMM3",
+        "bank_locator": "BANK 2",
+        "capacity_bytes": 17179869184,
+        "form_factor": "DIMM",
+        "memory_type": "DDR4",
+        "speed_mt_s": 2933,
+        "configured_speed_mt_s": 2933,
+        "manufacturer": "SK Hynix",
+        "serial_number": "2B000002",
+        "part_number": "HMA82GU6DJR8N-WM",
+        "populated": true,
+        "type_detail": [
+          "Synchronous",
+          "Unbuffered (Unregistered)"
+        ],
+        "array_handle": 4096,
+        "rank_count": 2
+      },
+      {
+        "device_locator": "DIMM4",
+        "bank_locator": "BANK 3",
+        "array_handle": 4096
+      }
+    ],
+    "arrays": [
+      {
+        "location": "System board or motherboard",
+        "use": "System memory",
+        "error_correction": "None",
+        "maximum_capacity": 137438953472,
+        "number_of_devices": 4,
+        "handle": 4096
+      }
+    ],
+    "slots_total": 4,
+    "slots_populated": 2
+  },
+  "Ports": null,
+  "Slots": null,
+  "OEMStrings": null,
+  "BIOSLanguage": "",
+  "Truncated": {},
+  "Availability": "ok"
+}

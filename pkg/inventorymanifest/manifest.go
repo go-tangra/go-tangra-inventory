@@ -39,7 +39,8 @@ var Permissions = []gatewayclient.Permission{
 	{Resource: "inventory", Action: "read", Description: "List and read hosts, snapshots and the live stream"},
 	{Resource: "inventory", Action: "write", Description: "Contribute inventory data (manual snapshots, imports)"},
 	{Resource: "hosts", Action: "manage", Description: "Tag, retire and delete hosts"},
-	{Resource: "agents", Action: "manage", Description: "Enroll, refresh, list and revoke endpoint agents"},
+	{Resource: "agents", Action: "manage", Description: "Enroll, refresh, list, upgrade and revoke endpoint agents"},
+	{Resource: "agentupgrades", Action: "manage", Description: "Configure automatic agent upgrades and the target agent version"},
 	{Resource: "snapshots", Action: "read", Description: "Read snapshot history, diffs and change records"},
 	{Resource: "snapshots", Action: "manage", Description: "Delete snapshots"},
 	{Resource: "stats", Action: "read", Description: "Read inventory statistics"},
@@ -64,6 +65,7 @@ var Abilities = []gatewayclient.Ability{
 	{Action: []string{"read", "create", "update", "delete"}, Subject: []string{"InventoryHost"}, Requires: "inventory:read"},
 	{Action: []string{"read", "create", "update", "delete"}, Subject: []string{"InventorySnapshot"}, Requires: "snapshots:read"},
 	{Action: []string{"manage"}, Subject: []string{"InventoryAgent"}, Requires: "agents:manage"},
+	{Action: []string{"manage"}, Subject: []string{"InventoryAgentUpgradePolicy"}, Requires: "agentupgrades:manage"},
 	{Action: []string{"read"}, Subject: []string{"InventoryStats"}, Requires: "stats:read"},
 }
 

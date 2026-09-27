@@ -57,10 +57,11 @@ systemd as shown below.
 On first run the agent exchanges an operator-issued **enrollment token** for a
 persistent per-agent credential (stored locally, 0600), then submits full
 snapshots over authenticated TLS to the ingest edge and holds a reconnecting
-command stream for on-demand **refresh**. It collects: hardware via SMBIOS
-(BIOS/system/board/chassis/CPU/cache/memory/ports/slots/OEM/BIOS-language),
+command stream for on-demand **refresh**. It collects: hardware from the raw SMBIOS table
+(BIOS/system/board/chassis/CPU/cache/memory arrays and every memory slot/ports/
+slots/OEM/BIOS-language, decoded per DSP0134), physical disks (`collect_disks`),
 monitors (EDID, Windows), OS/software/services/users/patches, network interfaces
-and disks, and the host report data described below. Categories unavailable on
+and filesystems, and the host report data described below. Categories unavailable on
 a platform yield empty sections, never failures.
 
 ### Installing the agent from a package
@@ -150,6 +151,85 @@ update_timeout_seconds: 120    # 30-600, whole update collection
   the whole collection stops at `update_timeout_seconds`. pacman needs
   `pacman-contrib` (`checkupdates`); without it the state is `unsupported`.
 
+### Hardware and disks
+
+| Data | Linux | Windows |
+|---|---|---|
+| SMBIOS (BIOS, system, board, chassis, processors, memory arrays and slots) | `/sys/firmware/dmi/tables/DMI` (root), go-smbios fallback | `GetSystemFirmwareTable` via go-smbios |
+| physical disks: name, model, serial, size, SSD/HDD/NVMe, interface, removable | `/sys/block` (loop, ram, zram, dm, md excluded) | `Get-PhysicalDisk` / `Win32_DiskDrive` |
+| filesystem to disk | `/proc/self/mountinfo` + sysfs holders | partitions to disk number |
+
+Bounds: 256 disks, 1024 memory slots, 64 memory arrays, 256 processors, 1024 filesystems, 16 type-detail flags per module.
+Each category reports its availability (`ok`, `partial`, `unavailable`,
+`unsupported`, `unknown`) instead of failing the snapshot.
+
+```yaml
+collect_disks: true            # physical disks and filesystem-to-disk mapping
+```
+
+### Agent self-upgrade
+
+Agents from 4.4.0 on upgrade themselves on request (see the
+[README](../README.md#agent-self-upgrade) for the model). Requirements and
+knobs:
+
+- **Linux**: systemd (the helper runs as a transient unit
+  `inventory-agent-upgrade-<id>` and restarts `inventory-agent.service`);
+  deb/rpm installs keep the package database right (`dpkg -i
+  --force-confold`, `rpm -U [--oldpackage]`); other installs swap the binary.
+  Without systemd the request fails `unsupported_install`.
+- **Windows**: the service `FreyaInventoryAgent`; the binary is swapped in place
+  and the service restarted by a detached helper.
+- **One manual install** of 4.4.0 per host. Older agents show
+  `manual_upgrade_required` in the fleet view.
+- Staging: `/var/lib/inventory-agent/upgrade` (0700, root; Windows:
+  `%ProgramData%\go-tangra\inventory-agent\upgrade`), the two newest versions are kept.
+
+```yaml
+upgrade:
+  enabled: true                  # false: ignore platform requests (`inventory-agent update` still works)
+  confirm_timeout_seconds: 300   # 60-1800: the new version must connect and submit, else rollback
+  # staging_dir: /var/lib/inventory-agent/upgrade
+```
+
+On the host: `inventory-agent update -check [-config agent.yaml]` (exit 0 up
+to date, 10 upgrade available, 1 error, 2 another upgrade running) and
+`inventory-agent update` (root/Administrator). Reason codes in the fleet view
+and the audit trail: `signature_invalid`, `unknown_key`, `checksum_mismatch`,
+`size_mismatch`, `platform_mismatch`, `version_mismatch`, `downgrade_refused`,
+`disk_full`, `download_failed`, `install_failed`, `start_timeout`,
+`unsupported_install`, `busy`, `package_db_mismatch` (rolled back by binary
+restore; reinstall the package), `expired`.
+
+Server side (`agent_releases` in `container.yaml`):
+
+```yaml
+agent_releases:
+  bundle_dir: /app/agent-releases   # signed releases shipped in the image ("" = none)
+  keep_versions: 5                  # 2-50 releases kept in PostgreSQL (~80 MB each); current, pins and active targets always kept
+  max_concurrent_downloads: 20      # 1-500 per server instance; one download per agent
+  chunk_bytes: 1048576              # 64 KiB-1 MiB storage and download chunk
+  request_ttl_hours: 168            # pending/delivered requests expire
+  progress_timeout_minutes: 15      # downloading/installing without a report fails
+```
+
+At start the server verifies every bundled release with its compiled keyring
+(refused bundles are logged and audited `agent_release_imported` refused) and
+copies it into PostgreSQL under an advisory lock, so several replicas seed
+once. Import a release for an offline site or another version from a verified
+directory (`<version>/agent-release.json`, `.sig` and the artifacts):
+
+```sh
+inventorysvc agent-release import -config /app/deploy/container.yaml /path/to/4.4.2
+```
+
+Automatic upgrades (`GET/PUT /api/inventory/v1/agents/upgrade-policy`,
+`POST .../resume`): the scheduler runs every minute per tenant under a
+cluster-wide lock, upgrades outdated online agents inside the window (oldest
+version first) up to `max_concurrent` (one at a time until an agent runs the
+target version), and pauses the policy on the first failed or rolled-back
+automatic upgrade (audit `upgrade_policy_paused`).
+
 ## Configuration
 
 Server `container.yaml` sections: `db`, `valkey`, `kek` (envelope key),
@@ -160,7 +240,8 @@ see [Ingest TLS](#ingest-tls)), `registry`
 in-memory), `retention` (`days`), `stale` (`after_seconds`), `jobs`, `events`,
 `gateway`, `enroll` (`token_ttl_seconds` — minted enrollment-token lifetime),
 `mesh_enroll` (the server's own SVID enrollment), `limits_inventory`
-(`max_request_bytes`, `max_snapshot_bytes`), and `host_reports`
+(`max_request_bytes`, `max_snapshot_bytes`), `agent_releases` (agent
+self-upgrade, see [above](#agent-self-upgrade)), and `host_reports`
 (`consumers` — mesh service names allowed to call HostReportService, default
 `[ipam]`; `max_page_bytes` — bound of one ListHostReports page, default 3 MiB). Framework `server`/`admin`/
 `discovery` sections supply the mesh gRPC/HTTP and admin listeners.
@@ -274,6 +355,12 @@ updates live.
   (stale marking, retention purge) run under a scoped system subject.
 - Every ingest, enrollment, refresh, deletion and admin action is recorded in the
   append-only, tamper-evident audit trail.
+- Agent upgrades: only releases signed with a key compiled into the agent are
+  installed (manifest signature, then size and SHA-256 of the streamed
+  artifact); the server re-verifies bundles and imports with its own keyring.
+  Downloads need the agent's credential and an active request of that agent
+  (or its own current version for rollback), are capped per agent and per
+  instance and time-bounded. Key custody and rotation: [SECURITY.md](../SECURITY.md).
 
 ## Backup
 

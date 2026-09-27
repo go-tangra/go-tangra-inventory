@@ -34,7 +34,29 @@ const (
 	BackupExported   EventType = "backup_exported"
 	BackupImported   EventType = "backup_imported"
 	AccessRefused    EventType = "access_refused"
+
+	// Agent self-upgrade (feature 023, contracts/audit-events.md). Upgrade
+	// transitions are written through the repo in the transaction of the
+	// state change (Row), never through the buffered writer.
+	AgentUpgradeRequested  EventType = "agent_upgrade_requested"
+	AgentUpgradeCancelled  EventType = "agent_upgrade_cancelled"
+	AgentUpgradeDelivered  EventType = "agent_upgrade_delivered"
+	AgentUpgradeStarted    EventType = "agent_upgrade_started"
+	AgentUpgradeInstalling EventType = "agent_upgrade_installing"
+	AgentUpgradeSucceeded  EventType = "agent_upgrade_succeeded"
+	AgentUpgradeFailed     EventType = "agent_upgrade_failed"
+	AgentUpgradeRolledBack EventType = "agent_upgrade_rolled_back"
+	AgentUpgradeExpired    EventType = "agent_upgrade_expired"
+	AgentUpgradeRefused    EventType = "agent_upgrade_refused"
+	UpgradePolicyUpdated   EventType = "upgrade_policy_updated"
+	UpgradePolicyPaused    EventType = "upgrade_policy_paused"
+	UpgradePolicyResumed   EventType = "upgrade_policy_resumed"
+	AgentReleaseImported   EventType = "agent_release_imported"
 )
+
+// PlatformTenant is the tenant id of platform-scope events (agent release
+// imports: releases are global, not tenant data).
+const PlatformTenant = "00000000-0000-0000-0000-000000000000"
 
 // Subject kinds (closed set).
 const (
@@ -44,6 +66,9 @@ const (
 	SubjectToken    = "token"
 	SubjectBackup   = "backup"
 	SubjectSystem   = "system"
+	// Feature 023.
+	SubjectUpgradePolicy = "upgrade_policy"
+	SubjectRelease       = "release"
 )
 
 // Outcomes (closed set).
@@ -71,6 +96,9 @@ func init() {
 		RefreshRequested, RefreshDelivered,
 		BackupExported, BackupImported,
 		AccessRefused,
+		AgentUpgradeRequested, AgentUpgradeCancelled, AgentUpgradeDelivered, AgentUpgradeStarted, AgentUpgradeInstalling,
+		AgentUpgradeSucceeded, AgentUpgradeFailed, AgentUpgradeRolledBack, AgentUpgradeExpired, AgentUpgradeRefused,
+		UpgradePolicyUpdated, UpgradePolicyPaused, UpgradePolicyResumed, AgentReleaseImported,
 	} {
 		known[t] = struct{}{}
 	}
@@ -106,13 +134,16 @@ func Validate(e Event) error {
 	if e.TenantID == "" {
 		return errors.New("audit: tenant_id is required")
 	}
+	if e.TenantID == PlatformTenant && e.EventType != AgentReleaseImported {
+		return errors.New("audit: the platform tenant is reserved for agent release imports")
+	}
 	switch e.ActorKind {
 	case ActorAgent, ActorUser, ActorService, ActorSystem:
 	default:
 		return fmt.Errorf("audit: actor_kind %q", e.ActorKind)
 	}
 	switch e.SubjectKind {
-	case SubjectHost, SubjectSnapshot, SubjectAgent, SubjectToken, SubjectBackup, SubjectSystem:
+	case SubjectHost, SubjectSnapshot, SubjectAgent, SubjectToken, SubjectBackup, SubjectSystem, SubjectUpgradePolicy, SubjectRelease:
 	default:
 		return fmt.Errorf("audit: subject_kind %q", e.SubjectKind)
 	}
@@ -170,6 +201,20 @@ func guardMap(m map[string]any) map[string]any {
 		out[k] = guardValue(v)
 	}
 	return out
+}
+
+// Row validates e and returns the audit row to write at now, with the detail
+// guard applied. It backs transactional audit writes (upgrade transitions)
+// that must not go through the buffered, lossy Writer.
+func Row(e Event, now time.Time) (store.AuditRow, error) {
+	if err := Validate(e); err != nil {
+		return store.AuditRow{}, err
+	}
+	return store.AuditRow{
+		ID: store.NewID(), TenantID: e.TenantID, At: now, ActorKind: e.ActorKind, ActorID: e.ActorID,
+		Action: string(e.EventType), SubjectKind: e.SubjectKind, SubjectID: e.SubjectID, Outcome: e.Outcome,
+		Reason: e.Reason, Detail: guardMap(e.Details),
+	}, nil
 }
 
 // Writer buffers events and writes them one row at a time; Record never blocks.

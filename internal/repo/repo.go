@@ -5,6 +5,7 @@ package repo
 import (
 	"context"
 	"errors"
+	"io"
 	"time"
 
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/store"
@@ -89,4 +90,81 @@ type Store interface {
 	SetReportDigest(ctx context.Context, tenantID, hostID, digest string, changedAt time.Time) (changed bool, err error)
 	ListReportTenants(ctx context.Context, since time.Time, limit int) (ids []string, maxChanged time.Time, err error)
 	ListHostReportRows(ctx context.Context, tenantID string, f store.ReportRowFilter) ([]store.Host, error)
+
+	ReleaseStore
+	UpgradeStore
+}
+
+// ArtifactOpener opens the content of one artifact of a release being
+// imported (the releases service wraps it in a verifying reader).
+type ArtifactOpener func(a store.AgentArtifact) (io.ReadCloser, error)
+
+// ReleaseStore holds the signed agent releases (feature 023). The tables are
+// global (public binaries, not tenant data); only the startup seeder and the
+// import CLI write them.
+type ReleaseStore interface {
+	// ImportAgentRelease stores a release, its artifacts and their chunks
+	// in one transaction under a per-version advisory lock, so concurrent
+	// replicas seeding the same bundle store it once. imported is false
+	// when the same release (same manifest digest) is already complete;
+	// a stored release with another manifest is ErrConflict. An error of
+	// open or of a returned reader aborts the whole import.
+	ImportAgentRelease(ctx context.Context, rel store.AgentRelease, open ArtifactOpener, chunkBytes int) (imported bool, err error)
+	// ListAgentReleases returns every stored release with its artifacts.
+	ListAgentReleases(ctx context.Context) ([]store.AgentRelease, error)
+	// GetAgentRelease returns one release with manifest, signature and artifacts.
+	GetAgentRelease(ctx context.Context, version string) (store.AgentRelease, error)
+	// ReadArtifactChunk returns chunk seq of an artifact (ErrNotFound past the end).
+	ReadArtifactChunk(ctx context.Context, a store.AgentArtifact, seq int) ([]byte, error)
+	// DeleteAgentRelease removes a release and (cascade) its artifacts.
+	DeleteAgentRelease(ctx context.Context, version string) error
+	// ProtectedAgentVersions lists versions retention must keep: tenant
+	// policy pins and targets of active upgrade requests (system scope).
+	ProtectedAgentVersions(ctx context.Context) ([]string, error)
+}
+
+// UpgradeFilter constrains ListAgentUpgrades (newest first).
+type UpgradeFilter struct {
+	State    string
+	AgentID  string
+	Limit    int    // <= 0: no limit
+	CursorID string // requests created before this one
+}
+
+// UpgradeStore holds agent platforms, upgrade requests and the per-tenant
+// upgrade policy (feature 023). Every write that changes a request or a
+// policy appends its audit rows in the same transaction (FR-016).
+type UpgradeStore interface {
+	// ListAgents lists a tenant's enrolled, non-revoked agents.
+	ListAgents(ctx context.Context, tenantID string) ([]store.Agent, error)
+	// SetAgentPlatform records the platform and capabilities an agent
+	// reported on its command stream (system scope, like TouchAgent).
+	SetAgentPlatform(ctx context.Context, agentID, os, arch, installType string, capabilities []string, at time.Time) error
+
+	// CreateAgentUpgrade inserts a request and its audit row; ErrConflict
+	// when the agent already has an active request.
+	CreateAgentUpgrade(ctx context.Context, u store.AgentUpgrade, row store.AuditRow) error
+	// UpdateAgentUpgrade locks the request, applies fn and stores the
+	// result together with the audit rows fn returns; an error of fn
+	// changes nothing. ErrNotFound for another tenant's or a missing id.
+	UpdateAgentUpgrade(ctx context.Context, tenantID, id string, fn func(*store.AgentUpgrade) ([]store.AuditRow, error)) (store.AgentUpgrade, error)
+	GetAgentUpgrade(ctx context.Context, tenantID, id string) (store.AgentUpgrade, error)
+	ListAgentUpgrades(ctx context.Context, tenantID string, f UpgradeFilter) ([]store.AgentUpgrade, error)
+	// LatestAgentUpgrades returns the newest request of every agent.
+	LatestAgentUpgrades(ctx context.Context, tenantID string) (map[string]store.AgentUpgrade, error)
+	// ListStaleUpgrades lists (system scope) pending/delivered requests past
+	// their expiry and downloading/installing requests not updated since
+	// progressBefore, at most limit.
+	ListStaleUpgrades(ctx context.Context, now, progressBefore time.Time, limit int) ([]store.AgentUpgrade, error)
+
+	// GetUpgradePolicy returns the tenant's policy (found false: defaults apply).
+	GetUpgradePolicy(ctx context.Context, tenantID string) (store.AgentUpgradePolicy, bool, error)
+	// UpdateUpgradePolicy upserts the policy through fn (starting from the
+	// stored row or the defaults) together with fn's audit rows.
+	UpdateUpgradePolicy(ctx context.Context, tenantID string, fn func(*store.AgentUpgradePolicy) ([]store.AuditRow, error)) (store.AgentUpgradePolicy, error)
+	// ListEnabledUpgradePolicies lists every enabled policy (system scope).
+	ListEnabledUpgradePolicies(ctx context.Context) ([]store.AgentUpgradePolicy, error)
+	// TryTenantLock runs fn while holding a cluster-wide lock named key;
+	// acquired is false (fn not run) when another holder has it.
+	TryTenantLock(ctx context.Context, key string, fn func(context.Context) error) (acquired bool, err error)
 }

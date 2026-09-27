@@ -51,6 +51,9 @@ enum ChangeType {
 enum CommandType {
   COMMAND_TYPE_UNSPECIFIED = 0;
   COMMAND_TYPE_REFRESH = 1;
+  // Upgrade the agent to Command.upgrade.target_version (feature 023). Agents
+  // older than 023 log and ignore it.
+  COMMAND_TYPE_UPGRADE = 2;
 }
 
 // ---- Shared identity + host messages
@@ -146,6 +149,13 @@ message Inventory {
   repeated HypervisorGuest hypervisor_guests = 28;   // <= 1000
   UpdateState update_state = 29;
   CollectionLimits truncated = 30;                   // entries dropped because a bound was reached
+  // Feature 023. Mounted filesystems with the physical disks they live on
+  // (<= 1024; replaces Disk.partitions for new agents).
+  repeated Filesystem filesystems = 31;
+  HardwareAvailability hardware_availability = 32;
+  // 0/1 = legacy SMBIOS decoding (values may be shifted), 2 = DSP0134-correct
+  // decoding and physical disks (feature 023).
+  uint32 hardware_schema = 33;
 }
 
 message BIOSInfo {
@@ -181,7 +191,8 @@ message ChassisInfo {
   string serial_number = 3;
   string asset_tag = 4;
   string sku_number = 5;
-  string type = 6;
+  string type = 6;          // DSP0134 7.4.1 name (filled from feature 023)
+  string bootup_state = 7;  // DSP0134 7.4.2 name
 }
 
 message Processor {
@@ -196,6 +207,9 @@ message Processor {
   string part_number = 9;
   string serial_number = 10;
   bool socket_populated = 11;
+  string family = 12;    // DSP0134 7.5.2 (processor family 2 when family = FEh)
+  string type = 13;      // DSP0134 7.5.1
+  string upgrade = 14;   // DSP0134 7.5.5 (socket), e.g. "Socket LGA4189"
 }
 
 message CacheInfo {
@@ -203,9 +217,12 @@ message CacheInfo {
 }
 
 message MemoryInfo {
-  uint64 total_physical_bytes = 1;
-  MemoryArray array = 2;
-  repeated MemoryModule modules = 3;
+  uint64 total_physical_bytes = 1;   // populated modules of "System memory" arrays
+  MemoryArray array = 2;             // primary array (first with use "System memory")
+  repeated MemoryModule modules = 3; // from 023 every slot incl. empty ones (populated=false), <= 1024
+  repeated MemoryArray arrays = 4;   // every type-16 structure, <= 64
+  uint32 slots_total = 5;
+  uint32 slots_populated = 6;
 }
 
 message MemoryArray {
@@ -214,6 +231,7 @@ message MemoryArray {
   string error_correction = 3;
   uint64 maximum_capacity = 4;
   uint32 number_of_devices = 5;
+  uint32 handle = 6;                 // SMBIOS handle; MemoryModule.array_handle refers to it
 }
 
 message MemoryModule {
@@ -227,6 +245,11 @@ message MemoryModule {
   string manufacturer = 8;
   string serial_number = 9;
   string part_number = 10;
+  bool populated = 11;               // false = empty slot
+  repeated string type_detail = 12;  // DSP0134 7.18.3 bit names, e.g. "Registered (Buffered)"
+  uint32 array_handle = 13;
+  string asset_tag = 14;
+  uint32 rank_count = 15;            // 0 = unknown
 }
 
 message Monitor {
@@ -366,15 +389,43 @@ message CollectionLimits {
   uint32 guests = 3;
   uint32 packages = 4;
   uint32 bmc_ports = 5;
+  uint32 disks = 6;
+  uint32 memory_slots = 7;
+  uint32 memory_arrays = 8;
+  uint32 processors = 9;
+  uint32 filesystems = 10;
 }
 
+// Disk is a physical disk (feature 023; agents before 023 reported mounted
+// partitions grouped by device in `partitions` and left the rest empty).
 message Disk {
   string model = 1;
   string serial = 2;
   uint64 size_bytes = 3;
-  string media_type = 4;
-  string interface = 5;
-  repeated Partition partitions = 6;
+  string media_type = 4;             // ssd | hdd | nvme_ssd | unknown
+  string interface = 5;              // nvme | sata | sas | scsi | usb | virtio | hyperv | xen | mmc | other
+  repeated Partition partitions = 6; // legacy (agents < 023)
+  string name = 7;                   // sda | nvme0n1 | PhysicalDrive0
+  bool removable = 8;
+  string vendor = 9;
+}
+
+// Filesystem is a mounted filesystem and the physical disks it lives on
+// (several for LVM or software RAID spanning disks).
+message Filesystem {
+  string mount = 1;
+  string fs = 2;
+  string device = 3;
+  uint64 size_bytes = 4;
+  uint64 free_bytes = 5;
+  repeated string disks = 6;         // Disk.name values, <= 64
+}
+
+// HardwareAvailability says how complete the hardware collection was:
+// ok | partial | unavailable | unsupported ("" = old agent).
+message HardwareAvailability {
+  string smbios = 1;
+  string disks = 2;
 }
 
 message Partition {
@@ -683,6 +734,23 @@ message HostReport {
   UpdateState update_state = 15;
   repeated PendingUpdate pending_updates = 16; // <= 5000
   CollectionLimits truncated = 17;
+  // Feature 023. Absent for snapshots of agents with hardware_schema < 2
+  // (legacy decoding) and from older inventory versions.
+  HardwareProfile hardware = 18;
+}
+
+// HardwareProfile is the hardware part of a host report (feature 023).
+message HardwareProfile {
+  BIOSInfo bios = 1;
+  SystemInfo system = 2;
+  BaseboardInfo baseboard = 3;
+  ChassisInfo chassis = 4;
+  repeated Processor processors = 5;     // <= 256
+  MemoryInfo memory = 6;                 // modules incl. empty slots, <= 1024
+  repeated Disk disks = 7;               // <= 256, partitions never set
+  repeated Filesystem filesystems = 8;   // <= 1024
+  HardwareAvailability availability = 9;
+  uint32 schema = 10;                    // = Inventory.hardware_schema
 }
 
 // PendingUpdate is an installed package with a newer version available.
@@ -702,6 +770,11 @@ service IngestService {
   rpc Enroll(EnrollRequest) returns (EnrollResponse);
   rpc SubmitInventory(SubmitRequest) returns (SubmitResponse);
   rpc StreamCommands(StreamRequest) returns (stream Command);
+  // Agent self-upgrade (feature 023), authenticated like every method except
+  // Enroll; the tenant always comes from the verified agent.
+  rpc CheckAgentUpdate(CheckAgentUpdateRequest) returns (CheckAgentUpdateResponse);
+  rpc DownloadAgentRelease(DownloadAgentReleaseRequest) returns (stream DownloadAgentReleaseResponse);
+  rpc ReportUpgrade(ReportUpgradeRequest) returns (ReportUpgradeResponse);
 }
 
 message EnrollRequest {
@@ -730,10 +803,90 @@ message SubmitResponse {
 message StreamRequest {
   string agent_id = 1;
   string agent_version = 2;
+  AgentPlatform platform = 3;        // feature 023
+  repeated string capabilities = 4;  // <= 16 items of ^[a-z0-9.]{1,32}$, e.g. "upgrade.v1"
+}
+
+// AgentPlatform identifies the release artifact an agent can install.
+message AgentPlatform {
+  string os = 1;                     // linux | windows
+  string arch = 2;                   // amd64 | arm64
+  string install_type = 3;           // deb | rpm | binary
 }
 
 // Command is a directive streamed to a connected agent. It carries no secrets.
 message Command {
   string command_id = 1;
   CommandType type = 2;
+  UpgradeCommand upgrade = 3;        // set when type = UPGRADE
+}
+
+// UpgradeCommand asks the agent to upgrade to target_version. The agent
+// downloads the artifact over DownloadAgentRelease and verifies it against
+// its compiled keyring before installing anything.
+message UpgradeCommand {
+  string request_id = 1;             // uuid of the upgrade request
+  string target_version = 2;
+  bool allow_downgrade = 3;          // only for administrator pins (SR-003)
+}
+
+message CheckAgentUpdateRequest {
+  string current_version = 1;
+  AgentPlatform platform = 2;
+  bool apply = 3;                    // true: create a request (origin agent) when an upgrade is available
+}
+
+message CheckAgentUpdateResponse {
+  bool available = 1;
+  string target_version = 2;         // "" when none stored for the platform
+  string request_id = 3;             // active or newly created request ("" when none)
+  string reason = 4;                 // up_to_date | no_release_for_platform | upgrade_active | not_comparable
+  bool allow_downgrade = 5;          // the active request targets an administrator-pinned lower version
+}
+
+message DownloadAgentReleaseRequest {
+  string request_id = 1;             // required unless version = the agent's current version (rollback package)
+  string version = 2;
+}
+
+message DownloadAgentReleaseResponse {
+  oneof part {
+    ReleaseHeader header = 1;        // always the first message
+    ArtifactChunk chunk = 2;
+  }
+}
+
+// ReleaseHeader carries the signed manifest and the entry chosen for the
+// agent's stored platform; the agent verifies both before it trusts a byte.
+message ReleaseHeader {
+  bytes manifest = 1;                // exact signed bytes, <= 64 KiB
+  bytes signature = 2;               // Ed25519, 64 bytes
+  string key_id = 3;
+  string file = 4;
+  int64 size = 5;
+  string sha256 = 6;
+}
+
+message ArtifactChunk {
+  int64 offset = 1;
+  bytes data = 2;                    // <= 1 MiB
+}
+
+// ReportUpgradeRequest states: downloading | installing | succeeded | failed |
+// rolled_back. Reason codes (closed set): signature_invalid, unknown_key,
+// checksum_mismatch, size_mismatch, platform_mismatch, version_mismatch,
+// downgrade_refused, disk_full, download_failed, install_failed,
+// start_timeout, unsupported_install, busy, package_db_mismatch,
+// cancelled_locally.
+message ReportUpgradeRequest {
+  string request_id = 1;
+  string state = 2;
+  string from_version = 3;
+  string to_version = 4;
+  string reason = 5;
+  string detail = 6;                 // <= 256 bytes, sanitised, never shown as HTML
+}
+
+message ReportUpgradeResponse {
+  bool accepted = 1;                 // false = transition ignored (terminal/duplicate)
 }

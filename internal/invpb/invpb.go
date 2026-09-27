@@ -1,7 +1,8 @@
-// Package invpb maps the feature-020 host report parts of the inventory
-// payload (interfaces with addresses, virtualization, BMC, hypervisor guests,
-// update state, truncation counters) between the domain store types and the
-// inventory.v1 wire messages. The agent sender, the ingest edge, the mesh API
+// Package invpb maps the host report parts of the inventory payload
+// (feature 020: interfaces with addresses, virtualization, BMC, hypervisor
+// guests, update state, truncation counters; feature 023: BIOS, system,
+// baseboard, chassis, processors, memory, disks, filesystems, availability)
+// between the domain store types and the inventory.v1 wire messages. The agent sender, the ingest edge, the mesh API
 // and the host report projection share these mappers so the three directions
 // cannot drift. The mappers copy values only; validation and bounds live in
 // internal/ingest (edge) and internal/agentfacts (agent).
@@ -160,13 +161,15 @@ func LimitsToPB(l store.CollectionLimits) *invv1.CollectionLimits {
 		return nil
 	}
 	return &invv1.CollectionLimits{Interfaces: l.Interfaces, Addresses: l.Addresses, Guests: l.Guests,
-		Packages: l.Packages, BmcPorts: l.BmcPorts}
+		Packages: l.Packages, BmcPorts: l.BmcPorts, Disks: l.Disks, MemorySlots: l.MemorySlots,
+		MemoryArrays: l.MemoryArrays, Processors: l.Processors, Filesystems: l.Filesystems}
 }
 
 // LimitsFromPB maps wire truncation counters.
 func LimitsFromPB(l *invv1.CollectionLimits) store.CollectionLimits {
 	return store.CollectionLimits{Interfaces: l.GetInterfaces(), Addresses: l.GetAddresses(), Guests: l.GetGuests(),
-		Packages: l.GetPackages(), BmcPorts: l.GetBmcPorts()}
+		Packages: l.GetPackages(), BmcPorts: l.GetBmcPorts(), Disks: l.GetDisks(), MemorySlots: l.GetMemorySlots(),
+		MemoryArrays: l.GetMemoryArrays(), Processors: l.GetProcessors(), Filesystems: l.GetFilesystems()}
 }
 
 func unix(t time.Time) int64 {

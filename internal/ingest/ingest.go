@@ -45,6 +45,10 @@ type Server struct {
 	st         repo.Store
 	maxBytes   int64
 	instanceID string
+
+	// Agent self-upgrade (feature 023); nil until WithUpgrades.
+	upgradeEdge      *upgradeEdge
+	downloadDeadline time.Duration
 }
 
 // New builds an ingest Server. A non-positive maxBytes falls back to
@@ -154,6 +158,9 @@ func (s *Server) StreamCommands(req *inventoryv1.StreamRequest, stream inventory
 	if req != nil && req.GetAgentVersion() != "" {
 		version = req.GetAgentVersion()
 	}
+	// Platform and capabilities decide which release artifact the agent
+	// gets and whether it can upgrade itself at all (feature 023).
+	agent = s.recordPlatform(ctx, agent, req)
 
 	commands, unregister, err := s.reg.Register(ctx, registry.ConnectedAgent{
 		AgentID:     agent.ID,
@@ -167,6 +174,14 @@ func (s *Server) StreamCommands(req *inventoryv1.StreamRequest, stream inventory
 	}
 	defer unregister()
 
+	// Upgrade requests created while the agent was offline (or whose push
+	// was lost) are delivered on every connect; the agent deduplicates.
+	for _, cmd := range s.pendingCommands(ctx, agent) {
+		if err := stream.Send(commandToPB(cmd)); err != nil {
+			return err
+		}
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -176,10 +191,7 @@ func (s *Server) StreamCommands(req *inventoryv1.StreamRequest, stream inventory
 				// Connection superseded (e.g. reconnect) or shut down.
 				return nil
 			}
-			if err := stream.Send(&inventoryv1.Command{
-				CommandId: cmd.ID,
-				Type:      commandType(cmd.Type),
-			}); err != nil {
+			if err := stream.Send(commandToPB(cmd)); err != nil {
 				return err
 			}
 		}
@@ -223,39 +235,11 @@ func inventoryFromProto(pb *inventoryv1.Inventory) store.Inventory {
 			UptimeSec:   pb.GetOs().GetUptimeSec(),
 			Family:      pb.GetOs().GetFamily(),
 		},
-		BIOS: store.BIOSInfo{
-			Vendor:      pb.GetBios().GetVendor(),
-			Version:     pb.GetBios().GetVersion(),
-			ReleaseDate: pb.GetBios().GetReleaseDate(),
-		},
-		System: store.SystemInfo{
-			Manufacturer: pb.GetSystem().GetManufacturer(),
-			ProductName:  pb.GetSystem().GetProductName(),
-			Version:      pb.GetSystem().GetVersion(),
-			SerialNumber: pb.GetSystem().GetSerialNumber(),
-			UUID:         pb.GetSystem().GetUuid(),
-			WakeUpType:   pb.GetSystem().GetWakeUpType(),
-			SKUNumber:    pb.GetSystem().GetSkuNumber(),
-			Family:       pb.GetSystem().GetFamily(),
-		},
-		Baseboard: store.BaseboardInfo{
-			Manufacturer:      pb.GetBaseboard().GetManufacturer(),
-			Product:           pb.GetBaseboard().GetProduct(),
-			Version:           pb.GetBaseboard().GetVersion(),
-			SerialNumber:      pb.GetBaseboard().GetSerialNumber(),
-			AssetTag:          pb.GetBaseboard().GetAssetTag(),
-			LocationInChassis: pb.GetBaseboard().GetLocationInChassis(),
-			BoardType:         pb.GetBaseboard().GetBoardType(),
-		},
-		Chassis: store.ChassisInfo{
-			Manufacturer: pb.GetChassis().GetManufacturer(),
-			Version:      pb.GetChassis().GetVersion(),
-			SerialNumber: pb.GetChassis().GetSerialNumber(),
-			AssetTag:     pb.GetChassis().GetAssetTag(),
-			SKUNumber:    pb.GetChassis().GetSkuNumber(),
-			Type:         pb.GetChassis().GetType(),
-		},
-		Memory:       memoryFromProto(pb.GetMemory()),
+		BIOS:         invpb.BIOSFromPB(pb.GetBios()),
+		System:       invpb.SystemFromPB(pb.GetSystem()),
+		Baseboard:    invpb.BaseboardFromPB(pb.GetBaseboard()),
+		Chassis:      invpb.ChassisFromPB(pb.GetChassis()),
+		Memory:       invpb.MemoryFromPB(pb.GetMemory()),
 		Ports:        pb.GetPorts(),
 		Slots:        pb.GetSlots(),
 		OEMStrings:   pb.GetOemStrings(),
@@ -268,21 +252,7 @@ func inventoryFromProto(pb *inventoryv1.Inventory) store.Inventory {
 		},
 	}
 
-	for _, p := range pb.GetProcessors() {
-		inv.Processors = append(inv.Processors, store.Processor{
-			SocketDesignation: p.GetSocketDesignation(),
-			Manufacturer:      p.GetManufacturer(),
-			Version:           p.GetVersion(),
-			MaxSpeedMHz:       p.GetMaxSpeedMhz(),
-			CurrentSpeedMHz:   p.GetCurrentSpeedMhz(),
-			CoreCount:         p.GetCoreCount(),
-			CoreEnabled:       p.GetCoreEnabled(),
-			ThreadCount:       p.GetThreadCount(),
-			PartNumber:        p.GetPartNumber(),
-			SerialNumber:      p.GetSerialNumber(),
-			SocketPopulated:   p.GetSocketPopulated(),
-		})
-	}
+	inv.Processors = invpb.ProcessorsFromPB(pb.GetProcessors())
 	for _, c := range pb.GetCache() {
 		inv.Cache = append(inv.Cache, store.CacheInfo{SocketDesignation: c.GetSocketDesignation()})
 	}
@@ -335,53 +305,11 @@ func inventoryFromProto(pb *inventoryv1.Inventory) store.Inventory {
 	inv.HypervisorGuests = invpb.GuestsFromPB(pb.GetHypervisorGuests())
 	inv.UpdateState = invpb.UpdateStateFromPB(pb.GetUpdateState())
 	inv.Truncated = invpb.LimitsFromPB(pb.GetTruncated())
-	for _, d := range pb.GetDisks() {
-		disk := store.Disk{
-			Model:     d.GetModel(),
-			Serial:    d.GetSerial(),
-			SizeBytes: d.GetSizeBytes(),
-			MediaType: d.GetMediaType(),
-			Interface: d.GetInterface(),
-		}
-		for _, part := range d.GetPartitions() {
-			disk.Partitions = append(disk.Partitions, store.Partition{
-				Mount:     part.GetMount(),
-				FS:        part.GetFs(),
-				SizeBytes: part.GetSizeBytes(),
-				FreeBytes: part.GetFreeBytes(),
-			})
-		}
-		inv.Disks = append(inv.Disks, disk)
-	}
+	inv.Disks = invpb.DisksFromPB(pb.GetDisks())
+	inv.Filesystems = invpb.FilesystemsFromPB(pb.GetFilesystems())
+	inv.Availability = invpb.AvailabilityFromPB(pb.GetHardwareAvailability())
+	inv.HardwareSchema = pb.GetHardwareSchema()
 	return inv
-}
-
-func memoryFromProto(pb *inventoryv1.MemoryInfo) store.MemoryInfo {
-	m := store.MemoryInfo{
-		TotalPhysicalBytes: pb.GetTotalPhysicalBytes(),
-		Array: store.MemoryArray{
-			Location:        pb.GetArray().GetLocation(),
-			Use:             pb.GetArray().GetUse(),
-			ErrorCorrection: pb.GetArray().GetErrorCorrection(),
-			MaximumCapacity: pb.GetArray().GetMaximumCapacity(),
-			NumberOfDevices: pb.GetArray().GetNumberOfDevices(),
-		},
-	}
-	for _, mod := range pb.GetModules() {
-		m.Modules = append(m.Modules, store.MemoryModule{
-			DeviceLocator:      mod.GetDeviceLocator(),
-			BankLocator:        mod.GetBankLocator(),
-			CapacityBytes:      mod.GetCapacityBytes(),
-			FormFactor:         mod.GetFormFactor(),
-			MemoryType:         mod.GetMemoryType(),
-			SpeedMTs:           mod.GetSpeedMtS(),
-			ConfiguredSpeedMTs: mod.GetConfiguredSpeedMtS(),
-			Manufacturer:       mod.GetManufacturer(),
-			SerialNumber:       mod.GetSerialNumber(),
-			PartNumber:         mod.GetPartNumber(),
-		})
-	}
-	return m
 }
 
 // unixToTime converts unix seconds to a UTC time, mapping 0 to the zero time.

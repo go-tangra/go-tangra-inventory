@@ -181,22 +181,12 @@ func (s *Server) Register(d Deps) {
 	})
 
 	// ---- Agents
-	s.MustHandle("GET", p+"/agents", func(w http.ResponseWriter, r *http.Request) {
-		subj, err := subjects(r)
-		if err != nil {
-			failSvc(w, err)
-			return
-		}
-		agents, err := d.Registry.ListConnected(r.Context(), subj.TenantID)
-		if err != nil {
-			failSvc(w, err)
-			return
-		}
-		if agents == nil {
-			agents = []registry.ConnectedAgent{}
-		}
-		WriteJSON(w, http.StatusOK, map[string]any{"items": agents})
-	})
+	if d.Upgrades != nil {
+		s.MustHandle("GET", p+"/agents", s.listFleet(d.Upgrades))
+		s.registerUpgrades(d, p)
+	} else {
+		s.MustHandle("GET", p+"/agents", s.listConnected(d))
+	}
 	s.MustHandle("POST", p+"/agents/enroll-token", func(w http.ResponseWriter, r *http.Request) {
 		subj, err := subjects(r)
 		if err != nil {
@@ -365,4 +355,25 @@ func atoiDefault(s string, def int) int {
 		return def
 	}
 	return n
+}
+
+// listConnected serves GET /agents from the live registry (deployments
+// without the upgrade service).
+func (s *Server) listConnected(d Deps) func(http.ResponseWriter, *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		subj, err := subjects(r)
+		if err != nil {
+			failSvc(w, err)
+			return
+		}
+		agents, err := d.Registry.ListConnected(r.Context(), subj.TenantID)
+		if err != nil {
+			failSvc(w, err)
+			return
+		}
+		if agents == nil {
+			agents = []registry.ConnectedAgent{}
+		}
+		WriteJSON(w, http.StatusOK, map[string]any{"items": agents})
+	}
 }

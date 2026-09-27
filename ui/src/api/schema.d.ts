@@ -155,7 +155,109 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["listConnectedAgents"];
+        /** Every enrolled agent (online and offline) with its version and upgrade state */
+        get: operations["listAgents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/inventory/v1/agents/upgrades": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listAgentUpgrades"];
+        put?: never;
+        /** Upgrade one agent, a selection or every outdated agent to the tenant target version */
+        post: operations["requestAgentUpgrades"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/inventory/v1/agents/upgrades/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["cancelAgentUpgrade"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/inventory/v1/agents/upgrade-policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The tenant's automatic agent upgrade policy (defaults when none is stored) */
+        get: operations["getAgentUpgradePolicy"];
+        /** Configure automatic agent upgrades and the target agent version */
+        put: operations["updateAgentUpgradePolicy"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/inventory/v1/agents/upgrade-policy/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resume automatic upgrades paused by a failed automatic upgrade */
+        post: operations["resumeAgentUpgradePolicy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/inventory/v1/agent-releases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Signed agent releases stored on the platform */
+        get: operations["listAgentReleases"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/inventory/v1/agents/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getAgent"];
         put?: never;
         post?: never;
         delete?: never;
@@ -306,6 +408,121 @@ export interface components {
             reason?: string;
             detail?: Record<string, never>;
         };
+        /** @description One enrolled agent (online or not) with its upgrade state. The keys of the former connected-agents listing are kept. */
+        AgentFleetEntry: {
+            /** Format: uuid */
+            agent_id?: string;
+            /** Format: uuid */
+            tenant_id?: string;
+            host_id?: string;
+            hostname?: string;
+            version?: string;
+            /** @enum {string} */
+            os?: "" | "linux" | "windows";
+            /** @enum {string} */
+            arch?: "" | "amd64" | "arm64";
+            /** @enum {string} */
+            install_type?: "" | "deb" | "rpm" | "binary";
+            online?: boolean;
+            /** Format: date-time */
+            connected_at?: string;
+            /** Format: date-time */
+            last_seen?: string;
+            target_version?: string;
+            /** @enum {string} */
+            upgrade_state?: "up_to_date" | "available" | "pending" | "in_progress" | "failed" | "rolled_back" | "manual_upgrade_required" | "unsupported";
+            /** @description reason code only */
+            upgrade_reason?: string;
+            /** Format: uuid */
+            upgrade_id?: string;
+            /** Format: date-time */
+            state_changed_at?: string;
+        };
+        AgentFleet: {
+            items?: components["schemas"]["AgentFleetEntry"][];
+            /** @description the tenant target: policy pin or platform current agent version */
+            current_version?: string;
+        };
+        AgentUpgrade: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            agent_id?: string;
+            host_id?: string;
+            from_version?: string;
+            target_version?: string;
+            allow_downgrade?: boolean;
+            /** @enum {string} */
+            state?: "pending" | "delivered" | "downloading" | "installing" | "succeeded" | "failed" | "rolled_back" | "expired" | "cancelled";
+            /** @enum {string} */
+            origin?: "user" | "policy" | "agent";
+            requested_by?: string;
+            reason?: string;
+            attempts?: number;
+            /** Format: date-time */
+            created_at?: string;
+            /** Format: date-time */
+            updated_at?: string;
+            /** Format: date-time */
+            expires_at?: string;
+            /** Format: date-time */
+            finished_at?: string;
+        };
+        AgentDetail: components["schemas"]["AgentFleetEntry"] & {
+            recent_upgrades?: components["schemas"]["AgentUpgrade"][];
+        };
+        UpgradeRequest: {
+            agent_ids?: string[];
+            /** @description every outdated, upgrade-capable agent of the tenant */
+            all_outdated?: boolean;
+        } & (unknown | unknown);
+        UpgradeBatchResult: {
+            target_version?: string;
+            created?: components["schemas"]["AgentUpgrade"][];
+            skipped?: {
+                agent_id?: string;
+                /** @enum {string} */
+                reason?: "up_to_date" | "upgrade_active" | "manual_upgrade_required" | "unsupported" | "no_release_for_platform" | "not_found";
+            }[];
+        };
+        AgentUpgradeList: {
+            items?: components["schemas"]["AgentUpgrade"][];
+            next_cursor?: string;
+        };
+        UpgradePolicy: {
+            enabled: boolean;
+            window_start: string;
+            /** @description may wrap past midnight; equal to window_start = the whole day */
+            window_end: string;
+            /** @description IANA name, validated with time.LoadLocation */
+            timezone: string;
+            max_concurrent: number;
+            /** @description "" = platform current; otherwise a stored release version (a lower pin downgrades newer agents) */
+            target_version: string;
+            readonly paused?: boolean;
+            readonly paused_reason?: string;
+            readonly updated_by?: string;
+            /** Format: date-time */
+            readonly updated_at?: string;
+        };
+        AgentReleaseInfo: {
+            version?: string;
+            /** @enum {string} */
+            source?: "bundled" | "import";
+            key_id?: string;
+            /** Format: date-time */
+            imported_at?: string;
+            platforms?: {
+                os?: string;
+                arch?: string;
+                install_type?: string;
+                size?: number;
+            }[];
+        };
+        AgentReleaseList: {
+            current_version?: string;
+            items?: components["schemas"]["AgentReleaseInfo"][];
+        };
     };
     responses: never;
     parameters: {
@@ -318,6 +535,10 @@ export interface components {
         other: string;
         cursor: string;
         limit: number;
+        upgradeState: "up_to_date" | "available" | "pending" | "in_progress" | "failed" | "rolled_back" | "manual_upgrade_required" | "unsupported";
+        requestState: "pending" | "delivered" | "downloading" | "installing" | "succeeded" | "failed" | "rolled_back" | "expired" | "cancelled";
+        outdated: boolean;
+        agentIdQuery: string;
     };
     requestBodies: never;
     headers: never;
@@ -592,7 +813,143 @@ export interface operations {
             };
         };
     };
-    listConnectedAgents: {
+    listAgents: {
+        parameters: {
+            query?: {
+                state?: components["parameters"]["upgradeState"];
+                outdated?: components["parameters"]["outdated"];
+                cursor?: components["parameters"]["cursor"];
+                limit?: components["parameters"]["limit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description agent fleet */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentFleet"];
+                };
+            };
+        };
+    };
+    listAgentUpgrades: {
+        parameters: {
+            query?: {
+                state?: components["parameters"]["requestState"];
+                agent_id?: components["parameters"]["agentIdQuery"];
+                cursor?: components["parameters"]["cursor"];
+                limit?: components["parameters"]["limit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description upgrade requests, newest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentUpgradeList"];
+                };
+            };
+        };
+    };
+    requestAgentUpgrades: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["csrf"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpgradeRequest"];
+            };
+        };
+        responses: {
+            /** @description requests created (delivered to online agents) */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpgradeBatchResult"];
+                };
+            };
+            /** @description invalid_argument */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description no_release_available */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description body_too_large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    cancelAgentUpgrade: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["csrf"];
+            };
+            path: {
+                /** @example 018f3a2b-0000-7000-8000-000000000001 */
+                id: components["parameters"]["id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description cancelled */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentUpgrade"];
+                };
+            };
+            /** @description not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description not_cancellable */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getAgentUpgradePolicy: {
         parameters: {
             query?: never;
             header?: never;
@@ -601,8 +958,129 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description connected agents */
+            /** @description policy */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpgradePolicy"];
+                };
+            };
+        };
+    };
+    updateAgentUpgradePolicy: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["csrf"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpgradePolicy"];
+            };
+        };
+        responses: {
+            /** @description stored */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpgradePolicy"];
+                };
+            };
+            /** @description invalid_argument */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description unknown_version */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description body_too_large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    resumeAgentUpgradePolicy: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["csrf"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description resumed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpgradePolicy"];
+                };
+            };
+        };
+    };
+    listAgentReleases: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description agent releases, newest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentReleaseList"];
+                };
+            };
+        };
+    };
+    getAgent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @example 018f3a2b-0000-7000-8000-000000000001 */
+                id: components["parameters"]["id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description agent with recent upgrades */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentDetail"];
+                };
+            };
+            /** @description not_found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

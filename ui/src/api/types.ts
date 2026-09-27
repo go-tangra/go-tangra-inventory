@@ -69,7 +69,8 @@ export interface ChassisInfo {
   serial_number?: string
   asset_tag?: string
   sku_number?: string
-  type?: string
+  type?: string // DSP0134 name, e.g. "Rack Mount Chassis"
+  bootup_state?: string
 }
 
 export interface Processor {
@@ -84,6 +85,9 @@ export interface Processor {
   part_number?: string
   serial_number?: string
   socket_populated?: boolean
+  family?: string // DSP0134 name, e.g. "Intel Xeon processor"
+  type?: string // e.g. "Central Processor"
+  upgrade?: string // socket, e.g. "Socket LGA4189"
 }
 
 export interface MemoryArray {
@@ -92,6 +96,7 @@ export interface MemoryArray {
   error_correction?: string
   maximum_capacity?: number
   number_of_devices?: number
+  handle?: number
 }
 
 export interface MemoryModule {
@@ -105,12 +110,22 @@ export interface MemoryModule {
   manufacturer?: string
   serial_number?: string
   part_number?: string
+  // Feature 023 (hardware_schema >= 2): every slot is listed; an empty slot
+  // has populated false/absent. Older agents listed populated modules only.
+  populated?: boolean
+  type_detail?: string[]
+  array_handle?: number
+  asset_tag?: string
+  rank_count?: number
 }
 
 export interface MemoryInfo {
   total_physical_bytes?: number
   array: MemoryArray
   modules?: MemoryModule[]
+  arrays?: MemoryArray[]
+  slots_total?: number
+  slots_populated?: number
 }
 
 export interface Monitor {
@@ -240,6 +255,11 @@ export interface CollectionLimits {
   guests?: number
   packages?: number
   bmc_ports?: number
+  disks?: number
+  memory_slots?: number
+  memory_arrays?: number
+  processors?: number
+  filesystems?: number
 }
 
 export interface Partition {
@@ -249,13 +269,34 @@ export interface Partition {
   free_bytes?: number
 }
 
+// Disk is a physical disk (hardware_schema >= 2); older agents reported
+// mounted partitions grouped by device in `partitions` only.
 export interface Disk {
   model?: string
   serial?: string
   size_bytes?: number
-  media_type?: string
-  interface?: string
+  media_type?: string // ssd | hdd | nvme_ssd | unknown
+  interface?: string // nvme | sata | sas | scsi | usb | virtio | hyperv | xen | mmc | other
   partitions?: Partition[]
+  name?: string
+  removable?: boolean
+  vendor?: string
+}
+
+// Filesystem is a mounted filesystem and the disks (Disk.name) it lives on.
+export interface Filesystem {
+  mount: string
+  fs?: string
+  device?: string
+  size_bytes?: number
+  free_bytes?: number
+  disks?: string[]
+}
+
+// HardwareAvailability: ok | partial | unavailable | unsupported | unknown.
+export interface HardwareAvailability {
+  smbios?: string
+  disks?: string
 }
 
 export interface Identity {
@@ -295,6 +336,9 @@ export interface Inventory {
   hypervisor_guests?: HypervisorGuest[]
   update_state?: UpdateState
   truncated?: CollectionLimits
+  filesystems?: Filesystem[]
+  hardware_schema?: number // < 2 (or absent): legacy decoding with known errors
+  hardware_availability?: HardwareAvailability
 }
 
 // Snapshot is an immutable inventory report bound to a host.
@@ -346,6 +390,71 @@ export interface ConnectedAgent {
   connected_at?: string
 }
 
+// --- agent fleet and self-upgrade (feature 023) ---
+
+export type FleetState = 'up_to_date' | 'available' | 'pending' | 'in_progress' | 'failed' | 'rolled_back' | 'manual_upgrade_required' | 'unsupported'
+export type UpgradeState = 'pending' | 'delivered' | 'downloading' | 'installing' | 'succeeded' | 'failed' | 'rolled_back' | 'expired' | 'cancelled'
+
+// AgentFleetEntry is one enrolled agent (online or not); the connected-agent keys are kept.
+export interface AgentFleetEntry extends ConnectedAgent {
+  tenant_id?: string
+  os?: '' | 'linux' | 'windows'
+  arch?: '' | 'amd64' | 'arm64'
+  install_type?: '' | 'deb' | 'rpm' | 'binary'
+  // Absent on the legacy connected-only listing (every entry is online there).
+  online?: boolean
+  last_seen?: string
+  target_version?: string
+  upgrade_state?: FleetState
+  upgrade_reason?: string
+  upgrade_id?: string
+  state_changed_at?: string
+}
+
+export interface AgentFleet {
+  items: AgentFleetEntry[]
+  current_version?: string
+}
+
+export interface AgentUpgrade {
+  id: string
+  agent_id: string
+  host_id?: string
+  from_version?: string
+  target_version: string
+  allow_downgrade?: boolean
+  state: UpgradeState
+  origin: 'user' | 'policy' | 'agent'
+  requested_by?: string
+  reason?: string
+  attempts?: number
+  created_at: string
+  updated_at?: string
+  expires_at?: string
+  finished_at?: string
+}
+
+export type SkipReason = 'up_to_date' | 'upgrade_active' | 'manual_upgrade_required' | 'unsupported' | 'no_release_for_platform' | 'not_found'
+
+export interface UpgradeBatchResult {
+  target_version: string
+  created: AgentUpgrade[]
+  skipped: { agent_id: string; reason: SkipReason }[]
+}
+
+export interface AgentReleaseInfo {
+  version: string
+  source: 'bundled' | 'import'
+  key_id: string
+  imported_at: string
+  platforms: { os: string; arch: string; install_type: string; size: number }[]
+}
+
+export interface AgentReleaseList {
+  current_version?: string
+  items: AgentReleaseInfo[]
+}
+
 // MintedToken is the one-time secret returned by /agents/enroll-token.
 export interface MintedToken {
   id: string
@@ -374,4 +483,18 @@ export interface Stats {
   total_ram_bytes: number
   total_cpu_cores: number
   total_disk_bytes: number
+}
+
+// UpgradePolicy is the tenant's automatic agent upgrade policy.
+export interface UpgradePolicy {
+  enabled: boolean
+  window_start: string
+  window_end: string
+  timezone: string
+  max_concurrent: number
+  target_version: string
+  paused?: boolean
+  paused_reason?: string
+  updated_by?: string
+  updated_at?: string
 }

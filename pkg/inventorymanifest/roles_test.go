@@ -57,3 +57,65 @@ func TestRegistration(t *testing.T) {
 		t.Fatalf("%v", req)
 	}
 }
+
+// Feature 023: agentupgrades:manage (automatic upgrades, version pins,
+// downgrades) is held by owner, admin and the module administrator only.
+func TestAgentUpgradesPermission(t *testing.T) {
+	const perm = "agentupgrades:manage"
+	if !slices.Contains(PermissionRefs(), perm) {
+		t.Fatalf("%s not declared", perm)
+	}
+	for _, slug := range []string{"owner", "admin"} {
+		if !slices.Contains(Grants[slug], perm) {
+			t.Errorf("%s lacks %s", slug, perm)
+		}
+	}
+	for _, slug := range []string{"operator", "member", "auditor"} {
+		if slices.Contains(Grants[slug], perm) {
+			t.Errorf("%s must not hold %s", slug, perm)
+		}
+	}
+	for _, r := range Roles {
+		if has := slices.Contains(r.Permissions, perm); has != (r.Slug == "administrator") {
+			t.Errorf("module role %s holds %s = %v", r.Slug, perm, has)
+		}
+	}
+	// Routine upgrades stay with agents:manage (operators keep them).
+	if !slices.Contains(Grants["operator"], "agents:manage") {
+		t.Error("operator lost agents:manage")
+	}
+	found := false
+	for _, a := range Abilities {
+		if slices.Equal(a.Action, []string{"manage"}) && slices.Equal(a.Subject, []string{"InventoryAgentUpgradePolicy"}) && a.Requires == perm {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("ability {manage, InventoryAgentUpgradePolicy} missing")
+	}
+	// The policy write routes require it; reading the policy needs agents:manage.
+	doc, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	routes, err := Routes(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"GET /api/inventory/v1/agents/upgrade-policy":         "agents:manage",
+		"PUT /api/inventory/v1/agents/upgrade-policy":         perm,
+		"POST /api/inventory/v1/agents/upgrade-policy/resume": perm,
+	}
+	for _, r := range routes {
+		if p, ok := want[r.Method+" "+r.Path]; ok {
+			if r.Permission != p {
+				t.Errorf("%s %s requires %s, want %s", r.Method, r.Path, r.Permission, p)
+			}
+			delete(want, r.Method+" "+r.Path)
+		}
+	}
+	if len(want) != 0 {
+		t.Fatalf("routes missing: %v", want)
+	}
+}

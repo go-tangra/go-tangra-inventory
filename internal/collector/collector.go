@@ -34,6 +34,8 @@ func CollectWith(ctx context.Context, opts Options) (store.Inventory, error) {
 	inv := store.Inventory{
 		CollectedAt:  time.Now().UTC(),
 		AgentVersion: Version,
+		// DSP0134-correct SMBIOS decoding and physical disks (feature 023).
+		HardwareSchema: store.HardwareSchemaCurrent,
 	}
 
 	// Identity: hostname + machine id (hardware uuid is filled from SMBIOS below).
@@ -46,12 +48,14 @@ func CollectWith(ctx context.Context, opts Options) (store.Inventory, error) {
 		if inv.Identity.HardwareUUID == "" {
 			inv.Identity.HardwareUUID = inv.System.UUID
 		}
+	} else {
+		inv.Availability.SMBIOS = store.AvailUnavailable
 	}
 
 	// OS / network / disks via gopsutil (cross-platform).
 	collectOS(ctx, &inv)
 	collectNetworks(ctx, &inv)
-	collectDisks(ctx, &inv)
+	collectDisks(ctx, &inv, opts)
 
 	// Software: installed programs, services, local users (build-tagged,
 	// best-effort; empty where not implemented for the platform).
@@ -77,21 +81,6 @@ func CollectWith(ctx context.Context, opts Options) (store.Inventory, error) {
 	}
 
 	return inv, nil
-}
-
-// applyHardware copies the SMBIOS-derived hardware pieces onto the inventory.
-func applyHardware(inv *store.Inventory, hw hardware) {
-	inv.BIOS = hw.BIOS
-	inv.System = hw.System
-	inv.Baseboard = hw.Baseboard
-	inv.Chassis = hw.Chassis
-	inv.Processors = hw.Processors
-	inv.Cache = hw.Cache
-	inv.Memory = hw.Memory
-	inv.Ports = hw.Ports
-	inv.Slots = hw.Slots
-	inv.OEMStrings = hw.OEMStrings
-	inv.BIOSLanguage = hw.BIOSLanguage
 }
 
 // mergeUser appends u unless a user with the same name is already present.

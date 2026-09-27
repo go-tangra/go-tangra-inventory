@@ -77,10 +77,11 @@ GitHub token with `read:packages` to install `@go-tangra/ui` from GitHub Package
 ```bash
 go build ./... && go vet ./... && go test -race ./...
 (cd sdk && go vet ./... && go test -race ./...)
-make proto-check                          # buf lint + buf breaking against sdk/v4.0.0
+make proto-check                          # buf lint + buf breaking against sdk/v4.1.0
 make test-integration                     # -tags integration, needs Docker
 make lint cover vuln
 make fuzz                                 # every Fuzz* target, FUZZTIME=10s each
+make e2e-upgrade                          # agent self-upgrade in systemd containers, needs privileged Docker
 
 cd ui
 export NODE_AUTH_TOKEN=$(gh auth token)   # ui/.npmrc only references this variable
@@ -88,7 +89,8 @@ npm ci && npm run lint && npm run test:unit && npm run build
 ```
 
 The unit coverage gate requires at least 80 % overall and 100 % for the
-authorization, sealing, enrollment and host report projection packages. Generated code, SQL bindings,
+authorization, sealing, enrollment, host report projection, release
+verification (`agentrelease`), agent self-update and upgrade lifecycle packages. Generated code, SQL bindings,
 wiring and the agent's platform collectors are covered by the integration suite
 or excluded on purpose.
 
@@ -130,8 +132,105 @@ server certificate against the system roots, or only against `ca_file`
 (`-ca-file`) for a private CA; `server_name` (`-server-name`) overrides the
 verified name. See [deploy/README.md](deploy/README.md#ingest-tls).
 
-CI cross-compiles the agent for every supported platform on each change. It does
-not upload or release agent binaries.
+Hardware comes from the raw SMBIOS table (Linux sysfs, go-smbios as the
+fallback on other platforms), decoded against DSP0134: BIOS vendor, version and
+date; system, board and chassis identity; every processor socket with family,
+cores and threads; the physical memory arrays (location, use, ECC, maximum
+capacity, slot count) and every memory slot, populated or empty, with type,
+type detail, rated and configured speed, bank and locator. `collect_disks`
+(default on) adds the physical disks (name, model, serial, size, SSD/HDD/NVMe,
+interface, removable; Linux sysfs, Windows `Get-PhysicalDisk`) and maps every
+filesystem to its disk. The dashboard's disk total counts physical disks only.
+Snapshots from older agents keep their hardware as sent and are marked
+`hardware_schema < 2` in the UI.
+
+### Agent self-upgrade
+
+From agent 4.4.0 on the platform upgrades agents itself. The first 4.4.0 is
+installed by hand once per host (package or binary as above); after that:
+
+- **Fleet view** (Inventory > Agents): every enrolled agent, online or not, with
+  version, target version and upgrade state (`up_to_date`, `available`,
+  `pending`, `in_progress`, `failed`, `rolled_back`, `manual_upgrade_required`
+  for agents older than 4.4.0, `unsupported`). **Upgrade**, **Upgrade
+  selected**, **Upgrade all outdated** and **Cancel** need `agents:manage`.
+- **Delivery**: the request reaches online agents at once over the command
+  stream and offline agents when they connect. The agent downloads the artifact
+  for its platform (linux/windows, amd64/arm64, deb/rpm/binary) over the same
+  mTLS ingest connection with its own credential.
+- **Verification**: the Ed25519 signature of the release manifest is checked
+  against the release keys compiled into the agent, then size and SHA-256 of the
+  artifact while it streams. Nothing is installed from an unverified download;
+  downgrades need an explicit pin, never below 4.4.0.
+- **Install**: Linux needs systemd. deb and rpm installs upgrade through
+  `dpkg -i` / `rpm -U` in a transient systemd unit, binary installs by an
+  atomic swap; Windows swaps the binary and restarts the service. Hosts without
+  systemd report `unsupported_install`: upgrade them by hand.
+- **Rollback**: the new version must connect and submit within
+  `upgrade.confirm_timeout_seconds` (default 300). Otherwise the previous
+  package (or binary) is put back and the request ends `rolled_back`.
+- **On the host**: `inventory-agent update -check` prints the current and the
+  available version (exit 0 up to date, 10 upgrade available, 1 error, 2 another
+  upgrade running); `inventory-agent update` upgrades now. `upgrade.enabled:
+  false` ignores upgrade requests from the platform.
+- **Automatic upgrades** (off by default, `agentupgrades:manage`): per tenant a
+  maintenance window (HH:MM, may wrap midnight, timezone), a concurrency limit
+  and an optional pinned version (which also allows downgrades). Until one
+  agent of the tenant runs the target version the policy upgrades a single
+  agent at a time (canary); a failed or rolled-back automatic upgrade pauses the
+  policy until an administrator resumes it.
+
+Releases are bundled in the image (`agent-releases/<version>/`: manifest,
+signature and the eight artifacts), verified and copied into PostgreSQL at
+start; the newest bundled version is the platform's current version and the
+last `agent_releases.keep_versions` (default 5) are kept, about 80 MB per
+release. Offline sites or other versions: `inventorysvc agent-release import
+-config <file> <release dir>` (same verification). Every request, transition,
+refusal, policy change and import is audited. Operations:
+[deploy/README.md](deploy/README.md#agent-self-upgrade).
+
+### Agent release signing
+
+Release artifacts are signed with an Ed25519 key that never enters the
+repository or the image. The public half is compiled into `inventorysvc` and
+`inventory-agent` through `-ldflags -X
+github.com/go-tangra/go-tangra-inventory/v4/internal/agentrelease.productionKeys=<id>:<base64>[,<id>:<base64>]`
+(`make ... AGENT_RELEASE_KEYS=...`; a build without keys trusts nothing and
+refuses every release).
+
+Key generation (once, on an offline or trusted machine):
+
+```bash
+go run ./cmd/agent-release keygen -key-id release-2026 -out-private release-2026.key > release-2026.pub
+cat release-2026.pub      # "release-2026:<base64 public key>"
+```
+
+GitHub setup:
+
+1. Create the environment **`release`** (Settings > Environments) with required
+   reviewers and deployment restricted to `v*` tags.
+2. Store the content of `release-2026.key` (base64 seed) as the environment
+   secret **`AGENT_RELEASE_SIGNING_KEY`**, then delete the local file (keep an
+   offline backup per SECURITY.md).
+3. Store the content of `release-2026.pub` as the repository variable
+   **`AGENT_RELEASE_PUBLIC_KEYS`** (comma-separate several keys during a
+   rotation).
+
+On a `v*` tag the CI `sign` job (environment `release`) runs `agent-release
+sign` on the eight artifacts, `agent-release verify` and `make release-check`
+(every binary carries the keyring and version, no `dev-` key). It fails with a
+clear error when the secret or the variable is missing. The `docker` job bakes
+the signed bundle into the image; the GitHub release carries artifacts,
+manifest, signature and `SHA256SUMS`.
+
+Local testing uses a throwaway key: `make agent-release-dev AGENT_VERSION=4.4.1`
+generates `.dev/agent-release/dev.key` (git-ignored, key id `dev-local`) and
+copies a dev-signed release into `agent-releases/`, which only an image built
+with that dev keyring accepts. `make e2e-upgrade` runs the systemd container
+end-to-end test (Debian 12, Rocky 9) with its own throwaway key.
+
+CI cross-compiles the agent for every supported platform on each change and
+builds the signed release only on tags.
 
 ## Host reports for IPAM
 
@@ -168,9 +267,12 @@ publishes the ingest edge port.
 
 ## API permissions and module roles
 
-`inventory:read/write`, `hosts:manage`, `agents:manage`,
-`snapshots:read/manage`, `stats:read`, `backup:manage`. The gateway enforces the
-per-route permission from the manifest; the module checks it again.
+`inventory:read/write`, `hosts:manage`, `agents:manage` (enroll, refresh,
+list, upgrade and revoke agents), `agentupgrades:manage` (automatic upgrades
+and the pinned agent version, including downgrades; owner, admin and the module
+administrator only, not operator), `snapshots:read/manage`, `stats:read`,
+`backup:manage`. The gateway enforces the per-route permission from the
+manifest; the module checks it again.
 
 The module registers its permissions, its module roles and the built-in role
 grants (`pkg/inventorymanifest.Grants`, scoped to inventory by auth) with auth

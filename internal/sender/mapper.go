@@ -30,39 +30,11 @@ func toProto(inv store.Inventory) *invv1.Inventory {
 			UptimeSec: inv.OS.UptimeSec,
 			Family:    inv.OS.Family,
 		},
-		Bios: &invv1.BIOSInfo{
-			Vendor:      inv.BIOS.Vendor,
-			Version:     inv.BIOS.Version,
-			ReleaseDate: inv.BIOS.ReleaseDate,
-		},
-		System: &invv1.SystemInfo{
-			Manufacturer: inv.System.Manufacturer,
-			ProductName:  inv.System.ProductName,
-			Version:      inv.System.Version,
-			SerialNumber: inv.System.SerialNumber,
-			Uuid:         inv.System.UUID,
-			WakeUpType:   inv.System.WakeUpType,
-			SkuNumber:    inv.System.SKUNumber,
-			Family:       inv.System.Family,
-		},
-		Baseboard: &invv1.BaseboardInfo{
-			Manufacturer:      inv.Baseboard.Manufacturer,
-			Product:           inv.Baseboard.Product,
-			Version:           inv.Baseboard.Version,
-			SerialNumber:      inv.Baseboard.SerialNumber,
-			AssetTag:          inv.Baseboard.AssetTag,
-			LocationInChassis: inv.Baseboard.LocationInChassis,
-			BoardType:         inv.Baseboard.BoardType,
-		},
-		Chassis: &invv1.ChassisInfo{
-			Manufacturer: inv.Chassis.Manufacturer,
-			Version:      inv.Chassis.Version,
-			SerialNumber: inv.Chassis.SerialNumber,
-			AssetTag:     inv.Chassis.AssetTag,
-			SkuNumber:    inv.Chassis.SKUNumber,
-			Type:         inv.Chassis.Type,
-		},
-		Memory:       memoryToProto(inv.Memory),
+		Bios:         invpb.BIOSToPB(inv.BIOS),
+		System:       invpb.SystemToPB(inv.System),
+		Baseboard:    invpb.BaseboardToPB(inv.Baseboard),
+		Chassis:      invpb.ChassisToPB(inv.Chassis),
+		Memory:       invpb.MemoryToPB(inv.Memory),
 		Ports:        inv.Ports,
 		Slots:        inv.Slots,
 		OemStrings:   inv.OEMStrings,
@@ -81,21 +53,7 @@ func toProto(inv store.Inventory) *invv1.Inventory {
 		pb.Os.LastBoot = inv.OS.LastBoot.Unix()
 	}
 
-	for _, p := range inv.Processors {
-		pb.Processors = append(pb.Processors, &invv1.Processor{
-			SocketDesignation: p.SocketDesignation,
-			Manufacturer:      p.Manufacturer,
-			Version:           p.Version,
-			MaxSpeedMhz:       p.MaxSpeedMHz,
-			CurrentSpeedMhz:   p.CurrentSpeedMHz,
-			CoreCount:         p.CoreCount,
-			CoreEnabled:       p.CoreEnabled,
-			ThreadCount:       p.ThreadCount,
-			PartNumber:        p.PartNumber,
-			SerialNumber:      p.SerialNumber,
-			SocketPopulated:   p.SocketPopulated,
-		})
-	}
+	pb.Processors = invpb.ProcessorsToPB(inv.Processors)
 	for _, c := range inv.Cache {
 		pb.Cache = append(pb.Cache, &invv1.CacheInfo{SocketDesignation: c.SocketDesignation})
 	}
@@ -145,51 +103,9 @@ func toProto(inv store.Inventory) *invv1.Inventory {
 	pb.HypervisorGuests = invpb.GuestsToPB(inv.HypervisorGuests)
 	pb.UpdateState = invpb.UpdateStateToPB(inv.UpdateState)
 	pb.Truncated = invpb.LimitsToPB(inv.Truncated)
-	for _, d := range inv.Disks {
-		pd := &invv1.Disk{
-			Model:     d.Model,
-			Serial:    d.Serial,
-			SizeBytes: d.SizeBytes,
-			MediaType: d.MediaType,
-			Interface: d.Interface,
-		}
-		for _, part := range d.Partitions {
-			pd.Partitions = append(pd.Partitions, &invv1.Partition{
-				Mount:     part.Mount,
-				Fs:        part.FS,
-				SizeBytes: part.SizeBytes,
-				FreeBytes: part.FreeBytes,
-			})
-		}
-		pb.Disks = append(pb.Disks, pd)
-	}
-	return pb
-}
-
-func memoryToProto(m store.MemoryInfo) *invv1.MemoryInfo {
-	pb := &invv1.MemoryInfo{
-		TotalPhysicalBytes: m.TotalPhysicalBytes,
-		Array: &invv1.MemoryArray{
-			Location:        m.Array.Location,
-			Use:             m.Array.Use,
-			ErrorCorrection: m.Array.ErrorCorrection,
-			MaximumCapacity: m.Array.MaximumCapacity,
-			NumberOfDevices: m.Array.NumberOfDevices,
-		},
-	}
-	for _, mod := range m.Modules {
-		pb.Modules = append(pb.Modules, &invv1.MemoryModule{
-			DeviceLocator:      mod.DeviceLocator,
-			BankLocator:        mod.BankLocator,
-			CapacityBytes:      mod.CapacityBytes,
-			FormFactor:         mod.FormFactor,
-			MemoryType:         mod.MemoryType,
-			SpeedMtS:           mod.SpeedMTs,
-			ConfiguredSpeedMtS: mod.ConfiguredSpeedMTs,
-			Manufacturer:       mod.Manufacturer,
-			SerialNumber:       mod.SerialNumber,
-			PartNumber:         mod.PartNumber,
-		})
-	}
+	pb.Disks = invpb.DisksToPB(inv.Disks)
+	pb.Filesystems = invpb.FilesystemsToPB(inv.Filesystems)
+	pb.HardwareAvailability = invpb.AvailabilityToPB(inv.Availability)
+	pb.HardwareSchema = inv.HardwareSchema
 	return pb
 }

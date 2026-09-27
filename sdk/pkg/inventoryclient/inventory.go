@@ -39,6 +39,11 @@ type Inventory struct {
 	Guests         []HypervisorGuest
 	Updates        UpdateState
 	Truncated      CollectionLimits
+	// 023: hardware details (zero values from older agents). HardwareSchema
+	// 0/1 = legacy SMBIOS decoding (values may be shifted), 2 = DSP0134-correct.
+	Filesystems    []Filesystem
+	HardwareSchema uint32
+	Availability   HardwareAvailability
 }
 
 type Identity struct {
@@ -92,7 +97,8 @@ type ChassisInfo struct {
 	SerialNumber string
 	AssetTag     string
 	SKUNumber    string
-	Type         string
+	Type         string // DSP0134 7.4.1 name
+	BootupState  string // DSP0134 7.4.2 name
 }
 
 type Processor struct {
@@ -107,16 +113,25 @@ type Processor struct {
 	PartNumber        string
 	SerialNumber      string
 	SocketPopulated   bool
+	Family            string // DSP0134 7.5.2
+	Type              string // DSP0134 7.5.1
+	Upgrade           string // DSP0134 7.5.5 (socket)
 }
 
 type CacheInfo struct {
 	SocketDesignation string
 }
 
+// MemoryInfo is the memory subsystem. From hardware schema 2 on Modules
+// lists every slot (empty ones with Populated false), Array is the primary
+// array and TotalPhysicalBytes counts "System memory" arrays only.
 type MemoryInfo struct {
 	TotalPhysicalBytes uint64
 	Array              MemoryArray
 	Modules            []MemoryModule
+	Arrays             []MemoryArray
+	SlotsTotal         uint32
+	SlotsPopulated     uint32
 }
 
 type MemoryArray struct {
@@ -125,6 +140,7 @@ type MemoryArray struct {
 	ErrorCorrection string
 	MaximumCapacity uint64
 	NumberOfDevices uint32
+	Handle          uint32 // SMBIOS handle; MemoryModule.ArrayHandle refers to it
 }
 
 type MemoryModule struct {
@@ -138,6 +154,11 @@ type MemoryModule struct {
 	Manufacturer       string
 	SerialNumber       string
 	PartNumber         string
+	Populated          bool     // hardware schema 2 only; false = empty slot
+	TypeDetail         []string // e.g. "Registered (Buffered)"
+	ArrayHandle        uint32
+	AssetTag           string
+	RankCount          uint32 // 0 = unknown
 }
 
 type Monitor struct {
@@ -267,15 +288,43 @@ type CollectionLimits struct {
 	Guests     uint32
 	Packages   uint32
 	BMCPorts   uint32
+	// 023. Disks also counts dropped filesystem->disk references.
+	Disks        uint32
+	MemorySlots  uint32
+	MemoryArrays uint32
+	Processors   uint32
+	Filesystems  uint32
 }
 
+// Disk is a physical disk (hardware schema 2). Older agents reported mounted
+// partitions grouped by device in Partitions and left the rest empty.
 type Disk struct {
 	Model      string
 	Serial     string
 	SizeBytes  uint64
-	MediaType  string
-	Interface  string
+	MediaType  string // ssd | hdd | nvme_ssd | unknown
+	Interface  string // nvme | sata | sas | scsi | usb | virtio | hyperv | xen | mmc | other
 	Partitions []Partition
+	Name       string // sda | nvme0n1 | PhysicalDrive0
+	Removable  bool
+	Vendor     string
+}
+
+// Filesystem is a mounted filesystem and the disks (Disk.Name) it lives on.
+type Filesystem struct {
+	Mount     string
+	FS        string
+	Device    string
+	SizeBytes uint64
+	FreeBytes uint64
+	Disks     []string
+}
+
+// HardwareAvailability says how complete the hardware collection was:
+// ok | partial | unavailable | unsupported ("" = older agent).
+type HardwareAvailability struct {
+	SMBIOS string
+	Disks  string
 }
 
 type Partition struct {
@@ -306,56 +355,24 @@ func toInventory(pb *invv1.Inventory) *Inventory {
 		}
 	}
 	if b := pb.GetBios(); b != nil {
-		inv.BIOS = BIOSInfo{Vendor: b.GetVendor(), Version: b.GetVersion(), ReleaseDate: b.GetReleaseDate()}
+		inv.BIOS = toBIOS(b)
 	}
 	if sy := pb.GetSystem(); sy != nil {
-		inv.System = SystemInfo{
-			Manufacturer: sy.GetManufacturer(), ProductName: sy.GetProductName(), Version: sy.GetVersion(),
-			SerialNumber: sy.GetSerialNumber(), UUID: sy.GetUuid(), WakeUpType: sy.GetWakeUpType(),
-			SKUNumber: sy.GetSkuNumber(), Family: sy.GetFamily(),
-		}
+		inv.System = toSystem(sy)
 	}
 	if bb := pb.GetBaseboard(); bb != nil {
-		inv.Baseboard = BaseboardInfo{
-			Manufacturer: bb.GetManufacturer(), Product: bb.GetProduct(), Version: bb.GetVersion(),
-			SerialNumber: bb.GetSerialNumber(), AssetTag: bb.GetAssetTag(),
-			LocationInChassis: bb.GetLocationInChassis(), BoardType: bb.GetBoardType(),
-		}
+		inv.Baseboard = toBaseboard(bb)
 	}
 	if ch := pb.GetChassis(); ch != nil {
-		inv.Chassis = ChassisInfo{
-			Manufacturer: ch.GetManufacturer(), Version: ch.GetVersion(), SerialNumber: ch.GetSerialNumber(),
-			AssetTag: ch.GetAssetTag(), SKUNumber: ch.GetSkuNumber(), Type: ch.GetType(),
-		}
+		inv.Chassis = toChassis(ch)
 	}
 	if m := pb.GetMemory(); m != nil {
-		inv.Memory = MemoryInfo{TotalPhysicalBytes: m.GetTotalPhysicalBytes()}
-		if a := m.GetArray(); a != nil {
-			inv.Memory.Array = MemoryArray{
-				Location: a.GetLocation(), Use: a.GetUse(), ErrorCorrection: a.GetErrorCorrection(),
-				MaximumCapacity: a.GetMaximumCapacity(), NumberOfDevices: a.GetNumberOfDevices(),
-			}
-		}
-		for _, mod := range m.GetModules() {
-			inv.Memory.Modules = append(inv.Memory.Modules, MemoryModule{
-				DeviceLocator: mod.GetDeviceLocator(), BankLocator: mod.GetBankLocator(), CapacityBytes: mod.GetCapacityBytes(),
-				FormFactor: mod.GetFormFactor(), MemoryType: mod.GetMemoryType(), SpeedMTs: mod.GetSpeedMtS(),
-				ConfiguredSpeedMTs: mod.GetConfiguredSpeedMtS(), Manufacturer: mod.GetManufacturer(),
-				SerialNumber: mod.GetSerialNumber(), PartNumber: mod.GetPartNumber(),
-			})
-		}
+		inv.Memory = toMemory(m)
 	}
 	if e := pb.GetEnvironment(); e != nil {
 		inv.Environment = Environment{Domain: e.GetDomain(), Workgroup: e.GetWorkgroup(), Timezone: e.GetTimezone(), Locale: e.GetLocale()}
 	}
-	for _, p := range pb.GetProcessors() {
-		inv.Processors = append(inv.Processors, Processor{
-			SocketDesignation: p.GetSocketDesignation(), Manufacturer: p.GetManufacturer(), Version: p.GetVersion(),
-			MaxSpeedMHz: p.GetMaxSpeedMhz(), CurrentSpeedMHz: p.GetCurrentSpeedMhz(), CoreCount: p.GetCoreCount(),
-			CoreEnabled: p.GetCoreEnabled(), ThreadCount: p.GetThreadCount(), PartNumber: p.GetPartNumber(),
-			SerialNumber: p.GetSerialNumber(), SocketPopulated: p.GetSocketPopulated(),
-		})
-	}
+	inv.Processors = toProcessors(pb.GetProcessors())
 	for _, c := range pb.GetCache() {
 		inv.Cache = append(inv.Cache, CacheInfo{SocketDesignation: c.GetSocketDesignation()})
 	}
@@ -389,18 +406,10 @@ func toInventory(pb *invv1.Inventory) *Inventory {
 	inv.Guests = toGuests(pb.GetHypervisorGuests())
 	inv.Updates = toUpdateState(pb.GetUpdateState())
 	inv.Truncated = toLimits(pb.GetTruncated())
-	for _, d := range pb.GetDisks() {
-		disk := Disk{
-			Model: d.GetModel(), Serial: d.GetSerial(), SizeBytes: d.GetSizeBytes(),
-			MediaType: d.GetMediaType(), Interface: d.GetInterface(),
-		}
-		for _, part := range d.GetPartitions() {
-			disk.Partitions = append(disk.Partitions, Partition{
-				Mount: part.GetMount(), FS: part.GetFs(), SizeBytes: part.GetSizeBytes(), FreeBytes: part.GetFreeBytes(),
-			})
-		}
-		inv.Disks = append(inv.Disks, disk)
-	}
+	inv.Disks = toDisks(pb.GetDisks())
+	inv.Filesystems = toFilesystems(pb.GetFilesystems())
+	inv.Availability = toAvailability(pb.GetHardwareAvailability())
+	inv.HardwareSchema = pb.GetHardwareSchema()
 	return inv
 }
 
@@ -459,5 +468,106 @@ func toUpdateState(u *invv1.UpdateState) UpdateState {
 
 func toLimits(l *invv1.CollectionLimits) CollectionLimits {
 	return CollectionLimits{Interfaces: l.GetInterfaces(), Addresses: l.GetAddresses(), Guests: l.GetGuests(),
-		Packages: l.GetPackages(), BMCPorts: l.GetBmcPorts()}
+		Packages: l.GetPackages(), BMCPorts: l.GetBmcPorts(), Disks: l.GetDisks(), MemorySlots: l.GetMemorySlots(),
+		MemoryArrays: l.GetMemoryArrays(), Processors: l.GetProcessors(), Filesystems: l.GetFilesystems()}
+}
+
+func toBIOS(b *invv1.BIOSInfo) BIOSInfo {
+	return BIOSInfo{Vendor: b.GetVendor(), Version: b.GetVersion(), ReleaseDate: b.GetReleaseDate()}
+}
+
+func toSystem(sy *invv1.SystemInfo) SystemInfo {
+	return SystemInfo{
+		Manufacturer: sy.GetManufacturer(), ProductName: sy.GetProductName(), Version: sy.GetVersion(),
+		SerialNumber: sy.GetSerialNumber(), UUID: sy.GetUuid(), WakeUpType: sy.GetWakeUpType(),
+		SKUNumber: sy.GetSkuNumber(), Family: sy.GetFamily(),
+	}
+}
+
+func toBaseboard(bb *invv1.BaseboardInfo) BaseboardInfo {
+	return BaseboardInfo{
+		Manufacturer: bb.GetManufacturer(), Product: bb.GetProduct(), Version: bb.GetVersion(),
+		SerialNumber: bb.GetSerialNumber(), AssetTag: bb.GetAssetTag(),
+		LocationInChassis: bb.GetLocationInChassis(), BoardType: bb.GetBoardType(),
+	}
+}
+
+func toChassis(ch *invv1.ChassisInfo) ChassisInfo {
+	return ChassisInfo{
+		Manufacturer: ch.GetManufacturer(), Version: ch.GetVersion(), SerialNumber: ch.GetSerialNumber(),
+		AssetTag: ch.GetAssetTag(), SKUNumber: ch.GetSkuNumber(), Type: ch.GetType(), BootupState: ch.GetBootupState(),
+	}
+}
+
+func toProcessors(in []*invv1.Processor) []Processor {
+	var out []Processor
+	for _, p := range in {
+		out = append(out, Processor{
+			SocketDesignation: p.GetSocketDesignation(), Manufacturer: p.GetManufacturer(), Version: p.GetVersion(),
+			MaxSpeedMHz: p.GetMaxSpeedMhz(), CurrentSpeedMHz: p.GetCurrentSpeedMhz(), CoreCount: p.GetCoreCount(),
+			CoreEnabled: p.GetCoreEnabled(), ThreadCount: p.GetThreadCount(), PartNumber: p.GetPartNumber(),
+			SerialNumber: p.GetSerialNumber(), SocketPopulated: p.GetSocketPopulated(),
+			Family: p.GetFamily(), Type: p.GetType(), Upgrade: p.GetUpgrade(),
+		})
+	}
+	return out
+}
+
+func toMemoryArray(a *invv1.MemoryArray) MemoryArray {
+	return MemoryArray{
+		Location: a.GetLocation(), Use: a.GetUse(), ErrorCorrection: a.GetErrorCorrection(),
+		MaximumCapacity: a.GetMaximumCapacity(), NumberOfDevices: a.GetNumberOfDevices(), Handle: a.GetHandle(),
+	}
+}
+
+func toMemory(m *invv1.MemoryInfo) MemoryInfo {
+	out := MemoryInfo{TotalPhysicalBytes: m.GetTotalPhysicalBytes(), SlotsTotal: m.GetSlotsTotal(), SlotsPopulated: m.GetSlotsPopulated()}
+	if a := m.GetArray(); a != nil {
+		out.Array = toMemoryArray(a)
+	}
+	for _, a := range m.GetArrays() {
+		out.Arrays = append(out.Arrays, toMemoryArray(a))
+	}
+	for _, mod := range m.GetModules() {
+		out.Modules = append(out.Modules, MemoryModule{
+			DeviceLocator: mod.GetDeviceLocator(), BankLocator: mod.GetBankLocator(), CapacityBytes: mod.GetCapacityBytes(),
+			FormFactor: mod.GetFormFactor(), MemoryType: mod.GetMemoryType(), SpeedMTs: mod.GetSpeedMtS(),
+			ConfiguredSpeedMTs: mod.GetConfiguredSpeedMtS(), Manufacturer: mod.GetManufacturer(),
+			SerialNumber: mod.GetSerialNumber(), PartNumber: mod.GetPartNumber(),
+			Populated: mod.GetPopulated(), TypeDetail: mod.GetTypeDetail(), ArrayHandle: mod.GetArrayHandle(),
+			AssetTag: mod.GetAssetTag(), RankCount: mod.GetRankCount(),
+		})
+	}
+	return out
+}
+
+func toDisks(in []*invv1.Disk) []Disk {
+	var out []Disk
+	for _, d := range in {
+		disk := Disk{
+			Model: d.GetModel(), Serial: d.GetSerial(), SizeBytes: d.GetSizeBytes(),
+			MediaType: d.GetMediaType(), Interface: d.GetInterface(),
+			Name: d.GetName(), Removable: d.GetRemovable(), Vendor: d.GetVendor(),
+		}
+		for _, part := range d.GetPartitions() {
+			disk.Partitions = append(disk.Partitions, Partition{
+				Mount: part.GetMount(), FS: part.GetFs(), SizeBytes: part.GetSizeBytes(), FreeBytes: part.GetFreeBytes(),
+			})
+		}
+		out = append(out, disk)
+	}
+	return out
+}
+
+func toFilesystems(in []*invv1.Filesystem) []Filesystem {
+	var out []Filesystem
+	for _, f := range in {
+		out = append(out, Filesystem{Mount: f.GetMount(), FS: f.GetFs(), Device: f.GetDevice(),
+			SizeBytes: f.GetSizeBytes(), FreeBytes: f.GetFreeBytes(), Disks: f.GetDisks()})
+	}
+	return out
+}
+
+func toAvailability(a *invv1.HardwareAvailability) HardwareAvailability {
+	return HardwareAvailability{SMBIOS: a.GetSmbios(), Disks: a.GetDisks()}
 }

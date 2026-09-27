@@ -1,0 +1,81 @@
+{
+  "BIOS": {
+    "vendor": "SeaBIOS",
+    "version": "1.16.3-debian-1.16.3-2",
+    "release_date": "04/01/2014"
+  },
+  "System": {
+    "manufacturer": "QEMU",
+    "product_name": "Standard PC (Q35 + ICH9, 2009)",
+    "version": "pc-q35-8.2",
+    "uuid": "401f7a5c-2d0b-444e-9f1b-6f552a1031e7",
+    "wake_up_type": "Power Switch"
+  },
+  "Baseboard": {},
+  "Chassis": {
+    "manufacturer": "QEMU",
+    "version": "pc-q35-8.2",
+    "type": "Other",
+    "bootup_state": "Safe"
+  },
+  "Processors": [
+    {
+      "socket_designation": "CPU 0",
+      "manufacturer": "QEMU",
+      "version": "pc-q35-8.2",
+      "max_speed_mhz": 2000,
+      "current_speed_mhz": 2000,
+      "core_count": 4,
+      "core_enabled": 4,
+      "thread_count": 4,
+      "socket_populated": true,
+      "family": "Other",
+      "type": "Central Processor",
+      "upgrade": "Other"
+    }
+  ],
+  "Cache": null,
+  "Memory": {
+    "total_physical_bytes": 4294967296,
+    "array": {
+      "location": "Other",
+      "use": "System memory",
+      "error_correction": "Multi-bit ECC",
+      "maximum_capacity": 4294967296,
+      "number_of_devices": 1,
+      "handle": 4096
+    },
+    "modules": [
+      {
+        "device_locator": "DIMM 0",
+        "capacity_bytes": 4294967296,
+        "form_factor": "DIMM",
+        "memory_type": "RAM",
+        "manufacturer": "QEMU",
+        "populated": true,
+        "type_detail": [
+          "Other"
+        ],
+        "array_handle": 4096
+      }
+    ],
+    "arrays": [
+      {
+        "location": "Other",
+        "use": "System memory",
+        "error_correction": "Multi-bit ECC",
+        "maximum_capacity": 4294967296,
+        "number_of_devices": 1,
+        "handle": 4096
+      }
+    ],
+    "slots_total": 1,
+    "slots_populated": 1
+  },
+  "Ports": null,
+  "Slots": null,
+  "OEMStrings": null,
+  "BIOSLanguage": "",
+  "Truncated": {},
+  "Availability": "partial"
+}

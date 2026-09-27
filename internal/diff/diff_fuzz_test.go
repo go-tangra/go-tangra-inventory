@@ -29,6 +29,17 @@ func FuzzDiff(f *testing.F) {
 		Virtualization:   store.Virtualization{Role: "vm"},
 	})
 	f.Add(rich, seedA)
+	hw, _ := json.Marshal(store.Inventory{
+		HardwareSchema: 2,
+		Chassis:        store.ChassisInfo{Type: "Rack Mount Chassis"},
+		Processors:     []store.Processor{{SocketDesignation: "CPU1", Family: "Intel Xeon processor"}},
+		Memory: store.MemoryInfo{Modules: []store.MemoryModule{
+			{DeviceLocator: "A1", BankLocator: "B0", Populated: true, TypeDetail: []string{"Synchronous"}}, {DeviceLocator: "A2"}}},
+		Disks:       []store.Disk{{Name: "sda", Serial: "S1"}},
+		Filesystems: []store.Filesystem{{Mount: "/", Disks: []string{"sda"}}},
+	})
+	f.Add(seedA, hw)
+	f.Add(hw, seedB)
 	f.Add([]byte(`{}`), []byte(`{}`))
 	f.Add([]byte("not json"), []byte("also not json"))
 	f.Add([]byte(``), []byte(``))

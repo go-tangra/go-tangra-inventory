@@ -424,31 +424,34 @@ func insertComponents(ctx context.Context, tx pgx.Tx, s store.Snapshot) error {
 		if _, e := tx.Exec(ctx, `INSERT INTO inventory_processors
 			(id, tenant_id, host_id, snapshot_id, socket_designation, manufacturer, version,
 			 max_speed_mhz, current_speed_mhz, core_count, core_enabled, thread_count,
-			 part_number, serial_number, socket_populated)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+			 part_number, serial_number, socket_populated, family)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
 			store.NewID(), s.TenantID, s.HostID, s.ID, c.SocketDesignation, c.Manufacturer, c.Version,
 			int64(c.MaxSpeedMHz), int64(c.CurrentSpeedMHz), int64(c.CoreCount), int64(c.CoreEnabled),
-			int64(c.ThreadCount), c.PartNumber, c.SerialNumber, c.SocketPopulated); e != nil {
+			int64(c.ThreadCount), c.PartNumber, c.SerialNumber, c.SocketPopulated, c.Family); e != nil {
 			return e
 		}
 	}
+	// Agents before 023 (hardware schema < 2) reported populated modules only.
+	legacyMemory := p.HardwareSchema < store.HardwareSchemaCurrent
 	for _, mo := range p.Memory.Modules {
 		if _, e := tx.Exec(ctx, `INSERT INTO inventory_memory_modules
 			(id, tenant_id, host_id, snapshot_id, device_locator, bank_locator, capacity_bytes,
-			 form_factor, memory_type, speed_mt_s, configured_speed_mt_s, manufacturer, serial_number, part_number)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+			 form_factor, memory_type, speed_mt_s, configured_speed_mt_s, manufacturer, serial_number, part_number,
+			 populated, type_detail)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
 			store.NewID(), s.TenantID, s.HostID, s.ID, mo.DeviceLocator, mo.BankLocator, toi64(mo.CapacityBytes),
 			mo.FormFactor, mo.MemoryType, int64(mo.SpeedMTs), int64(mo.ConfiguredSpeedMTs), mo.Manufacturer,
-			mo.SerialNumber, mo.PartNumber); e != nil {
+			mo.SerialNumber, mo.PartNumber, mo.Populated || legacyMemory, strings.Join(mo.TypeDetail, ", ")); e != nil {
 			return e
 		}
 	}
 	for _, dk := range p.Disks {
 		if _, e := tx.Exec(ctx, `INSERT INTO inventory_disks
-			(id, tenant_id, host_id, snapshot_id, model, serial, size_bytes, media_type, interface)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+			(id, tenant_id, host_id, snapshot_id, model, serial, size_bytes, media_type, interface, name, removable)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
 			store.NewID(), s.TenantID, s.HostID, s.ID, dk.Model, dk.Serial, toi64(dk.SizeBytes),
-			dk.MediaType, dk.Interface); e != nil {
+			dk.MediaType, dk.Interface, dk.Name, dk.Removable); e != nil {
 			return e
 		}
 	}
@@ -709,13 +712,22 @@ func (d *DB) ListChangesForSnapshot(ctx context.Context, tenantID, snapshotID st
 
 // ---- agents
 
-const agentCols = `id, tenant_id, coalesce(host_id::text,''), credential_sealed, enrolled_at, last_seen, agent_version, revoked, identity_hint`
+const agentCols = `id, tenant_id, coalesce(host_id::text,''), credential_sealed, enrolled_at, last_seen, agent_version, revoked, identity_hint,
+	os, arch, install_type, capabilities, platform_seen_at`
 
 func scanAgent(sc scanner) (store.Agent, error) {
 	var a store.Agent
+	var seen *time.Time
 	if err := sc.Scan(&a.ID, &a.TenantID, &a.HostID, &a.CredentialSealed, &a.EnrolledAt,
-		&a.LastSeen, &a.AgentVersion, &a.Revoked, &a.IdentityHint); err != nil {
+		&a.LastSeen, &a.AgentVersion, &a.Revoked, &a.IdentityHint,
+		&a.OS, &a.Arch, &a.InstallType, &a.Capabilities, &seen); err != nil {
 		return store.Agent{}, err
+	}
+	if seen != nil {
+		a.PlatformSeenAt = seen.UTC()
+	}
+	if len(a.Capabilities) == 0 {
+		a.Capabilities = nil
 	}
 	return a, nil
 }
@@ -803,7 +815,7 @@ func (d *DB) RevokeAgent(ctx context.Context, tenantID, id string) error {
 
 // ---- enrollment tokens
 
-const tokenCols = `id, tenant_id, token_hash, expires_at, used_at, revoked, created_by, created_at, label`
+const tokenCols = `id, tenant_id, token_hash, expires_at, used_at, revoked, created_by, created_at, label` // #nosec G101 -- column list
 
 func scanToken(sc scanner) (store.EnrollmentToken, error) {
 	var t store.EnrollmentToken
@@ -943,9 +955,7 @@ func (d *DB) TenantStats(ctx context.Context, tenantID string, staleBefore time.
 			for _, proc := range inv.Processors {
 				out.TotalCPUCores += int64(proc.CoreCount)
 			}
-			for _, dk := range inv.Disks {
-				out.TotalDiskBytes += dk.SizeBytes
-			}
+			out.TotalDiskBytes += store.PhysicalDiskBytes(inv)
 			for _, prog := range inv.Programs {
 				if prog.Name != "" {
 					programs[prog.Name]++

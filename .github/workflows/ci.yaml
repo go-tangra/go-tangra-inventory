@@ -32,6 +32,10 @@ env:
   GOWORK: 'off'
   REGISTRY: ghcr.io
   IMAGE_NAME: ghcr.io/go-tangra/go-tangra-inventory
+  # Release signing PUBLIC keyring ("<id>:<base64 Ed25519 public key>[,...]",
+  # feature 023), compiled into the agents and the service. Public data kept
+  # as a repository variable; see README "Agent release signing".
+  AGENT_RELEASE_KEYS: ${{ vars.AGENT_RELEASE_PUBLIC_KEYS }}
 
 jobs:
   go:
@@ -98,7 +102,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # buf breaking compares against the sdk/v4.0.0 tag
+          fetch-depth: 0 # buf breaking compares against the sdk/v4.1.0 tag
 
       - uses: bufbuild/buf-action@v1
         with:
@@ -109,13 +113,15 @@ jobs:
         working-directory: sdk
         run: buf lint
 
-      - name: buf breaking (against sdk/v4.0.0)
+      - name: buf breaking (against sdk/v4.1.0)
         working-directory: sdk
-        run: buf breaking --against '../.git#tag=sdk/v4.0.0,subdir=sdk'
+        run: buf breaking --against '../.git#tag=sdk/v4.1.0,subdir=sdk'
 
-  # The endpoint agent is not part of the image. CI proves it cross-compiles for
-  # every platform; the Linux builds are also packaged (.deb/.rpm, job
-  # `packages`) and attached to the GitHub release of a v* tag (job `release`).
+  # CI proves the endpoint agent cross-compiles for every platform; job
+  # `packages` builds the eight release artifacts, `sign` signs them for a v*
+  # tag, `docker` bundles the signed release into the image (the service
+  # offers it to agents for self-upgrade) and `release` attaches it to the
+  # GitHub release.
   agent:
     name: Agent cross-compile
     runs-on: ubuntu-latest
@@ -140,13 +146,15 @@ jobs:
           CGO_ENABLED: '0'
         run: go build -trimpath -o "${RUNNER_TEMP}/inventory-agent" ./cmd/inventory-agent
 
-  # .deb and .rpm of the Linux agent (binary, systemd unit, sample
-  # /etc/inventory-agent/agent.yaml) for amd64 and arm64, built with nfpm
-  # (packaging/nfpm.yaml). Tags package their version; other builds package
-  # `git describe` (e.g. 4.2.0~11-gabc1234). The amd64 .deb is installed and
-  # purged on the runner as a smoke test.
+  # The eight agent release artifacts (feature 023): .deb and .rpm of the
+  # Linux agent (binary, systemd unit, sample /etc/inventory-agent/agent.yaml)
+  # for amd64 and arm64 built with nfpm (packaging/nfpm.yaml), the raw Linux
+  # binaries and the Windows exes, all version-stamped and carrying the
+  # release signing keyring. Tags build their version; other builds
+  # `git describe` (e.g. 4.2.0-11-gabc1234). The amd64 .deb is installed and
+  # purged on the runner as a smoke test. Signing happens in job `sign`.
   packages:
-    name: Agent packages (deb/rpm)
+    name: Agent release artifacts
     runs-on: ubuntu-latest
     needs:
       - go
@@ -167,18 +175,19 @@ jobs:
           if [ "${GITHUB_REF_TYPE}" = tag ]; then v="${GITHUB_REF_NAME#v}"; else v="$(git describe --tags --match 'v*' --always | sed 's/^v//')"; fi
           echo "AGENT_VERSION=${v}" >> "${GITHUB_ENV}"
 
-      - name: Build packages
-        run: make packages AGENT_VERSION="${AGENT_VERSION}"
+      - name: Build the eight agent artifacts
+        run: make agent-release AGENT_VERSION="${AGENT_VERSION}" AGENT_RELEASE_KEYS="${AGENT_RELEASE_KEYS}"
 
       - name: Inspect packages
         run: |
           sudo apt-get install -y --no-install-recommends rpm >/dev/null
-          for f in dist/*.deb; do dpkg-deb --info "$f" | sed -n '/Package:/,/Architecture:/p'; dpkg-deb -c "$f"; done
-          for f in dist/*.rpm; do rpm -qpi "$f" | grep -E '^(Name|Version|Architecture)'; rpm -qpl "$f"; done
+          ls -l dist/agent
+          for f in dist/agent/*.deb; do dpkg-deb --info "$f" | sed -n '/Package:/,/Architecture:/p'; dpkg-deb -c "$f"; done
+          for f in dist/agent/*.rpm; do rpm -qpi "$f" | grep -E '^(Name|Version|Architecture)'; rpm -qpl "$f"; done
 
       - name: Install smoke test (amd64 .deb)
         run: |
-          sudo dpkg -i dist/*_amd64.deb
+          sudo dpkg -i dist/agent/*_amd64.deb
           test -x /usr/bin/inventory-agent
           test "$(sudo stat -c %a /var/lib/inventory-agent)" = 700
           test "$(systemctl is-enabled inventory-agent.service)" = enabled
@@ -190,25 +199,95 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: agent-packages
-          path: dist/*
+          name: agent-artifacts
+          path: dist/agent/*
           if-no-files-found: error
 
-  # A v* tag attaches the agent packages and their SHA256SUMS to the tag's
-  # GitHub release (created when missing).
+  # Signs the agent release of a v* tag (feature 023): writes the Ed25519-
+  # signed manifest agent-release.json(.sig) over the eight artifacts,
+  # verifies it with the compiled keyring and checks the binaries carry the
+  # production keyring and no development key. The private key exists ONLY
+  # as the secret AGENT_RELEASE_SIGNING_KEY of the protected GitHub
+  # environment `release` (required reviewers); the job fails with an
+  # explicit message when it or the public keyring is missing. Other builds
+  # skip it (no signature, no bundle in the image).
+  sign:
+    name: Sign the agent release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment: release
+    needs:
+      - packages
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            sdk/go.sum
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: agent-artifacts
+          path: dist/agent
+
+      - name: Require the signing configuration
+        env:
+          AGENT_RELEASE_SIGNING_KEY: ${{ secrets.AGENT_RELEASE_SIGNING_KEY }}
+        run: |
+          if [ -z "${AGENT_RELEASE_SIGNING_KEY}" ]; then
+            echo "::error::secret AGENT_RELEASE_SIGNING_KEY is not set in the GitHub environment 'release' (see README: Agent release signing)"; exit 1
+          fi
+          if [ -z "${AGENT_RELEASE_KEYS}" ]; then
+            echo "::error::repository variable AGENT_RELEASE_PUBLIC_KEYS is not set (see README: Agent release signing)"; exit 1
+          fi
+
+      - name: Sign and verify
+        env:
+          AGENT_RELEASE_SIGNING_KEY: ${{ secrets.AGENT_RELEASE_SIGNING_KEY }}
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          keyid="${AGENT_RELEASE_KEYS%%:*}"
+          go build -trimpath -ldflags "-X github.com/go-tangra/go-tangra-inventory/v4/internal/agentrelease.productionKeys=${AGENT_RELEASE_KEYS}" -o "${RUNNER_TEMP}/agent-release" ./cmd/agent-release
+          "${RUNNER_TEMP}/agent-release" sign -key-env AGENT_RELEASE_SIGNING_KEY -key-id "${keyid}" -version "${v}" -dir dist/agent
+          unset AGENT_RELEASE_SIGNING_KEY
+          "${RUNNER_TEMP}/agent-release" verify -dir dist/agent -version "${v}"
+          make release-check AGENT_VERSION="${v}" AGENT_RELEASE_KEYS="${AGENT_RELEASE_KEYS}"
+
+      - name: SBOM of the agent artifacts
+        uses: anchore/sbom-action@v0
+        with:
+          path: dist/agent
+          format: spdx-json
+          output-file: dist/agent/inventory-agent.sbom.spdx.json
+          upload-artifact: false
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-release
+          path: dist/agent/*
+          if-no-files-found: error
+
+  # A v* tag attaches the signed agent release (eight artifacts, manifest,
+  # signature, SBOM) and SHA256SUMS to the tag's GitHub release (created when
+  # missing). `inventorysvc agent-release import` accepts the same files.
   release:
-    name: Agent packages on the GitHub release
+    name: Agent release on the GitHub release
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     needs:
-      - packages
+      - sign
       - docker
     permissions:
       contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: agent-packages
+          name: agent-release
           path: dist
 
       - name: Upload to the release
@@ -218,8 +297,32 @@ jobs:
         run: |
           cd dist && sha256sum * > SHA256SUMS && cd ..
           gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1 || \
-            gh release create "${GITHUB_REF_NAME}" --verify-tag --title "${GITHUB_REF_NAME}" --notes "Inventory ${GITHUB_REF_NAME}. Agent packages: tangra-inventory-agent .deb/.rpm for amd64 and arm64; see deploy/README.md (Installing the agent from a package)."
+            gh release create "${GITHUB_REF_NAME}" --verify-tag --title "${GITHUB_REF_NAME}" --notes "Inventory ${GITHUB_REF_NAME}. Signed agent release: tangra-inventory-agent .deb/.rpm and binaries for Linux amd64/arm64, Windows exes, agent-release.json + .sig; see deploy/README.md (Installing the agent)."
           gh release upload "${GITHUB_REF_NAME}" dist/* --clobber
+
+  # Package upgrade and rollback of the agent in Debian 12 and Rocky 9
+  # containers with systemd (feature 023, tests/e2e): install N, upgrade to a
+  # test-signed N+1, roll back a broken N+1, refuse a tampered artifact.
+  e2e-upgrade:
+    name: Agent upgrade e2e (systemd containers)
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    needs:
+      - go
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            sdk/go.sum
+
+      - name: make e2e-upgrade
+        run: make e2e-upgrade
 
   docker:
     name: Docker image
@@ -229,11 +332,28 @@ jobs:
       - ui
       - buf
       - agent
+      - sign
+    # sign runs on tags only; other builds go on without a bundle.
+    if: ${{ !failure() && !cancelled() }}
     permissions:
       contents: read
       packages: write
     steps:
       - uses: actions/checkout@v4
+
+      - name: Bundle the signed agent release (tags)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/download-artifact@v4
+        with:
+          name: agent-release
+          path: agent-releases/${{ github.ref_name }}
+
+      - name: Name the bundle after the version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          mv "agent-releases/${GITHUB_REF_NAME}" "agent-releases/${GITHUB_REF_NAME#v}"
+          rm -f agent-releases/*/*.sbom.spdx.json
+          ls -l agent-releases/*
 
       - uses: docker/setup-buildx-action@v3
 
@@ -282,3 +402,4 @@ jobs:
           build-args: |
             APP_VERSION=${{ steps.version.outputs.value }}
             VCS_REF=${{ github.sha }}
+            AGENT_RELEASE_KEYS=${{ env.AGENT_RELEASE_KEYS }}

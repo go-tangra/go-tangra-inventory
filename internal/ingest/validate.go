@@ -110,6 +110,9 @@ func validateExtended(inv *store.Inventory) {
 		}
 		pending++
 	}
+
+	// Hardware (feature 023).
+	validateHardware(inv)
 }
 
 func validIface(n store.NetIface, lim *store.CollectionLimits) store.NetIface {

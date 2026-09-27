@@ -54,7 +54,7 @@ func TestManifestBuilds(t *testing.T) {
 	if len(m.Nav) != 3 {
 		t.Fatalf("nav entries = %d", len(m.Nav))
 	}
-	if len(m.Permissions) != 8 {
+	if len(m.Permissions) != 9 {
 		t.Fatalf("permissions = %d", len(m.Permissions))
 	}
 }

@@ -40,6 +40,7 @@ import (
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/store"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/stream"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/stream/valkeykv"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/upgrades"
 	"github.com/go-tangra/go-tangra-inventory/v4/pkg/inventorymanifest"
 )
 
@@ -188,6 +189,24 @@ func Build(ctx context.Context, cfg config.Config, o Options) (a *App, err error
 	backupSvc := backup.New(a.Repo)
 	a.Enroll = enroll.New(a.Repo, a.Env)
 
+	// Agent self-upgrade (feature 023): signed releases (bundled in the
+	// image, verified and copied into PostgreSQL at start) and the upgrade
+	// request lifecycle.
+	relSvc, err := a.buildReleases()
+	if err != nil {
+		return nil, fmt.Errorf("agent releases: %w", err)
+	}
+	upgSvc := upgrades.New(a.Repo, relSvc, a.Registry, pub, upgrades.Config{RequestTTL: cfg.RequestTTL(), ProgressTimeout: cfg.ProgressTimeout()})
+	// A failed or rolled-back automatic upgrade pauses the tenant's policy.
+	upgSvc.OnFinished(upgSvc.PauseOnFailure)
+	if m := a.Freya.Metrics(); m != nil {
+		um, merr := newUpgradeMetrics(m.Meter("github.com/go-tangra/go-tangra-inventory/v4"))
+		if merr != nil {
+			return nil, merr
+		}
+		upgSvc.SetMetrics(um)
+	}
+
 	// Mesh HTTP surface (reached only through the gateway).
 	hopts := []httpapi.Option{httpapi.WithVerifier(a.Verifier)}
 	if o.Remote != nil {
@@ -198,7 +217,7 @@ func Build(ctx context.Context, cfg config.Config, o Options) (a *App, err error
 	}
 	a.HTTP.Register(httpapi.Deps{
 		Hosts: hostsSvc, Snapshots: snapsSvc, Stats: statsSvc, Backup: backupSvc,
-		Enroll: a.Enroll, Registry: a.Registry, Hub: a.Hub,
+		Enroll: a.Enroll, Registry: a.Registry, Hub: a.Hub, Upgrades: upgSvc, Releases: relSvc,
 	})
 	a.Freya.HTTP().HandlePrefix("/", a.HTTP.Handler())
 
@@ -216,7 +235,8 @@ func Build(ctx context.Context, cfg config.Config, o Options) (a *App, err error
 	// It serves TLS from ingest.tls_cert_file/tls_key_file (hot-reloaded); only
 	// the development opt-out ingest.insecure serves plaintext. A missing or
 	// unloadable certificate refuses start.
-	ingestSrv := ingest.New(a.Enroll, snapsSvc, a.Registry, a.Repo, cfg.Limits.MaxSnapshotBytes, instanceID)
+	ingestSrv := ingest.New(a.Enroll, snapsSvc, a.Registry, a.Repo, cfg.Limits.MaxSnapshotBytes, instanceID).
+		WithUpgrades(upgSvc, relSvc, cfg.AgentReleases.MaxConcurrentDownloads, 10*time.Minute)
 	var ingestTLS *ingest.CertLoader
 	if !cfg.Ingest.Insecure {
 		if ingestTLS, err = ingest.NewCertLoader(cfg.Ingest.TLSCertFile, cfg.Ingest.TLSKeyFile); err != nil {
@@ -225,8 +245,9 @@ func Build(ctx context.Context, cfg config.Config, o Options) (a *App, err error
 	}
 	a.workers = append(a.workers, func(c context.Context) { a.serveIngest(c, ingestSrv, ingestTLS) })
 
-	// Maintenance: mark stale hosts + purge old snapshots on an interval.
-	a.workers = append(a.workers, a.maintenance)
+	// Maintenance: mark stale hosts + purge old snapshots on an interval;
+	// seed releases, sweep upgrade requests, apply release retention.
+	a.workers = append(a.workers, a.maintenance, a.upgradeWorker(relSvc, upgSvc))
 	return a, nil
 }
 

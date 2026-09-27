@@ -46,6 +46,26 @@ components:
       in: query
       required: false
       schema: { type: integer, minimum: 1, maximum: 500 }
+    upgradeState:
+      name: state
+      in: query
+      required: false
+      schema: { type: string, enum: [up_to_date, available, pending, in_progress, failed, rolled_back, manual_upgrade_required, unsupported] }
+    requestState:
+      name: state
+      in: query
+      required: false
+      schema: { type: string, enum: [pending, delivered, downloading, installing, succeeded, failed, rolled_back, expired, cancelled] }
+    outdated:
+      name: outdated
+      in: query
+      required: false
+      schema: { type: boolean }
+    agentIdQuery:
+      name: agent_id
+      in: query
+      required: false
+      schema: { type: string, maxLength: 64 }
   schemas:
     Error:
       type: object
@@ -55,6 +75,118 @@ components:
       example:
         reason: not_found
         detail: {}
+    # --- Agent self-upgrade (feature 023) ---
+    AgentFleetEntry:
+      type: object
+      description: One enrolled agent (online or not) with its upgrade state. The keys of the former connected-agents listing are kept.
+      properties:
+        agent_id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid }
+        host_id: { type: string }
+        hostname: { type: string }
+        version: { type: string }
+        os: { type: string, enum: ['', linux, windows] }
+        arch: { type: string, enum: ['', amd64, arm64] }
+        install_type: { type: string, enum: ['', deb, rpm, binary] }
+        online: { type: boolean }
+        connected_at: { type: string, format: date-time }
+        last_seen: { type: string, format: date-time }
+        target_version: { type: string }
+        upgrade_state: { type: string, enum: [up_to_date, available, pending, in_progress, failed, rolled_back, manual_upgrade_required, unsupported] }
+        upgrade_reason: { type: string, description: 'reason code only' }
+        upgrade_id: { type: string, format: uuid }
+        state_changed_at: { type: string, format: date-time }
+    AgentFleet:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/AgentFleetEntry' } }
+        current_version: { type: string, description: 'the tenant target: policy pin or platform current agent version' }
+    AgentUpgrade:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        agent_id: { type: string, format: uuid }
+        host_id: { type: string }
+        from_version: { type: string }
+        target_version: { type: string }
+        allow_downgrade: { type: boolean }
+        state: { type: string, enum: [pending, delivered, downloading, installing, succeeded, failed, rolled_back, expired, cancelled] }
+        origin: { type: string, enum: [user, policy, agent] }
+        requested_by: { type: string }
+        reason: { type: string }
+        attempts: { type: integer }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
+    AgentDetail:
+      allOf:
+        - $ref: '#/components/schemas/AgentFleetEntry'
+        - type: object
+          properties:
+            recent_upgrades: { type: array, maxItems: 20, items: { $ref: '#/components/schemas/AgentUpgrade' } }
+    UpgradeRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        agent_ids: { type: array, maxItems: 1000, uniqueItems: true, items: { type: string, maxLength: 64 } }
+        all_outdated: { type: boolean, description: 'every outdated, upgrade-capable agent of the tenant' }
+      oneOf:
+        - required: [agent_ids]
+        - required: [all_outdated]
+    UpgradeBatchResult:
+      type: object
+      properties:
+        target_version: { type: string }
+        created: { type: array, items: { $ref: '#/components/schemas/AgentUpgrade' } }
+        skipped:
+          type: array
+          items:
+            type: object
+            properties:
+              agent_id: { type: string }
+              reason: { type: string, enum: [up_to_date, upgrade_active, manual_upgrade_required, unsupported, no_release_for_platform, not_found] }
+    AgentUpgradeList:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/AgentUpgrade' } }
+        next_cursor: { type: string }
+    UpgradePolicy:
+      type: object
+      additionalProperties: false
+      required: [enabled, window_start, window_end, timezone, max_concurrent, target_version]
+      properties:
+        enabled: { type: boolean }
+        window_start: { type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$' }
+        window_end: { type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$', description: 'may wrap past midnight; equal to window_start = the whole day' }
+        timezone: { type: string, maxLength: 64, description: 'IANA name, validated with time.LoadLocation' }
+        max_concurrent: { type: integer, minimum: 1, maximum: 100 }
+        target_version: { type: string, maxLength: 64, description: '"" = platform current; otherwise a stored release version (a lower pin downgrades newer agents)' }
+        paused: { type: boolean, readOnly: true }
+        paused_reason: { type: string, readOnly: true }
+        updated_by: { type: string, readOnly: true }
+        updated_at: { type: string, format: date-time, readOnly: true }
+    AgentReleaseInfo:
+      type: object
+      properties:
+        version: { type: string }
+        source: { type: string, enum: [bundled, import] }
+        key_id: { type: string }
+        imported_at: { type: string, format: date-time }
+        platforms:
+          type: array
+          items:
+            type: object
+            properties:
+              os: { type: string }
+              arch: { type: string }
+              install_type: { type: string }
+              size: { type: integer }
+    AgentReleaseList:
+      type: object
+      properties:
+        current_version: { type: string }
+        items: { type: array, items: { $ref: '#/components/schemas/AgentReleaseInfo' } }
 paths:
   /api/inventory/v1/hosts:
     get: { operationId: listHosts, x-freya-permission: 'inventory:read', parameters: [{ $ref: '#/components/parameters/cursor' }, { $ref: '#/components/parameters/limit' }], responses: { '200': { description: list } } }
@@ -77,7 +209,80 @@ paths:
   /api/inventory/v1/snapshots/{id}/diff/{other}:
     get: { operationId: diffSnapshots, x-freya-permission: 'snapshots:read', parameters: [{ $ref: '#/components/parameters/id' }, { $ref: '#/components/parameters/other' }], responses: { '200': { description: diff } } }
   /api/inventory/v1/agents:
-    get: { operationId: listConnectedAgents, x-freya-permission: 'agents:manage', responses: { '200': { description: 'connected agents' } } }
+    get:
+      operationId: listAgents
+      summary: Every enrolled agent (online and offline) with its version and upgrade state
+      x-freya-permission: 'agents:manage'
+      parameters: [{ $ref: '#/components/parameters/upgradeState' }, { $ref: '#/components/parameters/outdated' }, { $ref: '#/components/parameters/cursor' }, { $ref: '#/components/parameters/limit' }]
+      responses: { '200': { description: 'agent fleet', content: { application/json: { schema: { $ref: '#/components/schemas/AgentFleet' } } } } }
+  /api/inventory/v1/agents/upgrades:
+    get:
+      operationId: listAgentUpgrades
+      x-freya-permission: 'agents:manage'
+      parameters: [{ $ref: '#/components/parameters/requestState' }, { $ref: '#/components/parameters/agentIdQuery' }, { $ref: '#/components/parameters/cursor' }, { $ref: '#/components/parameters/limit' }]
+      responses: { '200': { description: 'upgrade requests, newest first', content: { application/json: { schema: { $ref: '#/components/schemas/AgentUpgradeList' } } } } }
+    post:
+      operationId: requestAgentUpgrades
+      summary: Upgrade one agent, a selection or every outdated agent to the tenant target version
+      x-freya-permission: 'agents:manage'
+      x-freya-max-body-bytes: 65536
+      parameters: [{ $ref: '#/components/parameters/csrf' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/UpgradeRequest' } } } }
+      responses:
+        '202': { description: 'requests created (delivered to online agents)', content: { application/json: { schema: { $ref: '#/components/schemas/UpgradeBatchResult' } } } }
+        '400': { description: invalid_argument }
+        '409': { description: no_release_available }
+        '413': { description: body_too_large }
+  /api/inventory/v1/agents/upgrades/{id}/cancel:
+    post:
+      operationId: cancelAgentUpgrade
+      x-freya-permission: 'agents:manage'
+      x-freya-max-body-bytes: 1024
+      parameters: [{ $ref: '#/components/parameters/csrf' }, { $ref: '#/components/parameters/id' }]
+      responses:
+        '200': { description: cancelled, content: { application/json: { schema: { $ref: '#/components/schemas/AgentUpgrade' } } } }
+        '404': { description: not_found }
+        '409': { description: not_cancellable }
+  /api/inventory/v1/agents/upgrade-policy:
+    get:
+      operationId: getAgentUpgradePolicy
+      summary: The tenant's automatic agent upgrade policy (defaults when none is stored)
+      x-freya-permission: 'agents:manage'
+      responses: { '200': { description: policy, content: { application/json: { schema: { $ref: '#/components/schemas/UpgradePolicy' } } } } }
+    put:
+      operationId: updateAgentUpgradePolicy
+      summary: Configure automatic agent upgrades and the target agent version
+      x-freya-permission: 'agentupgrades:manage'
+      x-freya-max-body-bytes: 4096
+      parameters: [{ $ref: '#/components/parameters/csrf' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/UpgradePolicy' } } } }
+      responses:
+        '200': { description: stored, content: { application/json: { schema: { $ref: '#/components/schemas/UpgradePolicy' } } } }
+        '400': { description: invalid_argument }
+        '409': { description: unknown_version }
+        '413': { description: body_too_large }
+  /api/inventory/v1/agents/upgrade-policy/resume:
+    post:
+      operationId: resumeAgentUpgradePolicy
+      summary: Resume automatic upgrades paused by a failed automatic upgrade
+      x-freya-permission: 'agentupgrades:manage'
+      x-freya-max-body-bytes: 1024
+      parameters: [{ $ref: '#/components/parameters/csrf' }]
+      responses: { '200': { description: resumed, content: { application/json: { schema: { $ref: '#/components/schemas/UpgradePolicy' } } } } }
+  /api/inventory/v1/agent-releases:
+    get:
+      operationId: listAgentReleases
+      summary: Signed agent releases stored on the platform
+      x-freya-permission: 'agents:manage'
+      responses: { '200': { description: 'agent releases, newest first', content: { application/json: { schema: { $ref: '#/components/schemas/AgentReleaseList' } } } } }
+  /api/inventory/v1/agents/{id}:
+    get:
+      operationId: getAgent
+      x-freya-permission: 'agents:manage'
+      parameters: [{ $ref: '#/components/parameters/id' }]
+      responses:
+        '200': { description: 'agent with recent upgrades', content: { application/json: { schema: { $ref: '#/components/schemas/AgentDetail' } } } }
+        '404': { description: not_found }
   /api/inventory/v1/agents/enroll-token:
     post: { operationId: mintEnrollmentToken, x-freya-permission: 'agents:manage', x-freya-max-body-bytes: 65536, parameters: [{ $ref: '#/components/parameters/csrf' }], responses: { '201': { description: 'token minted (secret returned once)' } } }
   /api/inventory/v1/agents/{host_id}/refresh:

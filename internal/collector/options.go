@@ -11,6 +11,7 @@ import (
 type Options struct {
 	CollectBMC          bool
 	CollectUpdates      bool
+	CollectDisks        bool // physical disks (feature 023)
 	RefreshPackageLists bool
 	UpdateTimeout       time.Duration
 	// StateDir holds the package-list refresh timestamp ("" = in memory only).
@@ -26,7 +27,7 @@ func DefaultOptions() Options {
 // OptionsFrom maps the agent configuration to collector options.
 func OptionsFrom(cfg config.AgentConfig) Options {
 	o := Options{
-		CollectBMC: cfg.CollectBMC, CollectUpdates: cfg.CollectUpdates,
+		CollectBMC: cfg.CollectBMC, CollectUpdates: cfg.CollectUpdates, CollectDisks: cfg.CollectDisks,
 		RefreshPackageLists: cfg.RefreshPackageLists, UpdateTimeout: cfg.UpdateTimeout(),
 	}
 	switch {

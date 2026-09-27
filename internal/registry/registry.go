@@ -21,10 +21,27 @@ var ErrInvalid = errors.New("registry: invalid connected agent")
 // the agent as not currently reachable (slow/stuck reader).
 const deliverBuffer = 16
 
-// Command is a control message pushed to a connected agent.
+// Command types.
+const (
+	CommandRefresh = "refresh"
+	CommandUpgrade = "upgrade" // feature 023
+)
+
+// Command is a control message pushed to a connected agent. It travels as
+// JSON through the Valkey registry, so the upgrade payload is kept there.
 type Command struct {
-	ID   string `json:"id"`
-	Type string `json:"type"` // e.g. "refresh"
+	ID      string          `json:"id"`
+	Type    string          `json:"type"` // refresh | upgrade
+	Upgrade *UpgradePayload `json:"upgrade,omitempty"`
+}
+
+// UpgradePayload asks an agent to upgrade (feature 023). It carries no
+// secret and no download location: the agent downloads over its own
+// authenticated ingest connection.
+type UpgradePayload struct {
+	RequestID      string `json:"request_id"`
+	TargetVersion  string `json:"target_version"`
+	AllowDowngrade bool   `json:"allow_downgrade,omitempty"`
 }
 
 // ConnectedAgent is the metadata of a live agent connection.
