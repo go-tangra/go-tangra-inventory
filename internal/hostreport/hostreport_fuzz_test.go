@@ -21,6 +21,15 @@ func FuzzHostReport(f *testing.F) {
 		Bmc:               &invv1.Bmc{Address: "10.0.0.2"},
 	})
 	f.Add(seed, "active")
+	hw, _ := proto.Marshal(&invv1.Inventory{
+		HardwareSchema: 2,
+		Bios:           &invv1.BIOSInfo{Vendor: "AMI", Version: "2.5"},
+		Processors:     []*invv1.Processor{{SocketDesignation: "CPU1", Family: "Xeon"}},
+		Memory:         &invv1.MemoryInfo{Modules: []*invv1.MemoryModule{{DeviceLocator: "A1", Populated: true, TypeDetail: []string{"Synchronous"}}}},
+		Disks:          []*invv1.Disk{{Name: "sda", Partitions: []*invv1.Partition{{Mount: "/"}}}},
+		Filesystems:    []*invv1.Filesystem{{Mount: "/", Disks: []string{"sda"}}},
+	})
+	f.Add(hw, "active")
 	f.Add([]byte{}, "retired")
 	f.Fuzz(func(t *testing.T, data []byte, status string) {
 		pb := &invv1.Inventory{}
@@ -37,6 +46,17 @@ func FuzzHostReport(f *testing.F) {
 			HypervisorGuests: invpb.GuestsFromPB(pb.GetHypervisorGuests()),
 			UpdateState:      invpb.UpdateStateFromPB(pb.GetUpdateState()),
 			Truncated:        invpb.LimitsFromPB(pb.GetTruncated()),
+			// Feature 023 hardware (the projection bounds and copies it).
+			HardwareSchema: pb.GetHardwareSchema(),
+			BIOS:           invpb.BIOSFromPB(pb.GetBios()),
+			System:         invpb.SystemFromPB(pb.GetSystem()),
+			Baseboard:      invpb.BaseboardFromPB(pb.GetBaseboard()),
+			Chassis:        invpb.ChassisFromPB(pb.GetChassis()),
+			Processors:     invpb.ProcessorsFromPB(pb.GetProcessors()),
+			Memory:         invpb.MemoryFromPB(pb.GetMemory()),
+			Disks:          invpb.DisksFromPB(pb.GetDisks()),
+			Filesystems:    invpb.FilesystemsFromPB(pb.GetFilesystems()),
+			Availability:   invpb.AvailabilityFromPB(pb.GetHardwareAvailability()),
 		}
 		for _, p := range pb.GetInstalledPrograms() {
 			inv.Programs = append(inv.Programs, store.Program{Name: p.GetName(), Version: p.GetVersion(),
@@ -50,6 +70,19 @@ func FuzzHostReport(f *testing.F) {
 		}
 		if r1.GetReportDigest() != r2.GetReportDigest() || len(r1.GetReportDigest()) != 64 {
 			t.Fatalf("digest not deterministic: %q vs %q", r1.GetReportDigest(), r2.GetReportDigest())
+		}
+		hw := r1.GetHardware()
+		if (hw != nil) != (inv.HardwareSchema >= store.HardwareSchemaCurrent) {
+			t.Fatalf("hardware presence does not follow the schema gate (schema %d)", inv.HardwareSchema)
+		}
+		if len(hw.GetProcessors()) > store.MaxProcessors || len(hw.GetDisks()) > store.MaxDisks ||
+			len(hw.GetMemory().GetModules()) > store.MaxMemorySlots || len(hw.GetFilesystems()) > store.MaxFilesystems {
+			t.Fatal("hardware exceeds the collection bounds")
+		}
+		for _, d := range hw.GetDisks() {
+			if len(d.GetPartitions()) != 0 {
+				t.Fatal("legacy partitions projected")
+			}
 		}
 	})
 }

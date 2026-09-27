@@ -28,6 +28,26 @@ type HostReport struct {
 	Updates        UpdateState
 	PendingUpdates []PendingUpdate
 	Truncated      CollectionLimits
+	// Hardware is the host's hardware profile (023); nil for hosts whose
+	// agent predates the corrected hardware collection (hardware schema < 2)
+	// and for inventory versions before 4.4.0.
+	Hardware *Hardware
+}
+
+// Hardware is the hardware part of a host report: BIOS, system, board,
+// chassis, processors, memory (every slot, arrays), physical disks and the
+// filesystems with the disks they live on.
+type Hardware struct {
+	Schema       uint32
+	BIOS         BIOSInfo
+	System       SystemInfo
+	Board        BaseboardInfo
+	Chassis      ChassisInfo
+	Processors   []Processor
+	Memory       MemoryInfo
+	Disks        []Disk
+	Filesystems  []Filesystem
+	Availability HardwareAvailability
 }
 
 // PendingUpdate is an installed package with a newer version available.
@@ -102,6 +122,15 @@ func toHostReport(r *invv1.HostReport) HostReport {
 	}
 	if h := r.GetHost(); h != nil {
 		out.Host = toHost(h)
+	}
+	if hw := r.GetHardware(); hw != nil {
+		out.Hardware = &Hardware{
+			Schema: hw.GetSchema(), BIOS: toBIOS(hw.GetBios()), System: toSystem(hw.GetSystem()),
+			Board: toBaseboard(hw.GetBaseboard()), Chassis: toChassis(hw.GetChassis()),
+			Processors: toProcessors(hw.GetProcessors()), Memory: toMemory(hw.GetMemory()),
+			Disks: toDisks(hw.GetDisks()), Filesystems: toFilesystems(hw.GetFilesystems()),
+			Availability: toAvailability(hw.GetAvailability()),
+		}
 	}
 	for _, p := range r.GetPendingUpdates() {
 		out.PendingUpdates = append(out.PendingUpdates, PendingUpdate{

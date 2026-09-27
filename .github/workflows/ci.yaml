@@ -98,7 +98,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # buf breaking compares against the sdk/v4.0.0 tag
+          fetch-depth: 0 # buf breaking compares against the sdk/v4.1.0 tag
 
       - uses: bufbuild/buf-action@v1
         with:
@@ -109,9 +109,9 @@ jobs:
         working-directory: sdk
         run: buf lint
 
-      - name: buf breaking (against sdk/v4.0.0)
+      - name: buf breaking (against sdk/v4.1.0)
         working-directory: sdk
-        run: buf breaking --against '../.git#tag=sdk/v4.0.0,subdir=sdk'
+        run: buf breaking --against '../.git#tag=sdk/v4.1.0,subdir=sdk'
 
   # The endpoint agent is not part of the image. CI proves it cross-compiles for
   # every platform; the Linux builds are also packaged (.deb/.rpm, job

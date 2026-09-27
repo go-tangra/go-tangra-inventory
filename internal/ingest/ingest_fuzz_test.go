@@ -2,8 +2,10 @@ package ingest
 
 import (
 	"context"
+	"reflect"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -136,6 +138,23 @@ func richInventory() *inventoryv1.Inventory {
 	inv.UpdateState = &inventoryv1.UpdateState{PackageManager: "apt", Status: "updates_available", RebootRequired: "true",
 		AutomaticUpdates: "false", SecurityClassified: true, CheckedAt: 1_700_000_000, PendingCount: 1, SecurityCount: 1}
 	inv.Truncated = &inventoryv1.CollectionLimits{Packages: 1}
+	// Feature 023 hardware fields.
+	inv.HardwareSchema = 2
+	inv.Chassis = &inventoryv1.ChassisInfo{Type: "Rack Mount Chassis", BootupState: "Safe"}
+	inv.Processors = []*inventoryv1.Processor{{SocketDesignation: "CPU1", Version: "Intel(R) Xeon(R) Silver 4310 CPU @ 2.10GHz",
+		Family: "Xeon", Type: "Central Processor", Upgrade: "Socket LGA4189", CoreCount: 12, ThreadCount: 24}}
+	inv.Memory = &inventoryv1.MemoryInfo{TotalPhysicalBytes: 16 << 30, SlotsTotal: 2, SlotsPopulated: 1,
+		Array:  &inventoryv1.MemoryArray{Location: "System board or motherboard", Use: "System memory", ErrorCorrection: "Single-bit ECC", Handle: 0x1000},
+		Arrays: []*inventoryv1.MemoryArray{{Location: "System board or motherboard", Use: "System memory", ErrorCorrection: "Single-bit ECC", Handle: 0x1000}},
+		Modules: []*inventoryv1.MemoryModule{
+			{DeviceLocator: "P1-DIMMA1", BankLocator: "P0_Node0_Channel0_Dimm0", CapacityBytes: 16 << 30, FormFactor: "DIMM", MemoryType: "DDR4",
+				Populated: true, TypeDetail: []string{"Synchronous", "Registered (Buffered)"}, ArrayHandle: 0x1000, RankCount: 2},
+			{DeviceLocator: "P1-DIMMB1", ArrayHandle: 0x1000},
+		}}
+	inv.Disks = []*inventoryv1.Disk{{Name: "nvme0n1", Model: "SAMSUNG MZQL23T8HCLS", Serial: "S64HNE0T000001", SizeBytes: 3840755982336,
+		MediaType: "nvme_ssd", Interface: "nvme", Vendor: "Samsung"}}
+	inv.Filesystems = []*inventoryv1.Filesystem{{Mount: "/", Fs: "ext4", Device: "/dev/nvme0n1p2", SizeBytes: 100, FreeBytes: 10, Disks: []string{"nvme0n1"}}}
+	inv.HardwareAvailability = &inventoryv1.HardwareAvailability{Smbios: "ok", Disks: "ok"}
 	return inv
 }
 
@@ -166,6 +185,43 @@ func assertBounds(t *testing.T, inv store.Inventory) {
 	if pending > store.MaxPendingUpdates {
 		t.Fatalf("pending = %d", pending)
 	}
+	assertHardwareBounds(t, inv)
+}
+
+// assertHardwareBounds checks the feature-023 bounds after validateExtended.
+func assertHardwareBounds(t *testing.T, inv store.Inventory) {
+	t.Helper()
+	if len(inv.Disks) > store.MaxDisks || len(inv.Memory.Modules) > store.MaxMemorySlots || len(inv.Memory.Arrays) > store.MaxMemoryArrays ||
+		len(inv.Processors) > store.MaxProcessors || len(inv.Filesystems) > store.MaxFilesystems || inv.HardwareSchema > store.HardwareSchemaCurrent {
+		t.Fatalf("hardware bounds exceeded: %d disks %d modules %d arrays %d processors %d filesystems schema %d",
+			len(inv.Disks), len(inv.Memory.Modules), len(inv.Memory.Arrays), len(inv.Processors), len(inv.Filesystems), inv.HardwareSchema)
+	}
+	str := func(s string) {
+		if len(s) > store.MaxHWString || hasControl(s) || !utf8.ValidString(s) {
+			t.Fatalf("hardware string not cleaned: %q", s)
+		}
+	}
+	str(inv.BIOS.Vendor)
+	str(inv.System.SerialNumber)
+	str(inv.Chassis.Type)
+	for _, d := range inv.Disks {
+		str(d.Name)
+		str(d.Model)
+		str(d.Serial)
+	}
+	for _, m := range inv.Memory.Modules {
+		str(m.DeviceLocator)
+		str(m.PartNumber)
+		if len(m.TypeDetail) > maxTypeDetail {
+			t.Fatalf("type_detail = %d", len(m.TypeDetail))
+		}
+	}
+	for _, f := range inv.Filesystems {
+		str(f.Mount)
+		if len(f.Disks) > store.MaxFSDisks {
+			t.Fatalf("filesystem disk refs = %d", len(f.Disks))
+		}
+	}
 }
 
 func TestRichInventoryRoundTrip(t *testing.T) {
@@ -178,5 +234,11 @@ func TestRichInventoryRoundTrip(t *testing.T) {
 		inv.Networks[0].Addresses[0] != before.Networks[0].Addresses[0] || inv.Networks[0].Gateway != "192.0.2.1" ||
 		inv.Programs[0].AvailableVersion != "3.0.2" || !inv.Programs[0].SecurityUpdate || inv.OS.Family != "linux" {
 		t.Fatalf("valid values must survive validation:\n%+v", inv)
+	}
+	fresh := inventoryFromProto(richInventory()) // independent copy (validation edits slices in place)
+	if !reflect.DeepEqual(inv.Memory, fresh.Memory) || !reflect.DeepEqual(inv.Disks, fresh.Disks) ||
+		!reflect.DeepEqual(inv.Filesystems, fresh.Filesystems) || !reflect.DeepEqual(inv.Processors, fresh.Processors) ||
+		inv.Chassis != fresh.Chassis || inv.Availability != fresh.Availability || inv.HardwareSchema != 2 {
+		t.Fatalf("valid hardware values must survive validation:\n%+v\n%+v", inv.Memory, fresh.Memory)
 	}
 }

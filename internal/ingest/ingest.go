@@ -223,39 +223,11 @@ func inventoryFromProto(pb *inventoryv1.Inventory) store.Inventory {
 			UptimeSec:   pb.GetOs().GetUptimeSec(),
 			Family:      pb.GetOs().GetFamily(),
 		},
-		BIOS: store.BIOSInfo{
-			Vendor:      pb.GetBios().GetVendor(),
-			Version:     pb.GetBios().GetVersion(),
-			ReleaseDate: pb.GetBios().GetReleaseDate(),
-		},
-		System: store.SystemInfo{
-			Manufacturer: pb.GetSystem().GetManufacturer(),
-			ProductName:  pb.GetSystem().GetProductName(),
-			Version:      pb.GetSystem().GetVersion(),
-			SerialNumber: pb.GetSystem().GetSerialNumber(),
-			UUID:         pb.GetSystem().GetUuid(),
-			WakeUpType:   pb.GetSystem().GetWakeUpType(),
-			SKUNumber:    pb.GetSystem().GetSkuNumber(),
-			Family:       pb.GetSystem().GetFamily(),
-		},
-		Baseboard: store.BaseboardInfo{
-			Manufacturer:      pb.GetBaseboard().GetManufacturer(),
-			Product:           pb.GetBaseboard().GetProduct(),
-			Version:           pb.GetBaseboard().GetVersion(),
-			SerialNumber:      pb.GetBaseboard().GetSerialNumber(),
-			AssetTag:          pb.GetBaseboard().GetAssetTag(),
-			LocationInChassis: pb.GetBaseboard().GetLocationInChassis(),
-			BoardType:         pb.GetBaseboard().GetBoardType(),
-		},
-		Chassis: store.ChassisInfo{
-			Manufacturer: pb.GetChassis().GetManufacturer(),
-			Version:      pb.GetChassis().GetVersion(),
-			SerialNumber: pb.GetChassis().GetSerialNumber(),
-			AssetTag:     pb.GetChassis().GetAssetTag(),
-			SKUNumber:    pb.GetChassis().GetSkuNumber(),
-			Type:         pb.GetChassis().GetType(),
-		},
-		Memory:       memoryFromProto(pb.GetMemory()),
+		BIOS:         invpb.BIOSFromPB(pb.GetBios()),
+		System:       invpb.SystemFromPB(pb.GetSystem()),
+		Baseboard:    invpb.BaseboardFromPB(pb.GetBaseboard()),
+		Chassis:      invpb.ChassisFromPB(pb.GetChassis()),
+		Memory:       invpb.MemoryFromPB(pb.GetMemory()),
 		Ports:        pb.GetPorts(),
 		Slots:        pb.GetSlots(),
 		OEMStrings:   pb.GetOemStrings(),
@@ -268,21 +240,7 @@ func inventoryFromProto(pb *inventoryv1.Inventory) store.Inventory {
 		},
 	}
 
-	for _, p := range pb.GetProcessors() {
-		inv.Processors = append(inv.Processors, store.Processor{
-			SocketDesignation: p.GetSocketDesignation(),
-			Manufacturer:      p.GetManufacturer(),
-			Version:           p.GetVersion(),
-			MaxSpeedMHz:       p.GetMaxSpeedMhz(),
-			CurrentSpeedMHz:   p.GetCurrentSpeedMhz(),
-			CoreCount:         p.GetCoreCount(),
-			CoreEnabled:       p.GetCoreEnabled(),
-			ThreadCount:       p.GetThreadCount(),
-			PartNumber:        p.GetPartNumber(),
-			SerialNumber:      p.GetSerialNumber(),
-			SocketPopulated:   p.GetSocketPopulated(),
-		})
-	}
+	inv.Processors = invpb.ProcessorsFromPB(pb.GetProcessors())
 	for _, c := range pb.GetCache() {
 		inv.Cache = append(inv.Cache, store.CacheInfo{SocketDesignation: c.GetSocketDesignation()})
 	}
@@ -335,53 +293,11 @@ func inventoryFromProto(pb *inventoryv1.Inventory) store.Inventory {
 	inv.HypervisorGuests = invpb.GuestsFromPB(pb.GetHypervisorGuests())
 	inv.UpdateState = invpb.UpdateStateFromPB(pb.GetUpdateState())
 	inv.Truncated = invpb.LimitsFromPB(pb.GetTruncated())
-	for _, d := range pb.GetDisks() {
-		disk := store.Disk{
-			Model:     d.GetModel(),
-			Serial:    d.GetSerial(),
-			SizeBytes: d.GetSizeBytes(),
-			MediaType: d.GetMediaType(),
-			Interface: d.GetInterface(),
-		}
-		for _, part := range d.GetPartitions() {
-			disk.Partitions = append(disk.Partitions, store.Partition{
-				Mount:     part.GetMount(),
-				FS:        part.GetFs(),
-				SizeBytes: part.GetSizeBytes(),
-				FreeBytes: part.GetFreeBytes(),
-			})
-		}
-		inv.Disks = append(inv.Disks, disk)
-	}
+	inv.Disks = invpb.DisksFromPB(pb.GetDisks())
+	inv.Filesystems = invpb.FilesystemsFromPB(pb.GetFilesystems())
+	inv.Availability = invpb.AvailabilityFromPB(pb.GetHardwareAvailability())
+	inv.HardwareSchema = pb.GetHardwareSchema()
 	return inv
-}
-
-func memoryFromProto(pb *inventoryv1.MemoryInfo) store.MemoryInfo {
-	m := store.MemoryInfo{
-		TotalPhysicalBytes: pb.GetTotalPhysicalBytes(),
-		Array: store.MemoryArray{
-			Location:        pb.GetArray().GetLocation(),
-			Use:             pb.GetArray().GetUse(),
-			ErrorCorrection: pb.GetArray().GetErrorCorrection(),
-			MaximumCapacity: pb.GetArray().GetMaximumCapacity(),
-			NumberOfDevices: pb.GetArray().GetNumberOfDevices(),
-		},
-	}
-	for _, mod := range pb.GetModules() {
-		m.Modules = append(m.Modules, store.MemoryModule{
-			DeviceLocator:      mod.GetDeviceLocator(),
-			BankLocator:        mod.GetBankLocator(),
-			CapacityBytes:      mod.GetCapacityBytes(),
-			FormFactor:         mod.GetFormFactor(),
-			MemoryType:         mod.GetMemoryType(),
-			SpeedMTs:           mod.GetSpeedMtS(),
-			ConfiguredSpeedMTs: mod.GetConfiguredSpeedMtS(),
-			Manufacturer:       mod.GetManufacturer(),
-			SerialNumber:       mod.GetSerialNumber(),
-			PartNumber:         mod.GetPartNumber(),
-		})
-	}
-	return m
 }
 
 // unixToTime converts unix seconds to a UTC time, mapping 0 to the zero time.

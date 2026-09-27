@@ -49,25 +49,25 @@ host access) require explicit user confirmation before they are executed.
 
 ### Tests first — inventory
 
-- [ ] T007 [P] Proto contract check: `buf breaking --against '.git#tag=sdk/v4.1.0,subdir=sdk'` in `Makefile` (`proto-check`) and `.github/workflows/ci.yaml` (buf job, currently against sdk/v4.0.0); must fail until T015 is additive-clean
-- [ ] T008 [P] Migration test `internal/repo/repodb/hardware_upgrades_integration_test.go` (`//go:build integration`): database at 0005 with hosts/agents/components → 0006 applies; defaults on new columns; CHECKs reject bad `os`/`arch`/`install_type`, release `version`/`sha256`/`file`/`size`/chunk size, upgrade `state`/`origin`/`reason`, policy window/timezone/max_concurrent; partial unique index allows one active upgrade per agent; RLS isolates `inventory_agent_upgrades` and `inventory_agent_upgrade_policy` per tenant and admits `app.system`; release tables readable in tenant scope
-- [ ] T009 [P] Ingest validation tests `internal/ingest/validate_test.go`: 257 disks, 1025 memory modules, 65 arrays, 257 processors, 1025 filesystems, 65 disk refs → first N kept and counted in `Inventory.truncated`; strings > 256 bytes clipped; control characters removed; unknown media/interface/availability → `unknown`/`other`; **negative**: payload > `max_snapshot_bytes` still `InvalidArgument`; `hardware_schema` > 2 clamped to 2
-- [ ] T010 [P] Extend `FuzzSubmitMapper` in `internal/ingest/ingest_fuzz_test.go` to the new hardware fields (no panic, bounds hold after `validateExtended`, valid values round-trip)
-- [ ] T011 [P] Projection tests `internal/hostreport/hostreport_test.go` (100 %): `hardware` present only for `hardware_schema ≥ 2`; mapping per data-model §1.2 (disks without legacy partitions, all slots, arrays, filesystems, availability, truncated counters); digest changes when any hardware field changes and is stable otherwise; legacy snapshot → no hardware, digest unchanged vs. 4.3.x for identical other fields; extend `FuzzHostReport` in `internal/hostreport/hostreport_fuzz_test.go`
-- [ ] T012 [P] Mapper round-trip tests `internal/invpb/hardware_test.go` (store ↔ proto for Filesystem, HardwareAvailability, new Processor/MemoryInfo/MemoryModule/Disk/CollectionLimits fields)
-- [ ] T013 [P] SDK tests `sdk/pkg/inventoryclient/hostreport_test.go`: `HostReport.Hardware` plain-Go mapping (nil when absent), `toInventory` of the new `Inventory` fields, against the in-process fake server
-- [ ] T014 [P] Component insert tests: new columns (`populated`, `type_detail`, `name`, `removable`, `family`) written by `insertComponents` in `internal/repo/repodb/hardware_upgrades_integration_test.go` and mirrored in `internal/memstore/memstore_test.go`
+- [x] T007 [P] Proto contract check: `buf breaking --against '.git#tag=sdk/v4.1.0,subdir=sdk'` in `Makefile` (`proto-check`) and `.github/workflows/ci.yaml` (buf job, currently against sdk/v4.0.0); must fail until T015 is additive-clean
+- [x] T008 [P] Migration test `internal/repo/repodb/hardware_upgrades_integration_test.go` (`//go:build integration`): database at 0005 with hosts/agents/components → 0006 applies; defaults on new columns; CHECKs reject bad `os`/`arch`/`install_type`, release `version`/`sha256`/`file`/`size`/chunk size, upgrade `state`/`origin`/`reason`, policy window/timezone/max_concurrent; partial unique index allows one active upgrade per agent; RLS isolates `inventory_agent_upgrades` and `inventory_agent_upgrade_policy` per tenant and admits `app.system`; release tables readable in tenant scope
+- [x] T009 [P] Ingest validation tests `internal/ingest/validate_test.go`: 257 disks, 1025 memory modules, 65 arrays, 257 processors, 1025 filesystems, 65 disk refs → first N kept and counted in `Inventory.truncated`; strings > 256 bytes clipped; control characters removed; unknown media/interface/availability → `unknown`/`other`; **negative**: payload > `max_snapshot_bytes` still `InvalidArgument`; `hardware_schema` > 2 clamped to 2
+- [x] T010 [P] Extend `FuzzSubmitMapper` in `internal/ingest/ingest_fuzz_test.go` to the new hardware fields (no panic, bounds hold after `validateExtended`, valid values round-trip)
+- [x] T011 [P] Projection tests `internal/hostreport/hostreport_test.go` (100 %): `hardware` present only for `hardware_schema ≥ 2`; mapping per data-model §1.2 (disks without legacy partitions, all slots, arrays, filesystems, availability, truncated counters); digest changes when any hardware field changes and is stable otherwise; legacy snapshot → no hardware, digest unchanged vs. 4.3.x for identical other fields; extend `FuzzHostReport` in `internal/hostreport/hostreport_fuzz_test.go`
+- [x] T012 [P] Mapper round-trip tests `internal/invpb/hardware_test.go` (store ↔ proto for Filesystem, HardwareAvailability, new Processor/MemoryInfo/MemoryModule/Disk/CollectionLimits fields)
+- [x] T013 [P] SDK tests `sdk/pkg/inventoryclient/hostreport_test.go`: `HostReport.Hardware` plain-Go mapping (nil when absent), `toInventory` of the new `Inventory` fields, against the in-process fake server
+- [x] T014 [P] Component insert tests: new columns (`populated`, `type_detail`, `name`, `removable`, `family`) written by `insertComponents` in `internal/repo/repodb/hardware_upgrades_integration_test.go` and mirrored in `internal/memstore/memstore_test.go`
 
 ### Implementation — inventory
 
-- [ ] T015 Proto per contracts/inventory-grpc.md §1–§3 in `sdk/api/proto/inventory/v1/inventory.proto` (Inventory 31–33, ChassisInfo 7, Processor 12–14, MemoryInfo 4–6, MemoryArray 6, MemoryModule 11–15, Disk 7–9, Filesystem, HardwareAvailability, CollectionLimits 6–10, HostReport 18, HardwareProfile, CommandType UPGRADE, Command 3, UpgradeCommand, AgentPlatform, StreamRequest 3–4, CheckAgentUpdate/DownloadAgentRelease/ReportUpgrade + messages); `make generate`
-- [ ] T016 [P] Domain structs and bounds constants per data-model §1.1 in `internal/store/models.go`
-- [ ] T017 [P] Migration `internal/store/migrations/0006_hardware_upgrades.sql` per data-model §1.3
-- [ ] T018 Mappers for every new field: `internal/invpb/hardware.go` (shared), `internal/sender/mapper.go` (store → proto), `internal/ingest/ingest.go` (`inventoryFromProto`), `internal/grpcapi/mapper.go`, `sdk/pkg/inventoryclient/inventory.go` (`toInventory`)
-- [ ] T019 Hardware bounds and sanitisation in `validateExtended` in `internal/ingest/validate.go` (research D5)
-- [ ] T020 Projection hardware section + schema gate in `internal/hostreport/hostreport.go`
-- [ ] T021 New component columns in `insertComponents` in `internal/repo/repodb/db.go` and in `internal/memstore/memstore.go`
-- [ ] T022 SDK plain-Go `Hardware` types and mapping in `sdk/pkg/inventoryclient/hostreport.go` per contracts/inventory-grpc.md §2
+- [x] T015 Proto per contracts/inventory-grpc.md §1–§3 in `sdk/api/proto/inventory/v1/inventory.proto` (Inventory 31–33, ChassisInfo 7, Processor 12–14, MemoryInfo 4–6, MemoryArray 6, MemoryModule 11–15, Disk 7–9, Filesystem, HardwareAvailability, CollectionLimits 6–10, HostReport 18, HardwareProfile, CommandType UPGRADE, Command 3, UpgradeCommand, AgentPlatform, StreamRequest 3–4, CheckAgentUpdate/DownloadAgentRelease/ReportUpgrade + messages); `make generate`
+- [x] T016 [P] Domain structs and bounds constants per data-model §1.1 in `internal/store/models.go`
+- [x] T017 [P] Migration `internal/store/migrations/0006_hardware_upgrades.sql` per data-model §1.3
+- [x] T018 Mappers for every new field: `internal/invpb/hardware.go` (shared), `internal/sender/mapper.go` (store → proto), `internal/ingest/ingest.go` (`inventoryFromProto`), `internal/grpcapi/mapper.go`, `sdk/pkg/inventoryclient/inventory.go` (`toInventory`)
+- [x] T019 Hardware bounds and sanitisation in `validateExtended` in `internal/ingest/validate.go` (research D5)
+- [x] T020 Projection hardware section + schema gate in `internal/hostreport/hostreport.go`
+- [x] T021 New component columns in `insertComponents` in `internal/repo/repodb/db.go` and in `internal/memstore/memstore.go`
+- [x] T022 SDK plain-Go `Hardware` types and mapping in `sdk/pkg/inventoryclient/hostreport.go` per contracts/inventory-grpc.md §2
 
 ### Tests first — IPAM
 

@@ -1155,9 +1155,12 @@ var HostReportService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	IngestService_Enroll_FullMethodName          = "/inventory.v1.IngestService/Enroll"
-	IngestService_SubmitInventory_FullMethodName = "/inventory.v1.IngestService/SubmitInventory"
-	IngestService_StreamCommands_FullMethodName  = "/inventory.v1.IngestService/StreamCommands"
+	IngestService_Enroll_FullMethodName               = "/inventory.v1.IngestService/Enroll"
+	IngestService_SubmitInventory_FullMethodName      = "/inventory.v1.IngestService/SubmitInventory"
+	IngestService_StreamCommands_FullMethodName       = "/inventory.v1.IngestService/StreamCommands"
+	IngestService_CheckAgentUpdate_FullMethodName     = "/inventory.v1.IngestService/CheckAgentUpdate"
+	IngestService_DownloadAgentRelease_FullMethodName = "/inventory.v1.IngestService/DownloadAgentRelease"
+	IngestService_ReportUpgrade_FullMethodName        = "/inventory.v1.IngestService/ReportUpgrade"
 )
 
 // IngestServiceClient is the client API for IngestService service.
@@ -1171,6 +1174,11 @@ type IngestServiceClient interface {
 	Enroll(ctx context.Context, in *EnrollRequest, opts ...grpc.CallOption) (*EnrollResponse, error)
 	SubmitInventory(ctx context.Context, in *SubmitRequest, opts ...grpc.CallOption) (*SubmitResponse, error)
 	StreamCommands(ctx context.Context, in *StreamRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Command], error)
+	// Agent self-upgrade (feature 023), authenticated like every method except
+	// Enroll; the tenant always comes from the verified agent.
+	CheckAgentUpdate(ctx context.Context, in *CheckAgentUpdateRequest, opts ...grpc.CallOption) (*CheckAgentUpdateResponse, error)
+	DownloadAgentRelease(ctx context.Context, in *DownloadAgentReleaseRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[DownloadAgentReleaseResponse], error)
+	ReportUpgrade(ctx context.Context, in *ReportUpgradeRequest, opts ...grpc.CallOption) (*ReportUpgradeResponse, error)
 }
 
 type ingestServiceClient struct {
@@ -1220,6 +1228,45 @@ func (c *ingestServiceClient) StreamCommands(ctx context.Context, in *StreamRequ
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type IngestService_StreamCommandsClient = grpc.ServerStreamingClient[Command]
 
+func (c *ingestServiceClient) CheckAgentUpdate(ctx context.Context, in *CheckAgentUpdateRequest, opts ...grpc.CallOption) (*CheckAgentUpdateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CheckAgentUpdateResponse)
+	err := c.cc.Invoke(ctx, IngestService_CheckAgentUpdate_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *ingestServiceClient) DownloadAgentRelease(ctx context.Context, in *DownloadAgentReleaseRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[DownloadAgentReleaseResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &IngestService_ServiceDesc.Streams[1], IngestService_DownloadAgentRelease_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[DownloadAgentReleaseRequest, DownloadAgentReleaseResponse]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type IngestService_DownloadAgentReleaseClient = grpc.ServerStreamingClient[DownloadAgentReleaseResponse]
+
+func (c *ingestServiceClient) ReportUpgrade(ctx context.Context, in *ReportUpgradeRequest, opts ...grpc.CallOption) (*ReportUpgradeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReportUpgradeResponse)
+	err := c.cc.Invoke(ctx, IngestService_ReportUpgrade_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // IngestServiceServer is the server API for IngestService service.
 // All implementations must embed UnimplementedIngestServiceServer
 // for forward compatibility.
@@ -1231,6 +1278,11 @@ type IngestServiceServer interface {
 	Enroll(context.Context, *EnrollRequest) (*EnrollResponse, error)
 	SubmitInventory(context.Context, *SubmitRequest) (*SubmitResponse, error)
 	StreamCommands(*StreamRequest, grpc.ServerStreamingServer[Command]) error
+	// Agent self-upgrade (feature 023), authenticated like every method except
+	// Enroll; the tenant always comes from the verified agent.
+	CheckAgentUpdate(context.Context, *CheckAgentUpdateRequest) (*CheckAgentUpdateResponse, error)
+	DownloadAgentRelease(*DownloadAgentReleaseRequest, grpc.ServerStreamingServer[DownloadAgentReleaseResponse]) error
+	ReportUpgrade(context.Context, *ReportUpgradeRequest) (*ReportUpgradeResponse, error)
 	mustEmbedUnimplementedIngestServiceServer()
 }
 
@@ -1249,6 +1301,15 @@ func (UnimplementedIngestServiceServer) SubmitInventory(context.Context, *Submit
 }
 func (UnimplementedIngestServiceServer) StreamCommands(*StreamRequest, grpc.ServerStreamingServer[Command]) error {
 	return status.Error(codes.Unimplemented, "method StreamCommands not implemented")
+}
+func (UnimplementedIngestServiceServer) CheckAgentUpdate(context.Context, *CheckAgentUpdateRequest) (*CheckAgentUpdateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CheckAgentUpdate not implemented")
+}
+func (UnimplementedIngestServiceServer) DownloadAgentRelease(*DownloadAgentReleaseRequest, grpc.ServerStreamingServer[DownloadAgentReleaseResponse]) error {
+	return status.Error(codes.Unimplemented, "method DownloadAgentRelease not implemented")
+}
+func (UnimplementedIngestServiceServer) ReportUpgrade(context.Context, *ReportUpgradeRequest) (*ReportUpgradeResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReportUpgrade not implemented")
 }
 func (UnimplementedIngestServiceServer) mustEmbedUnimplementedIngestServiceServer() {}
 func (UnimplementedIngestServiceServer) testEmbeddedByValue()                       {}
@@ -1318,6 +1379,53 @@ func _IngestService_StreamCommands_Handler(srv interface{}, stream grpc.ServerSt
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type IngestService_StreamCommandsServer = grpc.ServerStreamingServer[Command]
 
+func _IngestService_CheckAgentUpdate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CheckAgentUpdateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IngestServiceServer).CheckAgentUpdate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IngestService_CheckAgentUpdate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IngestServiceServer).CheckAgentUpdate(ctx, req.(*CheckAgentUpdateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IngestService_DownloadAgentRelease_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(DownloadAgentReleaseRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(IngestServiceServer).DownloadAgentRelease(m, &grpc.GenericServerStream[DownloadAgentReleaseRequest, DownloadAgentReleaseResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type IngestService_DownloadAgentReleaseServer = grpc.ServerStreamingServer[DownloadAgentReleaseResponse]
+
+func _IngestService_ReportUpgrade_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReportUpgradeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IngestServiceServer).ReportUpgrade(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IngestService_ReportUpgrade_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IngestServiceServer).ReportUpgrade(ctx, req.(*ReportUpgradeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // IngestService_ServiceDesc is the grpc.ServiceDesc for IngestService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1333,11 +1441,24 @@ var IngestService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "SubmitInventory",
 			Handler:    _IngestService_SubmitInventory_Handler,
 		},
+		{
+			MethodName: "CheckAgentUpdate",
+			Handler:    _IngestService_CheckAgentUpdate_Handler,
+		},
+		{
+			MethodName: "ReportUpgrade",
+			Handler:    _IngestService_ReportUpgrade_Handler,
+		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
 			StreamName:    "StreamCommands",
 			Handler:       _IngestService_StreamCommands_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "DownloadAgentRelease",
+			Handler:       _IngestService_DownloadAgentRelease_Handler,
 			ServerStreams: true,
 		},
 	},
