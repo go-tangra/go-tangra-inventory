@@ -1,29 +1,50 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
-import { UiPage, UiAlert, UiCard, UiButton, UiDataTable, UiStatusChip, UiLiveIndicator, UiForm, UiInput, UiSecretField, UiCopyButton, UiDrawer, useConfirm, type Column } from '@go-tangra/ui'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { useAbility } from '@casl/vue'
+import { UiPage, UiAlert, UiCard, UiButton, UiDataTable, UiStatusChip, UiLiveIndicator, UiForm, UiInput, UiSecretField, UiCopyButton, UiDrawer, UiSelect, useConfirm, type Column } from '@go-tangra/ui'
 import { useZodForm } from '@go-tangra/ui/forms'
 import { useAgents } from '@/stores/agents'
 import { useLive } from '@/stores/live'
 import { describe } from '@/api/client'
 import { enrollTokenSchema } from '@/schemas'
-import type { ConnectedAgent, MintedToken } from '@/api/types'
+import type { AgentFleetEntry, FleetState, MintedToken, UpgradeBatchResult } from '@/api/types'
+import { fleetStateLabel, reasonText, skipSummary, UPGRADABLE } from './upgrade-text'
+import PolicyCard from './PolicyCard.vue'
 
 const agents = useAgents()
 const live = useLive()
 const confirm = useConfirm()
+const ability = useAbility()
+// Enrolment, refresh, revoke and routine upgrades all follow agents:manage.
+const canManage = computed(() => ability.can('manage', 'InventoryAgent'))
 
 const enrollOpen = ref(false)
 const minted = ref<MintedToken | null>(null)
 const message = ref('')
 const error = ref('')
 const busyHost = ref<string | null>(null)
+const busyUpgrade = ref(false)
+const selected = ref<string[]>([])
+const stateFilter = ref<FleetState | ''>('')
+
+function reload(): Promise<void> {
+  return agents.listFleet(stateFilter.value ? { upgrade_state: stateFilter.value } : {})
+}
 
 let release: (() => void) | null = null
+let off: (() => void) | null = null
 onMounted(() => {
-  void agents.listConnected()
+  void reload()
   release = live.connect()
+  // Upgrade events are content-free: refetch the fleet on each one.
+  off = live.on((type) => {
+    if (type.endsWith('agent.upgrade')) void reload()
+  })
 })
-onUnmounted(() => release?.())
+onUnmounted(() => {
+  off?.()
+  release?.()
+})
 
 // The secret is returned once; it lives only in this component's state while the dialog is open.
 const enrollForm = useZodForm(enrollTokenSchema, {
@@ -56,7 +77,7 @@ async function refresh(hostId?: string): Promise<void> {
     busyHost.value = null
   }
 }
-async function revoke(a: ConnectedAgent): Promise<void> {
+async function revoke(a: AgentFleetEntry): Promise<void> {
   if (!(await confirm.ask({ title: 'Revoke this agent?', text: 'It must enrol again with a new token.', danger: true, confirmLabel: 'Revoke' }))) return
   error.value = ''
   try {
@@ -65,34 +86,99 @@ async function revoke(a: ConnectedAgent): Promise<void> {
     error.value = describe(e)
   }
 }
+
+async function runUpgrade(action: () => Promise<UpgradeBatchResult>): Promise<void> {
+  busyUpgrade.value = true
+  message.value = ''
+  error.value = ''
+  try {
+    const res = await action()
+    message.value = `${res.created.length} upgrade${res.created.length === 1 ? '' : 's'} to ${res.target_version} requested.` + skipSummary(res.skipped)
+    selected.value = []
+    await reload()
+  } catch (e) {
+    error.value = describe(e)
+  } finally {
+    busyUpgrade.value = false
+  }
+}
+const upgradeOne = (a: AgentFleetEntry): Promise<void> => runUpgrade(() => agents.upgrade([a.agent_id]))
+const upgradeSelected = (): Promise<void> => runUpgrade(() => agents.upgrade(selected.value))
+async function upgradeAll(): Promise<void> {
+  if (!(await confirm.ask({ title: 'Upgrade all outdated agents?', text: `Every outdated agent that supports self-upgrade is asked to install ${agents.currentVersion || 'the current version'}.`, confirmLabel: 'Upgrade all' }))) return
+  await runUpgrade(() => agents.upgradeAllOutdated())
+}
+async function cancel(a: AgentFleetEntry): Promise<void> {
+  if (!a.upgrade_id) return
+  error.value = ''
+  message.value = ''
+  try {
+    await agents.cancelUpgrade(a.upgrade_id)
+    message.value = 'Upgrade cancelled.'
+    await reload()
+  } catch (e) {
+    error.value = describe(e)
+  }
+}
+
+const canUpgrade = (a: AgentFleetEntry): boolean => !!a.upgrade_state && UPGRADABLE.has(a.upgrade_state)
+const manualCount = computed(() => agents.fleet.filter((a) => a.upgrade_state === 'manual_upgrade_required').length)
+const outdatedCount = computed(() => agents.fleet.filter(canUpgrade).length)
+
+const stateColors = { up_to_date: 'success', available: 'info', pending: 'neutral', in_progress: 'primary', failed: 'error', rolled_back: 'warning', manual_upgrade_required: 'warning', unsupported: 'neutral' } as const
+const stateOptions = [{ title: 'All states', value: '' }, ...(Object.keys(stateColors) as FleetState[]).map((s) => ({ title: fleetStateLabel(s), value: s }))]
+
 const fmt = (ts?: string): string => (ts ? new Date(ts).toLocaleString() : '')
-const columns: Column<ConnectedAgent>[] = [
-  { key: 'status', label: 'Status', width: 'sm', format: () => 'online' },
+const columns: Column<AgentFleetEntry>[] = [
+  { key: 'status', label: 'Status', width: 'sm' },
   { key: 'hostname', label: 'Hostname', sortable: true },
   { key: 'agent_id', label: 'Agent ID', format: (a) => a.agent_id.slice(0, 12), hideOnStack: true },
-  { key: 'version', label: 'Version', hideOnStack: true },
-  { key: 'connected_at', label: 'Connected', format: (a) => fmt(a.connected_at) },
+  { key: 'version', label: 'Version', sortable: true },
+  { key: 'target_version', label: 'Target', hideOnStack: true },
+  { key: 'upgrade_state', label: 'Upgrade' },
+  { key: 'state_changed_at', label: 'Last change', format: (a) => fmt(a.state_changed_at || a.last_seen || a.connected_at), hideOnStack: true },
 ]
 </script>
 
 <template>
-  <UiPage title="Agents">
+  <UiPage title="Agents" :subtitle="agents.currentVersion ? 'Current agent version ' + agents.currentVersion : ''">
     <template #badges><UiLiveIndicator :connected="live.connected" /></template>
     <template #actions>
-      <UiButton variant="text" icon="mdi-refresh" icon-only label="Refresh" @click="agents.listConnected()" />
-      <UiButton icon="mdi-key-plus" data-test="issue-token" @click="openEnroll">Issue enrollment token</UiButton>
+      <UiButton variant="text" icon="mdi-refresh" icon-only label="Refresh" @click="reload()" />
+      <template v-if="canManage">
+        <UiButton v-if="selected.length" variant="soft" icon="mdi-arrow-up-bold-circle-outline" :loading="busyUpgrade" data-test="upgrade-selected" @click="upgradeSelected">Upgrade selected ({{ selected.length }})</UiButton>
+        <UiButton variant="soft" icon="mdi-arrow-up-bold-circle" :loading="busyUpgrade" :disabled="!outdatedCount" data-test="upgrade-all" @click="upgradeAll">Upgrade all outdated</UiButton>
+        <UiButton icon="mdi-key-plus" data-test="issue-token" @click="openEnroll">Issue enrollment token</UiButton>
+      </template>
     </template>
-    <UiAlert v-if="message" kind="success" class="mb-3">{{ message }}</UiAlert>
+    <UiAlert v-if="message" kind="success" class="mb-3" data-test="upgrade-message">{{ message }}</UiAlert>
     <UiAlert v-if="error || agents.error" kind="error" class="mb-3">{{ error || agents.error }}</UiAlert>
+    <UiAlert v-if="manualCount" kind="info" class="mb-3" data-test="manual-upgrade-note">
+      {{ manualCount }} agent{{ manualCount === 1 ? ' is' : 's are' }} older than 4.4.0 and cannot upgrade themselves. Install the current agent package on {{ manualCount === 1 ? 'that host' : 'those hosts' }} once by hand; later versions upgrade from here.
+    </UiAlert>
+    <div class="mb-3 max-w-xs">
+      <UiSelect id="fleet-state" v-model="stateFilter" label="Upgrade state" size="sm" :options="stateOptions" data-test="fleet-state-filter" @update:model-value="reload()" />
+    </div>
     <UiCard :padded="false">
-      <UiDataTable :items="agents.connected" :columns="columns" row-key="agent_id" :loading="agents.loading" caption="Connected agents" empty-title="No agents connected" :row-attrs="(a) => ({ 'data-test': 'agent-row-' + a.agent_id })" data-test="agents-table">
-        <template #cell-status><UiStatusChip status="online" /></template>
+      <UiDataTable v-model:selected="selected" :items="agents.fleet" :columns="columns" row-key="agent_id" :loading="agents.loading" :selectable="canManage" :row-selectable="canUpgrade" caption="Agents" empty-title="No agents enrolled" :row-attrs="(a) => ({ 'data-test': 'agent-row-' + a.agent_id })" data-test="agents-table">
+        <template #cell-status="{ row }"><UiStatusChip :status="row.online === false ? 'offline' : 'online'" /></template>
+        <template #cell-upgrade_state="{ row }">
+          <span v-if="row.upgrade_state" class="inline-flex flex-col gap-0.5">
+            <UiStatusChip :status="row.upgrade_state" :label="fleetStateLabel(row.upgrade_state)" :colors="stateColors" :data-test="'agent-state-' + row.agent_id" />
+            <span v-if="row.upgrade_reason" class="text-xs text-base-content/70" :data-test="'agent-reason-' + row.agent_id">{{ reasonText(row.upgrade_reason) }}</span>
+          </span>
+        </template>
         <template #actions="{ row }">
-          <UiButton size="xs" variant="soft" icon="mdi-refresh" :loading="busyHost === row.host_id" :disabled="!row.host_id" :data-test="'agent-refresh-' + row.agent_id" @click="refresh(row.host_id)">Refresh</UiButton>
-          <UiButton size="xs" variant="text" color="error" :data-test="'agent-revoke-' + row.agent_id" @click="revoke(row)">Revoke</UiButton>
+          <template v-if="canManage">
+            <UiButton v-if="canUpgrade(row)" size="xs" variant="soft" icon="mdi-arrow-up-bold" :loading="busyUpgrade" :data-test="'agent-upgrade-' + row.agent_id" @click="upgradeOne(row)">Upgrade</UiButton>
+            <UiButton v-if="row.upgrade_state === 'pending' && row.upgrade_id" size="xs" variant="text" :data-test="'agent-cancel-' + row.agent_id" @click="cancel(row)">Cancel</UiButton>
+            <UiButton size="xs" variant="soft" icon="mdi-refresh" :loading="busyHost === row.host_id" :disabled="!row.host_id || row.online === false" :data-test="'agent-refresh-' + row.agent_id" @click="refresh(row.host_id)">Refresh</UiButton>
+            <UiButton size="xs" variant="text" color="error" :data-test="'agent-revoke-' + row.agent_id" @click="revoke(row)">Revoke</UiButton>
+          </template>
         </template>
       </UiDataTable>
     </UiCard>
+    <PolicyCard class="mt-4" />
 
     <UiDrawer :model-value="enrollOpen" title="Issue enrollment token" size="md" @update:model-value="closeEnroll">
       <template v-if="!minted">

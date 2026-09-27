@@ -16,7 +16,7 @@ import (
 // agent-side sender attaches to outgoing calls.
 const (
 	metaAgentIDKey    = "x-agent-id"
-	metaCredentialKey = "x-agent-credential"
+	metaCredentialKey = "x-agent-credential" // #nosec G101 -- metadata key name, not a credential
 )
 
 // agentCtxKey is the (unexported, typed) context key under which the verified

@@ -27,7 +27,7 @@ const (
 	// MetaAgentIDKey carries the agent id on SubmitInventory/StreamCommands.
 	MetaAgentIDKey = "x-agent-id"
 	// MetaCredentialKey carries the per-agent credential on authenticated calls.
-	MetaCredentialKey = "x-agent-credential"
+	MetaCredentialKey = "x-agent-credential" // #nosec G101 -- metadata key name, not a credential
 
 	defaultCallTimeout = 30 * time.Second
 	baseBackoff        = 1 * time.Second

@@ -239,12 +239,12 @@ func TestMemoryArraysAndTotals(t *testing.T) {
 	video := physArray(0x2000, 0x06, 0x04, 0x03, 1)
 	small := physArray(0x3000, 0x03, 0x03, 0x03, 1)
 	b := small.Formatted
-	put32(b, 0x07, 64<<20)                         // 64 GiB in KiB, no extended capacity needed
-	small = st(16, 0x3000, b[:0x0F-4])             // SMBIOS 2.1 length: extended capacity absent
-	d1 := memDevice(0x1100, 0x1000, 16384, 0, 0)   // system, 16 GiB
-	d2 := memDevice(0x1101, 0x1000, 0, 0, 0)       // system, empty
-	d3 := memDevice(0x2100, 0x2000, 1024, 0, 0)    // video memory: not in the total
-	d4 := memDevice(0x3100, 0x3000, 8192, 0, 0)    // second system array
+	put32(b, 0x07, 64<<20)                       // 64 GiB in KiB, no extended capacity needed
+	small = st(16, 0x3000, b[:0x0F-4])           // SMBIOS 2.1 length: extended capacity absent
+	d1 := memDevice(0x1100, 0x1000, 16384, 0, 0) // system, 16 GiB
+	d2 := memDevice(0x1101, 0x1000, 0, 0, 0)     // system, empty
+	d3 := memDevice(0x2100, 0x2000, 1024, 0, 0)  // video memory: not in the total
+	d4 := memDevice(0x3100, 0x3000, 8192, 0, 0)  // second system array
 	hw := DecodeSMBIOS(v33, []SMBIOSStructure{video, sys, small, d1, d2, d3, d4})
 	m := hw.Memory
 	if len(m.Arrays) != 3 || m.Array.Handle != 0x1000 || m.Array.Use != "System memory" || m.Array.Location != "System board or motherboard" ||

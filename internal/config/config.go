@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -44,6 +45,41 @@ type Config struct {
 	Limits     Limits     `yaml:"limits_inventory"`
 	// HostReports configures the mesh-only HostReportService (feature 020).
 	HostReports HostReports `yaml:"host_reports"`
+	// AgentReleases configures the signed agent releases offered to agents
+	// for self-upgrade and the upgrade request lifecycle (feature 023).
+	AgentReleases AgentReleases `yaml:"agent_releases"`
+}
+
+// AgentReleases configures agent self-upgrade on the server. BundleDir holds
+// the signed releases shipped in the image (<version>/ with manifest,
+// signature and artifacts; "" = none), verified and copied into PostgreSQL
+// at start; KeepVersions bounds the stored releases (the platform current
+// version, tenant pins and active targets are always kept).
+type AgentReleases struct {
+	BundleDir              string `yaml:"bundle_dir"`
+	KeepVersions           int    `yaml:"keep_versions"`
+	MaxConcurrentDownloads int    `yaml:"max_concurrent_downloads"`
+	ChunkBytes             int    `yaml:"chunk_bytes"`
+	RequestTTLHours        int    `yaml:"request_ttl_hours"`
+	ProgressTimeoutMinutes int    `yaml:"progress_timeout_minutes"`
+}
+
+func (r AgentReleases) validate() error {
+	switch {
+	case r.BundleDir != "" && !filepath.IsAbs(r.BundleDir):
+		return errors.New("config: agent_releases.bundle_dir must be an absolute path")
+	case r.KeepVersions < 2 || r.KeepVersions > 50:
+		return errors.New("config: agent_releases.keep_versions must be within [2, 50]")
+	case r.MaxConcurrentDownloads < 1 || r.MaxConcurrentDownloads > 500:
+		return errors.New("config: agent_releases.max_concurrent_downloads must be within [1, 500]")
+	case r.ChunkBytes < 64<<10 || r.ChunkBytes > 1<<20:
+		return errors.New("config: agent_releases.chunk_bytes must be within [65536, 1048576]")
+	case r.RequestTTLHours < 1 || r.RequestTTLHours > 720:
+		return errors.New("config: agent_releases.request_ttl_hours must be within [1, 720]")
+	case r.ProgressTimeoutMinutes < 5 || r.ProgressTimeoutMinutes > 120:
+		return errors.New("config: agent_releases.progress_timeout_minutes must be within [5, 120]")
+	}
+	return nil
 }
 
 // HostReports configures HostReportService. Consumers are the mesh service
@@ -201,6 +237,8 @@ func Default() Config {
 		Enroll:      Enroll{TokenTTLSeconds: 3600},
 		Limits:      Limits{MaxRequestBytes: 1 << 20, MaxSnapshotBytes: 8 << 20},
 		HostReports: HostReports{Consumers: []string{"ipam"}, MaxPageBytes: 3 << 20},
+		AgentReleases: AgentReleases{BundleDir: "/app/agent-releases", KeepVersions: 5, MaxConcurrentDownloads: 20,
+			ChunkBytes: 1 << 20, RequestTTLHours: 168, ProgressTimeoutMinutes: 15},
 	}
 }
 
@@ -289,7 +327,20 @@ func (c Config) Validate() error {
 	if c.Limits.MaxSnapshotBytes < 1<<10 || c.Limits.MaxSnapshotBytes > 128<<20 {
 		return errors.New("config: limits_inventory.max_snapshot_bytes must be within [1 KiB, 128 MiB]")
 	}
-	return c.HostReports.validate()
+	if err := c.HostReports.validate(); err != nil {
+		return err
+	}
+	return c.AgentReleases.validate()
+}
+
+// RequestTTL is how long an upgrade request waits for its agent (FR-011).
+func (c Config) RequestTTL() time.Duration {
+	return time.Duration(c.AgentReleases.RequestTTLHours) * time.Hour
+}
+
+// ProgressTimeout fails an upgrade whose agent stops reporting.
+func (c Config) ProgressTimeout() time.Duration {
+	return time.Duration(c.AgentReleases.ProgressTimeoutMinutes) * time.Minute
 }
 
 // validate checks the ingest transport: plaintext only as a non-production
@@ -410,11 +461,29 @@ type AgentConfig struct {
 	// CollectDisks reports the physical disks (feature 023: model, serial,
 	// size, media, interface; Linux sysfs, Windows Get-PhysicalDisk).
 	CollectDisks bool `yaml:"collect_disks"`
+
+	// Upgrade configures self-upgrade (feature 023). Upgrades are only
+	// ever downloaded from the configured ingest endpoint; there is
+	// deliberately no other source setting.
+	Upgrade AgentUpgrade `yaml:"upgrade"`
+}
+
+// AgentUpgrade: Enabled accepts upgrade requests pushed by the server
+// (false: only the manual `update` command upgrades); ConfirmTimeoutSeconds
+// bounds how long a new version has to start and report before the host
+// rolls back (FR-013); StagingDir overrides the private staging directory
+// (default /var/lib/inventory-agent/upgrade, on Windows
+// %ProgramData%\go-tangra\inventory-agent\upgrade).
+type AgentUpgrade struct {
+	Enabled               bool   `yaml:"enabled"`
+	ConfirmTimeoutSeconds int    `yaml:"confirm_timeout_seconds"`
+	StagingDir            string `yaml:"staging_dir"`
 }
 
 // DefaultAgent returns the endpoint agent's secure defaults.
 func DefaultAgent() AgentConfig {
-	return AgentConfig{IntervalSeconds: 3600, CollectBMC: true, CollectUpdates: true, UpdateTimeoutSeconds: 120, CollectDisks: true}
+	return AgentConfig{IntervalSeconds: 3600, CollectBMC: true, CollectUpdates: true, UpdateTimeoutSeconds: 120, CollectDisks: true,
+		Upgrade: AgentUpgrade{Enabled: true, ConfirmTimeoutSeconds: 300}}
 }
 
 // LoadAgent reads the endpoint agent's YAML over DefaultAgent(); unknown fields
@@ -447,6 +516,12 @@ func (a AgentConfig) Validate() error {
 	if a.TokenFile == "" && a.CredentialFile == "" {
 		return errors.New("config: agent token_file or credential_file is required")
 	}
+	if a.Upgrade.ConfirmTimeoutSeconds < 60 || a.Upgrade.ConfirmTimeoutSeconds > 1800 {
+		return errors.New("config: agent upgrade.confirm_timeout_seconds must be within [60, 1800]")
+	}
+	if a.Upgrade.StagingDir != "" && !filepath.IsAbs(a.Upgrade.StagingDir) {
+		return errors.New("config: agent upgrade.staging_dir must be an absolute path")
+	}
 	if a.Insecure && (a.CAFile != "" || a.ServerName != "") {
 		return errors.New("config: agent insecure contradicts ca_file/server_name (TLS settings)")
 	}
@@ -474,6 +549,11 @@ func checkCABundle(path string) error {
 // UpdateTimeout bounds the agent's whole package update collection.
 func (a AgentConfig) UpdateTimeout() time.Duration {
 	return time.Duration(a.UpdateTimeoutSeconds) * time.Second
+}
+
+// ConfirmTimeout bounds how long a new agent version has to confirm itself.
+func (a AgentConfig) ConfirmTimeout() time.Duration {
+	return time.Duration(a.Upgrade.ConfirmTimeoutSeconds) * time.Second
 }
 
 // AgentInterval is the endpoint agent's collection tick.

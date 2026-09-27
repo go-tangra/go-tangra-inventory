@@ -32,8 +32,11 @@ RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY . .
 COPY --from=ui /src/ui/dist ./ui/dist
 ARG APP_VERSION=dev
+# Release signing public keyring ("<id>:<base64>[,...]", feature 023): the
+# service verifies the bundled agent releases against it. Public data.
+ARG AGENT_RELEASE_KEYS=
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
-    go build -trimpath -tags "ui" -ldflags "-s -w -X main.version=${APP_VERSION}" -o /out/inventorysvc ./cmd/inventorysvc
+    go build -trimpath -tags "ui" -ldflags "-s -w -X main.version=${APP_VERSION} ${AGENT_RELEASE_KEYS:+-X github.com/go-tangra/go-tangra-inventory/v4/internal/agentrelease.productionKeys=${AGENT_RELEASE_KEYS}}" -o /out/inventorysvc ./cmd/inventorysvc
 
 FROM alpine:3.20
 ARG APP_VERSION=dev
@@ -45,6 +48,10 @@ LABEL org.opencontainers.image.source="https://github.com/go-tangra/go-tangra-in
 RUN apk add --no-cache ca-certificates postgresql-client && adduser -D -u 10001 app
 COPY --from=build /out/inventorysvc /usr/local/bin/
 COPY deploy /app/deploy
+# Signed agent releases (agent-releases/<version>/: manifest, signature and
+# the eight artifacts) are verified and copied into PostgreSQL at start.
+# Tag builds carry the release of the same version; other builds none.
+COPY --chown=root:root agent-releases /app/agent-releases
 WORKDIR /app
 USER app
 ENTRYPOINT ["inventorysvc"]

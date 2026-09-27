@@ -32,6 +32,7 @@ type Mem struct {
 	audit    []store.AuditRow
 	failNext map[string]bool
 	Now      func() time.Time
+	upg      *upgradeState // feature 023 (lazily created)
 }
 
 // New builds an empty store.
@@ -224,6 +225,9 @@ func (m *Mem) GetHostByIdentity(_ context.Context, tenantID string, id store.Ide
 func (m *Mem) ListHosts(_ context.Context, tenantID string, f store.HostFilter) ([]store.Host, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if err := m.fail("ListHosts"); err != nil {
+		return nil, err
+	}
 	tagKey, tagVal, tagHasVal := parseTag(f.Tag)
 	var out []store.Host
 	for _, h := range m.hosts {
@@ -718,12 +722,10 @@ func (m *Mem) TenantStats(_ context.Context, tenantID string, staleBefore time.T
 		TopPrograms:         map[string]int64{},
 		OSVersions:          map[string]int64{},
 	}
-	var hosts []store.Host
 	for _, h := range m.hosts {
 		if h.TenantID != tenantID {
 			continue
 		}
-		hosts = append(hosts, h)
 		st.HostsTotal++
 		st.HostsByStatus[h.Status]++
 		if h.OSName != "" {

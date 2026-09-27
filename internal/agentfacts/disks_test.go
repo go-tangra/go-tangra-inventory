@@ -101,7 +101,7 @@ func TestInterfaceFromPath(t *testing.T) {
 		pci + "/host0/sas_host0/block/sde":                             store.IfSAS,
 		pci + "/0000:00:17.0/ata1/host0/target0:0:0/block/sda":         store.IfSATA,
 		pci + "/host3/target3:0:0/3:0:0:0/block/sdx":                   store.IfSCSI,
-		"":                                                             store.IfOther,
+		"": store.IfOther,
 	}
 	for path, want := range cases {
 		if got := interfaceFromPath(path); got != want {

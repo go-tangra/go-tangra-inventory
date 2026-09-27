@@ -2,6 +2,10 @@
 // local hardware/software inventory and, depending on mode, prints or writes it
 // as JSON and/or submits it to the off-mesh ingest edge. It can run one-shot,
 // as a long-lived daemon, or install/uninstall itself as an OS service.
+//
+// Subcommands (feature 023): `update [-check]` checks the enrolled platform
+// for a newer agent and upgrades; `upgrade-apply -state <file>` is the helper
+// the agent itself starts to install a verified upgrade.
 package main
 
 import (
@@ -9,6 +13,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,6 +22,7 @@ import (
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/collector"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/config"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/daemon"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/upgrader"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/winsvc"
 )
 
@@ -26,6 +32,15 @@ var version = "dev"
 const serviceName = "FreyaInventoryAgent"
 
 func main() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "update":
+			collector.Version = version
+			os.Exit(runUpdate(os.Args[2:], os.Stderr, defaultDeps()))
+		case "upgrade-apply":
+			os.Exit(runApply(os.Args[2:], os.Stderr, defaultDeps()))
+		}
+	}
 	var (
 		configPath = flag.String("config", "", "path to agent config YAML")
 		ingest     = flag.String("ingest", "", "ingest endpoint host:port (overrides config)")
@@ -53,7 +68,7 @@ func main() {
 			fatalf("service %s: %v", *service, err)
 		}
 	case *daemonMode:
-		if err := runDaemon(cfg); err != nil {
+		if err := runDaemon(cfg, *configPath); err != nil {
 			fatalf("daemon: %v", err)
 		}
 	default:
@@ -142,11 +157,24 @@ func runOnce(cfg config.AgentConfig, outputDir string) error {
 
 // runDaemon validates config and runs the agent loop, under the SCM when the
 // process is launched as a Windows service.
-func runDaemon(cfg config.AgentConfig) error {
+func runDaemon(cfg config.AgentConfig, configPath string) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
 	d := daemon.New(cfg, version)
+	// Self-upgrade (feature 023): announce the platform, confirm or report an
+	// upgrade in flight, act on upgrade commands when enabled.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	platform := upgrader.Platform(ctx, upgrader.ExecRunner{})
+	cancel()
+	d.WithUpgrades(platform, func(agentID, credential string) daemon.Upgrader {
+		u, _, err := buildUpdater(cfg, configPath, agentID, credential)
+		if err != nil {
+			log.Printf("self-upgrade unavailable: %v", err)
+			return nil
+		}
+		return u
+	})
 
 	if winsvc.IsWindowsService() {
 		winsvc.SetupEventLog(serviceName)
@@ -210,7 +238,7 @@ func handleService(action, configPath string, f flags) error {
 // writeJSON writes the inventory as an indented JSON file named
 // <hostname>-<timestamp>.json in dir, returning the full path.
 func writeJSON(dir, hostname string, v any) (string, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return "", fmt.Errorf("create output directory: %w", err)
 	}
 	if hostname == "" {

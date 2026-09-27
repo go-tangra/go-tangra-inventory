@@ -7,7 +7,6 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
@@ -112,18 +111,3 @@ var (
 	ErrNotFound = errors.New("store: not found")
 	ErrConflict = errors.New("store: conflict")
 )
-
-func notFound(err error) error {
-	if errors.Is(err, pgx.ErrNoRows) {
-		return ErrNotFound
-	}
-	return err
-}
-
-func conflict(err error) error {
-	var pg *pgconn.PgError
-	if errors.As(err, &pg) && pg.Code == "23505" {
-		return ErrConflict
-	}
-	return err
-}

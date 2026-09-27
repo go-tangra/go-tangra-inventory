@@ -3,6 +3,7 @@
 .github
 **/node_modules
 **/dist
+# agent-releases/ (signed agent bundles) IS part of the build context.
 **/dist-remote
 **/coverage
 **/test-results
@@ -19,3 +20,5 @@ go.work.sum
 deploy/kek.dev
 deploy/*.kek
 deploy/dev-kek.b64
+# Development signing keys never enter an image.
+.dev/

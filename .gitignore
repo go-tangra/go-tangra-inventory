@@ -10,3 +10,8 @@ bin/
 /inventory-agent
 /inventory-agent.exe
 dist/
+# Agent release bundles (feature 023): only the directory is tracked; dev
+# signing keys stay local.
+/agent-releases/*
+!/agent-releases/.gitkeep
+/.dev/

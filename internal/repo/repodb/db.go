@@ -712,13 +712,22 @@ func (d *DB) ListChangesForSnapshot(ctx context.Context, tenantID, snapshotID st
 
 // ---- agents
 
-const agentCols = `id, tenant_id, coalesce(host_id::text,''), credential_sealed, enrolled_at, last_seen, agent_version, revoked, identity_hint`
+const agentCols = `id, tenant_id, coalesce(host_id::text,''), credential_sealed, enrolled_at, last_seen, agent_version, revoked, identity_hint,
+	os, arch, install_type, capabilities, platform_seen_at`
 
 func scanAgent(sc scanner) (store.Agent, error) {
 	var a store.Agent
+	var seen *time.Time
 	if err := sc.Scan(&a.ID, &a.TenantID, &a.HostID, &a.CredentialSealed, &a.EnrolledAt,
-		&a.LastSeen, &a.AgentVersion, &a.Revoked, &a.IdentityHint); err != nil {
+		&a.LastSeen, &a.AgentVersion, &a.Revoked, &a.IdentityHint,
+		&a.OS, &a.Arch, &a.InstallType, &a.Capabilities, &seen); err != nil {
 		return store.Agent{}, err
+	}
+	if seen != nil {
+		a.PlatformSeenAt = seen.UTC()
+	}
+	if len(a.Capabilities) == 0 {
+		a.Capabilities = nil
 	}
 	return a, nil
 }
@@ -806,7 +815,7 @@ func (d *DB) RevokeAgent(ctx context.Context, tenantID, id string) error {
 
 // ---- enrollment tokens
 
-const tokenCols = `id, tenant_id, token_hash, expires_at, used_at, revoked, created_by, created_at, label`
+const tokenCols = `id, tenant_id, token_hash, expires_at, used_at, revoked, created_by, created_at, label` // #nosec G101 -- column list
 
 func scanToken(sc scanner) (store.EnrollmentToken, error) {
 	var t store.EnrollmentToken

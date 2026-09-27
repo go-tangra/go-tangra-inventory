@@ -2,7 +2,7 @@ GO        ?= go
 PKGS      := $(shell $(GO) list ./... | grep -v /ui/)
 COVER_OUT := coverage.out
 
-.PHONY: lint vuln test test-integration cover fuzz proto-check generate ui-build build build-ui image agent-windows agent-linux agent packages
+.PHONY: lint vuln test test-integration cover fuzz proto-check generate ui-build build build-ui image agent-windows agent-linux agent packages agent-release agent-release-dev release-check e2e-upgrade
 
 lint:
 	$(GO) vet ./...
@@ -56,13 +56,21 @@ proto-check:
 ui-build:
 	cd ui && npm ci && npm run build
 
+# Release signing public keyring ("<id>:<base64 Ed25519 public key>[,...]")
+# compiled into the agent and the service (feature 023). Release builds get
+# it from the AGENT_RELEASE_PUBLIC_KEYS setting of the CI; without it the
+# binaries refuse every agent upgrade. `make agent-release-dev` uses a
+# locally generated development key instead.
+AGENT_RELEASE_KEYS ?=
+KEYS_LDFLAG := $(if $(AGENT_RELEASE_KEYS),-X github.com/go-tangra/go-tangra-inventory/v4/internal/agentrelease.productionKeys=$(AGENT_RELEASE_KEYS))
+
 # Build the service binary without the embedded UI.
 build:
-	$(GO) build -o bin/inventorysvc ./cmd/inventorysvc
+	$(GO) build -ldflags "$(KEYS_LDFLAG)" -o bin/inventorysvc ./cmd/inventorysvc
 
 # Build the service binary with the embedded UI remote (requires ui-build first).
 build-ui: ui-build
-	$(GO) build -tags "ui" -o bin/inventorysvc ./cmd/inventorysvc
+	$(GO) build -tags "ui" -ldflags "$(KEYS_LDFLAG)" -o bin/inventorysvc ./cmd/inventorysvc
 
 # Build the container image (NODE_AUTH_TOKEN: GitHub token with read:packages for @go-tangra/ui).
 image:
@@ -71,13 +79,15 @@ image:
 # Cross-compile the endpoint agent for the platforms it ships to.
 agent: agent-windows agent-linux
 
-agent-windows:
-	GOOS=windows GOARCH=amd64 $(GO) build -o bin/inventory-agent-windows-amd64.exe ./cmd/inventory-agent
-	GOOS=windows GOARCH=arm64 $(GO) build -o bin/inventory-agent-windows-arm64.exe ./cmd/inventory-agent
-
-# Linux agents are static and stamped with the version the packages carry.
+# Agents are static and stamped with the version the packages carry and the
+# release signing keyring.
 AGENT_VERSION ?= $(shell git describe --tags --match 'v*' --always 2>/dev/null | sed 's/^v//')
-AGENT_LDFLAGS := -s -w -X main.version=$(AGENT_VERSION)
+AGENT_LDFLAGS := -s -w -X main.version=$(AGENT_VERSION) $(KEYS_LDFLAG)
+
+agent-windows:
+	for arch in amd64 arm64; do \
+		CGO_ENABLED=0 GOOS=windows GOARCH=$$arch $(GO) build -trimpath -ldflags "$(AGENT_LDFLAGS)" -o bin/inventory-agent-windows-$$arch.exe ./cmd/inventory-agent || exit 1; \
+	done
 
 agent-linux:
 	for arch in amd64 arm64; do \
@@ -96,3 +106,49 @@ packages: agent-linux
 			VERSION=$(AGENT_VERSION) ARCH=$$arch $(NFPM) package -f packaging/nfpm.yaml -p $$fmt -t dist/ || exit 1; \
 		done; \
 	done
+
+# The eight artifacts of an agent release (feature 023) in dist/agent/:
+# deb and rpm packages and raw binaries for Linux amd64/arm64, exes for
+# Windows amd64/arm64, all version-stamped and carrying AGENT_RELEASE_KEYS.
+# CI signs them in the protected release environment (agent-release sign).
+AGENT_DIST := dist/agent
+agent-release:
+	@test -n "$(AGENT_VERSION)" || { echo "AGENT_VERSION is empty" >&2; exit 1; }
+	mkdir -p $(AGENT_DIST) bin/pkg
+	find $(AGENT_DIST) -mindepth 1 -maxdepth 1 -type f -delete
+	for arch in amd64 arm64; do \
+		CGO_ENABLED=0 GOOS=linux GOARCH=$$arch $(GO) build -trimpath -ldflags "$(AGENT_LDFLAGS)" -o $(AGENT_DIST)/inventory-agent-linux-$$arch ./cmd/inventory-agent || exit 1; \
+		CGO_ENABLED=0 GOOS=windows GOARCH=$$arch $(GO) build -trimpath -ldflags "$(AGENT_LDFLAGS)" -o $(AGENT_DIST)/inventory-agent-windows-$$arch.exe ./cmd/inventory-agent || exit 1; \
+		cp $(AGENT_DIST)/inventory-agent-linux-$$arch bin/pkg/inventory-agent || exit 1; \
+		for fmt in deb rpm; do \
+			VERSION=$(AGENT_VERSION) ARCH=$$arch $(NFPM) package -f packaging/nfpm.yaml -p $$fmt -t $(AGENT_DIST)/ || exit 1; \
+		done; \
+	done
+
+# Development release for local stacks (freya-stack): a development key pair
+# is generated once into $(DEV_KEY_DIR) (git-ignored, never committed; key id
+# "dev-local", refused by release-check), the agents and the service are
+# built with its public key and the signed bundle is copied to
+# agent-releases/<version>/ for `make image`. Use a release-like version, e.g.
+#   make agent-release-dev AGENT_VERSION=4.4.1
+DEV_KEY_DIR ?= .dev/agent-release
+agent-release-dev:
+	mkdir -p $(DEV_KEY_DIR)
+	test -f $(DEV_KEY_DIR)/dev.key || $(GO) run ./cmd/agent-release keygen -out-private $(DEV_KEY_DIR)/dev.key -key-id dev-local > $(DEV_KEY_DIR)/dev.pub
+	$(MAKE) agent-release AGENT_VERSION=$(AGENT_VERSION) AGENT_RELEASE_KEYS="$$(cat $(DEV_KEY_DIR)/dev.pub)"
+	AGENT_RELEASE_SIGNING_KEY="$$(cat $(DEV_KEY_DIR)/dev.key)" $(GO) run -ldflags "-X github.com/go-tangra/go-tangra-inventory/v4/internal/agentrelease.productionKeys=$$(cat $(DEV_KEY_DIR)/dev.pub)" ./cmd/agent-release sign -key-env AGENT_RELEASE_SIGNING_KEY -key-id dev-local -version $(AGENT_VERSION) -dir $(AGENT_DIST)
+	mkdir -p agent-releases/$(AGENT_VERSION)
+	cp $(AGENT_DIST)/* agent-releases/$(AGENT_VERSION)/
+	@echo "dev release $(AGENT_VERSION) in agent-releases/$(AGENT_VERSION); build the image with AGENT_RELEASE_KEYS=\"$$(cat $(DEV_KEY_DIR)/dev.pub)\""
+
+# Release artifacts carry the production keyring, no development key and a
+# release version (scripts/check-release-binary.sh).
+release-check:
+	./scripts/check-release-binary.sh -keys "$(AGENT_RELEASE_KEYS)" -version "$(AGENT_VERSION)" \
+		$(AGENT_DIST)/inventory-agent-linux-amd64 $(AGENT_DIST)/inventory-agent-linux-arm64 \
+		$(AGENT_DIST)/inventory-agent-windows-amd64.exe $(AGENT_DIST)/inventory-agent-windows-arm64.exe
+
+# Package upgrade and rollback in Debian 12 and Rocky 9 containers with
+# systemd (Docker, privileged containers; CI job e2e-upgrade).
+e2e-upgrade:
+	$(GO) test -tags e2e -count=1 -timeout 40m -v ./tests/e2e/...

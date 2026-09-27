@@ -12,17 +12,17 @@ func TestResolveFilesystemDisks(t *testing.T) {
 	src := treeSource(t, "node-1")
 	r := NewDiskResolver(src, []string{"nvme0n1", "sda", "sdb", "sdc"})
 	cases := map[string][]string{
-		"/dev/nvme0n1p2":       {"nvme0n1"},      // partition -> parent disk
-		"/dev/nvme0n1":         {"nvme0n1"},      // whole disk
-		"/dev/mapper/vg0-root": {"nvme0n1"},      // LVM dm-0 -> slaves/nvme0n1p3 -> nvme0n1
-		"/dev/dm-0":            {"nvme0n1"},      // same by kernel name
-		"/dev/md0":             {"sda", "sdb"},   // RAID1 over two disks
-		"/dev/mapper/vg1-data": {"sda", "sdb"},   // LVM on md
-		"/dev/sdc1":            {"sdc"},          // USB stick partition
-		"/dev/loop0":           nil,              // not a physical disk
-		"/dev/mapper/unknown":  nil,              // unknown dm name
-		"tmpfs":                nil,              // not a device
-		"C:":                   nil,              // not a Linux device
+		"/dev/nvme0n1p2":       {"nvme0n1"},    // partition -> parent disk
+		"/dev/nvme0n1":         {"nvme0n1"},    // whole disk
+		"/dev/mapper/vg0-root": {"nvme0n1"},    // LVM dm-0 -> slaves/nvme0n1p3 -> nvme0n1
+		"/dev/dm-0":            {"nvme0n1"},    // same by kernel name
+		"/dev/md0":             {"sda", "sdb"}, // RAID1 over two disks
+		"/dev/mapper/vg1-data": {"sda", "sdb"}, // LVM on md
+		"/dev/sdc1":            {"sdc"},        // USB stick partition
+		"/dev/loop0":           nil,            // not a physical disk
+		"/dev/mapper/unknown":  nil,            // unknown dm name
+		"tmpfs":                nil,            // not a device
+		"C:":                   nil,            // not a Linux device
 	}
 	for dev, want := range cases {
 		got, dropped := r.Disks(dev)

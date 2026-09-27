@@ -45,6 +45,10 @@ type Server struct {
 	st         repo.Store
 	maxBytes   int64
 	instanceID string
+
+	// Agent self-upgrade (feature 023); nil until WithUpgrades.
+	upgradeEdge      *upgradeEdge
+	downloadDeadline time.Duration
 }
 
 // New builds an ingest Server. A non-positive maxBytes falls back to
@@ -154,6 +158,9 @@ func (s *Server) StreamCommands(req *inventoryv1.StreamRequest, stream inventory
 	if req != nil && req.GetAgentVersion() != "" {
 		version = req.GetAgentVersion()
 	}
+	// Platform and capabilities decide which release artifact the agent
+	// gets and whether it can upgrade itself at all (feature 023).
+	agent = s.recordPlatform(ctx, agent, req)
 
 	commands, unregister, err := s.reg.Register(ctx, registry.ConnectedAgent{
 		AgentID:     agent.ID,
@@ -167,6 +174,14 @@ func (s *Server) StreamCommands(req *inventoryv1.StreamRequest, stream inventory
 	}
 	defer unregister()
 
+	// Upgrade requests created while the agent was offline (or whose push
+	// was lost) are delivered on every connect; the agent deduplicates.
+	for _, cmd := range s.pendingCommands(ctx, agent) {
+		if err := stream.Send(commandToPB(cmd)); err != nil {
+			return err
+		}
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -176,10 +191,7 @@ func (s *Server) StreamCommands(req *inventoryv1.StreamRequest, stream inventory
 				// Connection superseded (e.g. reconnect) or shut down.
 				return nil
 			}
-			if err := stream.Send(&inventoryv1.Command{
-				CommandId: cmd.ID,
-				Type:      commandType(cmd.Type),
-			}); err != nil {
+			if err := stream.Send(commandToPB(cmd)); err != nil {
 				return err
 			}
 		}

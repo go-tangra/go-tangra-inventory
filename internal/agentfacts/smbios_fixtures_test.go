@@ -42,10 +42,19 @@ func newStruct(typ uint8, length int, handle uint16) *rawStruct {
 	return &rawStruct{typ: typ, handle: handle, b: make([]byte, length)}
 }
 
-func (r *rawStruct) u8(off int, v uint8) *rawStruct   { r.b[off] = v; return r }
-func (r *rawStruct) u16(off int, v uint16) *rawStruct { binary.LittleEndian.PutUint16(r.b[off:], v); return r }
-func (r *rawStruct) u32(off int, v uint32) *rawStruct { binary.LittleEndian.PutUint32(r.b[off:], v); return r }
-func (r *rawStruct) u64(off int, v uint64) *rawStruct { binary.LittleEndian.PutUint64(r.b[off:], v); return r }
+func (r *rawStruct) u8(off int, v uint8) *rawStruct { r.b[off] = v; return r }
+func (r *rawStruct) u16(off int, v uint16) *rawStruct {
+	binary.LittleEndian.PutUint16(r.b[off:], v)
+	return r
+}
+func (r *rawStruct) u32(off int, v uint32) *rawStruct {
+	binary.LittleEndian.PutUint32(r.b[off:], v)
+	return r
+}
+func (r *rawStruct) u64(off int, v uint64) *rawStruct {
+	binary.LittleEndian.PutUint64(r.b[off:], v)
+	return r
+}
 func (r *rawStruct) bytes(off int, v []byte) *rawStruct {
 	copy(r.b[off:], v)
 	return r

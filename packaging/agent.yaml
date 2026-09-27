@@ -17,3 +17,11 @@ collect_updates: true              # package update state
 refresh_package_lists: false       # never refresh package lists unless enabled
 update_timeout_seconds: 120        # 30-600
 collect_disks: true                # physical disks: model, serial, size, SSD/HDD/NVMe, interface (sysfs)
+
+# Self-upgrade (needs systemd): upgrades come only from the ingest endpoint
+# above, are verified with the release key built into the agent and roll
+# back automatically when the new version does not report in time.
+upgrade:
+  enabled: true                    # act on upgrade requests from the platform (false: only `inventory-agent update`)
+  confirm_timeout_seconds: 300     # 60-1800
+  # staging_dir: /var/lib/inventory-agent/upgrade

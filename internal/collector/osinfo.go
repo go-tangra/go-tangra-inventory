@@ -2,6 +2,7 @@ package collector
 
 import (
 	"context"
+	"math"
 	"runtime"
 	"strings"
 	"time"
@@ -32,8 +33,8 @@ func collectOS(ctx context.Context, inv *store.Inventory) {
 		UptimeSec: info.Uptime,
 		Family:    osFamily(),
 	}
-	if info.BootTime > 0 {
-		inv.OS.LastBoot = time.Unix(int64(info.BootTime), 0).UTC()
+	if info.BootTime > 0 && info.BootTime <= math.MaxInt64 {
+		inv.OS.LastBoot = time.Unix(int64(info.BootTime), 0) // #nosec G115 -- bounded above.UTC()
 	}
 	if inv.Identity.Hostname == "" {
 		inv.Identity.Hostname = info.Hostname

@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createRouter, createMemoryHistory } from 'vue-router'
+import { abilitiesPlugin } from '@casl/vue'
+import { createMongoAbility } from '@casl/ability'
 import Hosts from '@/views/hosts/index.vue'
 import Detail from '@/views/hosts/detail.vue'
 import Agents from '@/views/agents/index.vue'
@@ -20,7 +22,7 @@ function fetchMock(handler: (url: string, init: RequestInit) => unknown) {
 }
 class FakeSource { onopen = null; onerror = null; addEventListener() {} close() {} }
 const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: { template: '<div/>' } }, { path: '/inventory', name: 'inventory-hosts', component: { template: '<div/>' } }, { path: '/inventory/host/:id', name: 'inventory-host', component: { template: '<div/>' } }] })
-const global = { plugins: [router] }
+const global = { plugins: [router, [abilitiesPlugin, createMongoAbility([{ action: 'manage', subject: 'InventoryAgent' }])]] as never[] }
 const host = { id: 'h1', hostname: 'pc-01', status: 'active', os_name: 'Windows', os_version: '11', manufacturer: 'Dell', model: 'XPS', first_seen: '2026-01-01T00:00:00Z', last_seen: '2026-01-02T00:00:00Z', tags: { site: 'hq' }, system_serial: 'SN1' }
 const snapshot = { id: 'snap1234abcd', host_id: 'h1', collected_at: '2026-01-02T00:00:00Z', received_at: '2026-01-02T00:00:01Z', source: 'agent', payload: { os: { name: 'Windows' }, bios: { vendor: 'Dell' }, system: {}, baseboard: {}, chassis: {}, memory: { array: {}, modules: [{ device_locator: 'DIMM0', capacity_bytes: 8589934592 }] }, processors: [{ socket_designation: 'CPU0', core_count: 8 }], environment: {}, network_interfaces: [{ name: 'eth0', up: true, ip_addresses: ['10.0.0.5'] }] } }
 

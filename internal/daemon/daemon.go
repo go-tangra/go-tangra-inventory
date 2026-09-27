@@ -1,7 +1,10 @@
 // Package daemon runs the endpoint agent's long-lived loop: it enrolls once
 // (persisting the issued agent id and credential), submits a collected inventory
 // at startup and on the configured interval, and holds a reconnecting
-// StreamCommands stream that submits immediately on a refresh command.
+// StreamCommands stream that submits immediately on a refresh command and
+// starts a self-upgrade on an upgrade command (feature 023; the agent
+// announces its platform and the upgrade.v1 capability on the stream and
+// confirms or reports a finished upgrade after its first connect and submit).
 package daemon
 
 import (
@@ -14,14 +17,26 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	invv1 "github.com/go-tangra/go-tangra-inventory/sdk/v4/api/proto/inventory/v1"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/agentrelease"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/collector"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/config"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/selfupdate"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/sender"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/store"
 )
+
+// Upgrader is the agent's self-upgrade core (selfupdate.Updater).
+type Upgrader interface {
+	Upgrade(ctx context.Context, cmd selfupdate.Command) error
+	Resume(ctx context.Context) error
+}
+
+// UpgraderFactory builds the upgrader of an enrolled agent (nil: none).
+type UpgraderFactory func(agentID, credential string) Upgrader
 
 const (
 	baseBackoff = 1 * time.Second
@@ -42,17 +57,92 @@ type Daemon struct {
 
 	agentID    string
 	credential string
+
+	// Self-upgrade (feature 023).
+	platform    agentrelease.Platform
+	newUpgrader UpgraderFactory
+	upg         Upgrader
+	refresh     func(context.Context) error
+	connected   atomic.Bool
+	submitted   atomic.Bool
+	resumed     atomic.Bool
 }
 
 // New builds a Daemon for the given agent configuration and version.
 func New(cfg config.AgentConfig, version string) *Daemon {
-	return &Daemon{
+	d := &Daemon{
 		cfg: cfg,
 		sender: sender.New(cfg.IngestEndpoint, sender.Options{
 			Insecure: cfg.Insecure, CAFile: cfg.CAFile, ServerName: cfg.ServerName,
 		}),
 		version: version,
 	}
+	d.refresh = d.collectAndSubmit
+	return d
+}
+
+// Sender is the ingest client of the daemon.
+func (d *Daemon) Sender() *sender.Sender { return d.sender }
+
+// WithUpgrades enables self-upgrade: the agent announces platform and the
+// upgrade.v1 capability and builds its upgrader once enrolled.
+func (d *Daemon) WithUpgrades(p agentrelease.Platform, factory UpgraderFactory) *Daemon {
+	d.platform, d.newUpgrader = p, factory
+	return d
+}
+
+// streamRequest is the StreamCommands request: version, platform and — when
+// server-pushed upgrades are enabled and possible — the upgrade.v1 capability.
+func (d *Daemon) streamRequest() *invv1.StreamRequest {
+	req := &invv1.StreamRequest{AgentId: d.agentID, AgentVersion: d.version}
+	if d.platform.OS != "" {
+		req.Platform = &invv1.AgentPlatform{Os: d.platform.OS, Arch: d.platform.Arch, InstallType: d.platform.InstallType}
+	}
+	if d.upg != nil && d.cfg.Upgrade.Enabled && d.platform.Valid() {
+		req.Capabilities = []string{store.CapUpgradeV1}
+	}
+	return req
+}
+
+// handleCommand executes one pushed command.
+func (d *Daemon) handleCommand(ctx context.Context, cmd *invv1.Command) {
+	switch cmd.GetType() {
+	case invv1.CommandType_COMMAND_TYPE_REFRESH:
+		log.Printf("daemon: refresh command %s received", cmd.GetCommandId())
+		if err := d.refresh(ctx); err != nil {
+			log.Printf("daemon: refresh submit failed: %v", err)
+		} else {
+			log.Println("daemon: refresh complete; inventory re-submitted")
+		}
+	case invv1.CommandType_COMMAND_TYPE_UPGRADE:
+		u := cmd.GetUpgrade()
+		if d.upg == nil || !d.cfg.Upgrade.Enabled || u == nil {
+			log.Printf("daemon: ignoring upgrade command %s (server-pushed upgrades disabled)", cmd.GetCommandId())
+			return
+		}
+		log.Printf("daemon: upgrade request %s to %s received", u.GetRequestId(), u.GetTargetVersion())
+		go func() {
+			if err := d.upg.Upgrade(ctx, selfupdate.Command{RequestID: u.GetRequestId(), TargetVersion: u.GetTargetVersion(),
+				AllowDowngrade: u.GetAllowDowngrade()}); err != nil {
+				log.Printf("daemon: upgrade %s refused: %v", u.GetRequestId(), err)
+			}
+		}()
+	default:
+		log.Printf("daemon: ignoring unknown command type %d (id %s)", cmd.GetType(), cmd.GetCommandId())
+	}
+}
+
+// maybeResume finishes an upgrade in flight once the agent has connected
+// and submitted (it confirms a new version or reports a rollback).
+func (d *Daemon) maybeResume(ctx context.Context) {
+	if d.upg == nil || !d.connected.Load() || !d.submitted.Load() || d.resumed.Load() {
+		return
+	}
+	if err := d.upg.Resume(ctx); err != nil {
+		log.Printf("daemon: upgrade confirmation pending: %v", err)
+		return
+	}
+	d.resumed.Store(true)
 }
 
 // Run performs enroll-if-needed, an initial submit, then runs the periodic
@@ -64,6 +154,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}
 	if err := d.ensureEnrolled(ctx, inv.Identity); err != nil {
 		return fmt.Errorf("daemon: enroll: %w", err)
+	}
+	if d.newUpgrader != nil {
+		d.upg = d.newUpgrader(d.agentID, d.credential)
 	}
 	if err := d.submit(ctx, inv); err != nil {
 		log.Printf("daemon: initial submit failed: %v", err)
@@ -84,6 +177,10 @@ func (d *Daemon) SubmitCollected(ctx context.Context, inv store.Inventory) (stri
 	}
 	return d.sender.Submit(ctx, d.agentID, d.credential, inv)
 }
+
+// Credentials returns the persisted agent id and credential (the `update`
+// command runs only on an enrolled agent).
+func (d *Daemon) Credentials() (agentID, credential string, ok bool) { return d.loadEnrollment() }
 
 // ensureEnrolled loads a persisted agent id + credential, or consumes the
 // enrollment token to obtain and persist a fresh one.
@@ -161,14 +258,14 @@ func (d *Daemon) streamLoop(ctx context.Context) error {
 	defer conn.Close()
 
 	authCtx := sender.AuthContext(ctx, d.agentID, d.credential)
-	stream, err := client.StreamCommands(authCtx, &invv1.StreamRequest{
-		AgentId:      d.agentID,
-		AgentVersion: d.version,
-	})
+	stream, err := client.StreamCommands(authCtx, d.streamRequest())
 	if err != nil {
 		return fmt.Errorf("open stream: %w", err)
 	}
 	log.Printf("daemon: command stream connected to %s", d.cfg.IngestEndpoint)
+	d.connected.Store(true)
+	defer d.connected.Store(false)
+	d.maybeResume(ctx)
 
 	for {
 		cmd, err := stream.Recv()
@@ -178,17 +275,7 @@ func (d *Daemon) streamLoop(ctx context.Context) error {
 			}
 			return fmt.Errorf("recv: %w", err)
 		}
-		switch cmd.GetType() {
-		case invv1.CommandType_COMMAND_TYPE_REFRESH:
-			log.Printf("daemon: refresh command %s received", cmd.GetCommandId())
-			if err := d.collectAndSubmit(ctx); err != nil {
-				log.Printf("daemon: refresh submit failed: %v", err)
-			} else {
-				log.Println("daemon: refresh complete; inventory re-submitted")
-			}
-		default:
-			log.Printf("daemon: ignoring unknown command type %d (id %s)", cmd.GetType(), cmd.GetCommandId())
-		}
+		d.handleCommand(ctx, cmd)
 	}
 }
 
@@ -207,6 +294,8 @@ func (d *Daemon) submit(ctx context.Context, inv store.Inventory) error {
 		return err
 	}
 	log.Printf("daemon: submitted snapshot %s", snapID)
+	d.submitted.Store(true)
+	d.maybeResume(ctx)
 	return nil
 }
 

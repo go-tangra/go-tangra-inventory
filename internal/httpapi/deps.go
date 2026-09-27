@@ -9,10 +9,12 @@ import (
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/enroll"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/hosts"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/registry"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/releases"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/repo"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/snapshots"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/stats"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/stream"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/upgrades"
 )
 
 // Deps wire the inventory HTTP handlers. Every field is required except Hub,
@@ -26,6 +28,11 @@ type Deps struct {
 	Enroll    *enroll.Service
 	Registry  registry.Registry
 	Hub       *stream.Hub // optional: enables GET /stream (SSE) when set
+	// Agent self-upgrade (feature 023), optional: when set, GET /agents
+	// serves the fleet view (every enrolled agent) and the upgrade routes
+	// are mounted; otherwise GET /agents lists live connections only.
+	Upgrades *upgrades.Service
+	Releases *releases.Service
 }
 
 // subjects derives the authz subject from the verified platform identity. The
