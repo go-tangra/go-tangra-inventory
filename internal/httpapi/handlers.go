@@ -187,6 +187,9 @@ func (s *Server) Register(d Deps) {
 	} else {
 		s.MustHandle("GET", p+"/agents", s.listConnected(d))
 	}
+	if d.AutoEnroll != nil {
+		s.registerAutoEnroll(d.AutoEnroll, p)
+	}
 	s.MustHandle("POST", p+"/agents/enroll-token", func(w http.ResponseWriter, r *http.Request) {
 		subj, err := subjects(r)
 		if err != nil {

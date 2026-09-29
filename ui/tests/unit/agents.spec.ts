@@ -37,8 +37,11 @@ function mountAs(rules: { action: string; subject: string }[]) {
 }
 const manager = [{ action: 'manage', subject: 'InventoryAgent' }]
 const policy = { enabled: false, window_start: '02:00', window_end: '04:00', timezone: 'UTC', max_concurrent: 5, target_version: '', paused: false, paused_reason: '' }
+const autoKey = { id: 'k-1', key_id: 'ak_0123456789abcdef01234567', name: 'lab', allowed_cidrs: ['10.0.0.0/8'], enabled: true, state: 'active', expires_at: null, max_enrollments: 10, enrollments: 3, last_used_at: null, last_used_ip: '', created_by: 'u1', created_at: '2026-09-01T00:00:00Z', updated_at: '2026-09-01T00:00:00Z' }
+const autoEnroll = { enabled: false, window_seconds: 300, keys: [autoKey] }
 const handler = (url: string, init: RequestInit): unknown => {
   if (url.includes('/upgrade-policy')) return policy
+  if (url.includes('/auto-enroll')) return autoEnroll
   if (init.method === 'POST' && url.endsWith('/agents/upgrades')) return { target_version: '4.5.0', created: [{ id: 'u-9', agent_id: 'a-available', state: 'pending' }], skipped: [{ agent_id: 'a-legacy', reason: 'manual_upgrade_required' }] }
   if (init.method === 'POST' && url.includes('/cancel')) return { id: 'u-3', state: 'cancelled' }
   return fleet
@@ -248,5 +251,33 @@ describe('agent fleet view', () => {
     expect(fleetStateLabel('in_progress')).toBe('Upgrading')
     expect(skipSummary([])).toBe('')
     expect(skipSummary([{ agent_id: 'a', reason: 'up_to_date' }, { agent_id: 'b', reason: 'up_to_date' }])).toBe(' 2 skipped: already on the target version (2).')
+  })
+
+  it('automatic enrollment card: keys, switch and one-time secret', async () => {
+    let state = { ...autoEnroll }
+    const calls = fetchMock((url, init) => {
+      if (url.endsWith('/auto-enroll') && init.method === 'PUT') return (state = { ...state, ...JSON.parse(String(init.body)) })
+      if (url.endsWith('/auto-enroll/keys') && init.method === 'POST') return { key: { ...autoKey, id: 'k-2', key_id: 'ak_ffffffffffffffffffffffff', name: 'office' }, secret: 'aks_one-time-secret' }
+      if (url.endsWith('/auto-enroll')) return state
+      return handler(url, init)
+    })
+    const w = mountAs(manager)
+    await flushPromises()
+    const card = w.find('[data-test="auto-enroll-card"]')
+    expect(card.exists()).toBe(true)
+    expect(w.find('[data-test="auto-key-ak_0123456789abcdef01234567"]').text()).toContain('3 / 10')
+    expect(w.find('[data-test="auto-enroll-off"]').exists()).toBe(true)
+    await w.find('[data-test="auto-enroll-enabled"] input').setValue(true)
+    await flushPromises()
+    expect(calls.some((c) => c.init.method === 'PUT' && c.url.endsWith('/agents/auto-enroll') && String(c.init.body).includes('true'))).toBe(true)
+    w.unmount()
+  })
+
+  it('hides the automatic enrollment card from non-managers', async () => {
+    fetchMock(handler)
+    const w = mountAs([])
+    await flushPromises()
+    expect(w.find('[data-test="auto-enroll-card"]').exists()).toBe(false)
+    w.unmount()
   })
 })

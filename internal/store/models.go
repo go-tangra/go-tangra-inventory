@@ -558,7 +558,17 @@ type Agent struct {
 	InstallType    string    `json:"install_type,omitempty"` // deb | rpm | binary
 	Capabilities   []string  `json:"capabilities,omitempty"` // e.g. upgrade.v1
 	PlatformSeenAt time.Time `json:"platform_seen_at"`
+	// How the agent enrolled (feature 029): EnrolledViaToken or
+	// EnrolledViaAuto with the public id of the auto-enrollment key.
+	EnrolledVia     string `json:"enrolled_via,omitempty"`
+	AutoEnrollKeyID string `json:"auto_enroll_key_id,omitempty"`
 }
+
+// Enrollment methods of an agent.
+const (
+	EnrolledViaToken = "token"
+	EnrolledViaAuto  = "auto"
+)
 
 // HasCapability reports whether the agent announced capability c.
 func (a Agent) HasCapability(c string) bool {
@@ -690,6 +700,63 @@ type EnrollmentToken struct {
 	CreatedBy string     `json:"created_by,omitempty"`
 	CreatedAt time.Time  `json:"created_at"`
 	Label     string     `json:"label,omitempty"`
+}
+
+// --- automatic enrollment (feature 029) ---
+
+// AutoEnrollSettings is a tenant's master switch for automatic enrollment.
+type AutoEnrollSettings struct {
+	TenantID  string    `json:"tenant_id"`
+	Enabled   bool      `json:"enabled"`
+	UpdatedBy string    `json:"updated_by,omitempty"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// AutoEnrollKey is a reusable key agents prove possession of to enroll into
+// the key's tenant from its allowed networks. The secret is sealed and never
+// serialized; KeyID is the public identifier agents send.
+type AutoEnrollKey struct {
+	ID             string     `json:"id"`
+	TenantID       string     `json:"tenant_id"`
+	KeyID          string     `json:"key_id"`
+	Name           string     `json:"name"`
+	SecretSealed   []byte     `json:"-"`
+	AllowedCIDRs   []string   `json:"allowed_cidrs"`
+	Enabled        bool       `json:"enabled"`
+	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
+	MaxEnrollments int        `json:"max_enrollments"` // 0 = unlimited
+	Enrollments    int        `json:"enrollments"`
+	LastUsedAt     *time.Time `json:"last_used_at,omitempty"`
+	LastUsedIP     string     `json:"last_used_ip,omitempty"`
+	CreatedBy      string     `json:"created_by,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+}
+
+// Expired reports whether the key has an expiry at or before now.
+func (k AutoEnrollKey) Expired(now time.Time) bool {
+	return k.ExpiresAt != nil && !now.Before(*k.ExpiresAt)
+}
+
+// Exhausted reports whether the key reached its enrollment limit.
+func (k AutoEnrollKey) Exhausted() bool {
+	return k.MaxEnrollments > 0 && k.Enrollments >= k.MaxEnrollments
+}
+
+// AutoEnrollment is one accepted automatic enrollment, applied atomically:
+// the nonce is recorded (older nonces of the key are pruned), the key's
+// counters are advanced if it is still usable and the tenant switch is on,
+// the agent is created and the audit row written.
+type AutoEnrollment struct {
+	KeyUUID     string // AutoEnrollKey.ID
+	KeyID       string // public key id
+	TenantID    string
+	Nonce       string
+	At          time.Time
+	PruneBefore time.Time // nonces seen before this are dropped
+	IP          string
+	Agent       Agent
+	Audit       AuditRow
 }
 
 // --- audit ---

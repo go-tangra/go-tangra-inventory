@@ -49,6 +49,9 @@ type Server struct {
 	// Agent self-upgrade (feature 023); nil until WithUpgrades.
 	upgradeEdge      *upgradeEdge
 	downloadDeadline time.Duration
+
+	// Automatic enrollment (feature 029); nil until WithAutoEnroll.
+	auto AutoEnroller
 }
 
 // New builds an ingest Server. A non-positive maxBytes falls back to
@@ -87,6 +90,9 @@ func (s *Server) Enroll(ctx context.Context, req *inventoryv1.EnrollRequest) (*i
 		HardwareUUID: id.GetHardwareUuid(),
 		MachineID:    id.GetMachineId(),
 		Hostname:     id.GetHostname(),
+	}
+	if req.GetAutoEnroll() != nil {
+		return s.autoEnroll(ctx, req, ident)
 	}
 	agentID, credential, err := s.enroll.Enroll(ctx, req.GetEnrollmentToken(), ident, req.GetAgentVersion())
 	if err != nil {

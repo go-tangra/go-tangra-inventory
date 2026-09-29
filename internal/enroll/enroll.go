@@ -100,12 +100,8 @@ func (s *Service) Enroll(ctx context.Context, secret string, ident store.Identit
 	if err != nil {
 		return "", "", ErrTokenInvalid
 	}
-	credential, err = randomSecret()
-	if err != nil {
-		return "", "", err
-	}
 	agentID = store.NewID()
-	blob, err := sealFn(s.env, []byte(credential), agentAD(agentID))
+	credential, blob, err := IssueCredential(s.env, agentID)
 	if err != nil {
 		return "", "", err
 	}
@@ -118,11 +114,28 @@ func (s *Service) Enroll(ctx context.Context, secret string, ident store.Identit
 		LastSeen:         now,
 		AgentVersion:     agentVersion,
 		IdentityHint:     ident.Hostname,
+		EnrolledVia:      store.EnrolledViaToken,
 	}
 	if err = s.st.CreateAgent(ctx, agent); err != nil {
 		return "", "", err
 	}
 	return agentID, credential, nil
+}
+
+// IssueCredential generates a per-agent credential for agentID and seals it
+// with env (bound to the agent id). The plaintext is returned once for the
+// enrollment response; only the sealed blob is stored. Automatic enrollment
+// (feature 029) uses it to create the agent inside its own transaction.
+func IssueCredential(env *sealed.Envelope, agentID string) (credential string, blob []byte, err error) {
+	credential, err = randomSecret()
+	if err != nil {
+		return "", nil, err
+	}
+	blob, err = sealFn(env, []byte(credential), agentAD(agentID))
+	if err != nil {
+		return "", nil, err
+	}
+	return credential, blob, nil
 }
 
 // Verify authenticates a presented credential against the sealed one. On

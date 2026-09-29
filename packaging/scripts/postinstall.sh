@@ -15,7 +15,7 @@ if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
     systemctl try-restart inventory-agent.service || true
   else
     systemctl enable inventory-agent.service >/dev/null 2>&1 || true
-    echo "inventory-agent: set ingest_endpoint in /etc/inventory-agent/agent.yaml, put the enrollment token in /etc/inventory-agent/enrollment.token (mode 0600), then: systemctl start inventory-agent"
+    echo "inventory-agent: set ingest_endpoint in /etc/inventory-agent/agent.yaml, put the enrollment token in /etc/inventory-agent/enrollment.token (mode 0600) or configure auto_enroll with the key in /etc/inventory-agent/auto-enroll.key (mode 0600), then: systemctl start inventory-agent"
   fi
 fi
 exit 0

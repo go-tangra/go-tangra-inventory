@@ -233,6 +233,76 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/inventory/v1/agents/auto-enroll": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The tenant's automatic enrollment switch and keys (secrets are never returned) */
+        get: operations["getAutoEnroll"];
+        /** Turn automatic enrollment on or off for the tenant */
+        put: operations["setAutoEnroll"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/inventory/v1/agents/auto-enroll/keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create an auto-enrollment key (the secret is returned once) */
+        post: operations["createAutoEnrollKey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/inventory/v1/agents/auto-enroll/keys/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete an auto-enrollment key (enrolled agents keep working) */
+        delete: operations["deleteAutoEnrollKey"];
+        options?: never;
+        head?: never;
+        /** Change an auto-enrollment key (name, networks, on/off, expiry, limit) */
+        patch: operations["updateAutoEnrollKey"];
+        trace?: never;
+    };
+    "/api/inventory/v1/agents/auto-enroll/keys/{id}/rotate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Replace the key's secret (returned once); the key id stays */
+        post: operations["rotateAutoEnrollKey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/inventory/v1/agent-releases": {
         parameters: {
             query?: never;
@@ -410,6 +480,13 @@ export interface components {
         };
         /** @description One enrolled agent (online or not) with its upgrade state. The keys of the former connected-agents listing are kept. */
         AgentFleetEntry: {
+            /**
+             * @description enrollment method (feature 029)
+             * @enum {string}
+             */
+            enrolled_via?: "token" | "auto";
+            /** @description public id of the auto-enrollment key, when enrolled_via = auto */
+            auto_enroll_key_id?: string;
             /** Format: uuid */
             agent_id?: string;
             /** Format: uuid */
@@ -504,6 +581,67 @@ export interface components {
             readonly updated_by?: string;
             /** Format: date-time */
             readonly updated_at?: string;
+        };
+        AutoEnrollSwitch: {
+            enabled: boolean;
+        };
+        AutoEnroll: {
+            enabled?: boolean;
+            updated_by?: string;
+            /** Format: date-time */
+            updated_at?: string | null;
+            /** @description accepted clock skew of a proof timestamp */
+            window_seconds?: number;
+            keys?: components["schemas"]["AutoEnrollKey"][];
+        };
+        AutoEnrollKey: {
+            /** Format: uuid */
+            id?: string;
+            /** @description public id agents send */
+            key_id?: string;
+            name?: string;
+            allowed_cidrs?: string[];
+            enabled?: boolean;
+            /** @enum {string} */
+            state?: "active" | "disabled" | "expired" | "exhausted";
+            /** Format: date-time */
+            expires_at?: string | null;
+            /** @description 0 = unlimited */
+            max_enrollments?: number;
+            enrollments?: number;
+            /** Format: date-time */
+            last_used_at?: string | null;
+            last_used_ip?: string;
+            created_by?: string;
+            /** Format: date-time */
+            created_at?: string;
+            /** Format: date-time */
+            updated_at?: string;
+        };
+        AutoEnrollKeySecret: {
+            key?: components["schemas"]["AutoEnrollKey"];
+            /** @description aks_…; shown once, never stored in clear */
+            secret?: string;
+        };
+        AutoEnrollKeyCreate: {
+            name: string;
+            /** @description networks agents may enroll from (a bare address is a single host; /0 is refused) */
+            allowed_cidrs: string[];
+            enabled?: boolean;
+            /** Format: date-time */
+            expires_at?: string | null;
+            max_enrollments?: number;
+        };
+        AutoEnrollKeyUpdate: {
+            name?: string;
+            allowed_cidrs?: string[];
+            enabled?: boolean;
+            /**
+             * Format: date-time
+             * @description null removes the expiry
+             */
+            expires_at?: string | null;
+            max_enrollments?: number;
         };
         AgentReleaseInfo: {
             version?: string;
@@ -1035,6 +1173,209 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["UpgradePolicy"];
                 };
+            };
+        };
+    };
+    getAutoEnroll: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description settings and keys */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutoEnroll"];
+                };
+            };
+        };
+    };
+    setAutoEnroll: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["csrf"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AutoEnrollSwitch"];
+            };
+        };
+        responses: {
+            /** @description stored */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description validation_failed */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    createAutoEnrollKey: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["csrf"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AutoEnrollKeyCreate"];
+            };
+        };
+        responses: {
+            /** @description created: {key, secret} */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutoEnrollKeySecret"];
+                };
+            };
+            /** @description conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description validation_failed */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    deleteAutoEnrollKey: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["csrf"];
+            };
+            path: {
+                /** @example 018f3a2b-0000-7000-8000-000000000001 */
+                id: components["parameters"]["id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    updateAutoEnrollKey: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["csrf"];
+            };
+            path: {
+                /** @example 018f3a2b-0000-7000-8000-000000000001 */
+                id: components["parameters"]["id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AutoEnrollKeyUpdate"];
+            };
+        };
+        responses: {
+            /** @description updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutoEnrollKey"];
+                };
+            };
+            /** @description not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description validation_failed */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    rotateAutoEnrollKey: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["csrf"];
+            };
+            path: {
+                /** @example 018f3a2b-0000-7000-8000-000000000001 */
+                id: components["parameters"]["id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description rotated: {key, secret} */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutoEnrollKeySecret"];
+                };
+            };
+            /** @description not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

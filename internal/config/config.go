@@ -437,7 +437,11 @@ type AgentConfig struct {
 	IntervalSeconds int    `yaml:"interval_seconds"`
 	TokenFile       string `yaml:"token_file"`      // one-time enrollment token
 	CredentialFile  string `yaml:"credential_file"` // persisted agent credential after enroll
-	StateFile       string `yaml:"state_file"`      // last-snapshot hash / cursor
+	// AutoEnroll enrolls with a tenant's auto-enrollment key instead of a
+	// token (feature 029): used when no credential is persisted and the
+	// token_file does not exist.
+	AutoEnroll AgentAutoEnroll `yaml:"auto_enroll"`
+	StateFile  string          `yaml:"state_file"` // last-snapshot hash / cursor
 	// Insecure dials the ingest edge in plaintext (development stack only).
 	Insecure bool `yaml:"insecure"`
 	// CAFile pins the ingest server's issuing CA (PEM bundle). When set, ONLY
@@ -468,6 +472,17 @@ type AgentConfig struct {
 	Upgrade AgentUpgrade `yaml:"upgrade"`
 }
 
+// AgentAutoEnroll names an auto-enrollment key: KeyID is its public id
+// (ak_…), KeyFile the path of a file holding its secret (aks_…, readable by
+// the agent only).
+type AgentAutoEnroll struct {
+	KeyID   string `yaml:"key_id"`
+	KeyFile string `yaml:"key_file"`
+}
+
+// Configured reports whether automatic enrollment is set up.
+func (a AgentAutoEnroll) Configured() bool { return a.KeyID != "" || a.KeyFile != "" }
+
 // AgentUpgrade: Enabled accepts upgrade requests pushed by the server
 // (false: only the manual `update` command upgrades); ConfirmTimeoutSeconds
 // bounds how long a new version has to start and report before the host
@@ -479,6 +494,9 @@ type AgentUpgrade struct {
 	ConfirmTimeoutSeconds int    `yaml:"confirm_timeout_seconds"`
 	StagingDir            string `yaml:"staging_dir"`
 }
+
+// autoKeyIDRE matches an auto-enrollment key id (sdk/pkg/autoenroll).
+var autoKeyIDRE = regexp.MustCompile(`^ak_[0-9a-f]{24}$`)
 
 // DefaultAgent returns the endpoint agent's secure defaults.
 func DefaultAgent() AgentConfig {
@@ -513,8 +531,19 @@ func (a AgentConfig) Validate() error {
 	if a.UpdateTimeoutSeconds < 30 || a.UpdateTimeoutSeconds > 600 {
 		return errors.New("config: agent update_timeout_seconds must be within [30, 600]")
 	}
-	if a.TokenFile == "" && a.CredentialFile == "" {
-		return errors.New("config: agent token_file or credential_file is required")
+	if a.TokenFile == "" && a.CredentialFile == "" && !a.AutoEnroll.Configured() {
+		return errors.New("config: agent token_file, credential_file or auto_enroll is required")
+	}
+	if a.AutoEnroll.Configured() {
+		if !autoKeyIDRE.MatchString(a.AutoEnroll.KeyID) {
+			return errors.New("config: agent auto_enroll.key_id must look like ak_ followed by 24 hex characters")
+		}
+		if a.AutoEnroll.KeyFile == "" {
+			return errors.New("config: agent auto_enroll.key_file is required with auto_enroll.key_id")
+		}
+		if a.CredentialFile == "" || a.StateFile == "" {
+			return errors.New("config: agent credential_file and state_file are required with auto_enroll (the issued credential is persisted there)")
+		}
 	}
 	if a.Upgrade.ConfirmTimeoutSeconds < 60 || a.Upgrade.ConfirmTimeoutSeconds > 1800 {
 		return errors.New("config: agent upgrade.confirm_timeout_seconds must be within [60, 1800]")

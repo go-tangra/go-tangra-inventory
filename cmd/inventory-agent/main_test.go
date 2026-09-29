@@ -29,3 +29,13 @@ func TestResolveConfigTLSOverrides(t *testing.T) {
 		t.Fatalf("flag overrides not applied: %+v", cfg)
 	}
 }
+
+func TestResolveConfigAutoEnrollOverrides(t *testing.T) {
+	cfg, err := resolveConfig("", flags{autoKeyID: "ak_0123456789abcdef01234567", autoKeyFile: "/etc/inv/auto.key"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AutoEnroll.KeyID != "ak_0123456789abcdef01234567" || cfg.AutoEnroll.KeyFile != "/etc/inv/auto.key" {
+		t.Fatalf("auto-enroll flags not applied: %+v", cfg.AutoEnroll)
+	}
+}

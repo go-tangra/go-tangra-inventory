@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { api } from '@/api/client'
-import type { AgentFleet, AgentFleetEntry, AgentReleaseList, AgentUpgrade, ConnectedAgent, FleetState, MintedToken, RefreshResult, UpgradeBatchResult, UpgradePolicy } from '@/api/types'
+import type { AutoEnroll, AutoEnrollKey, AutoEnrollKeyInput, AutoEnrollKeySecret, AgentFleet, AgentFleetEntry, AgentReleaseList, AgentUpgrade, ConnectedAgent, FleetState, MintedToken, RefreshResult, UpgradeBatchResult, UpgradePolicy } from '@/api/types'
 
 export interface FleetFilter {
   upgrade_state?: FleetState
@@ -84,6 +84,36 @@ export const useAgents = defineStore('inventory-agents', () => {
     policy.value = await api<UpgradePolicy>('POST', 'agents/upgrade-policy/resume')
   }
 
+  // Automatic enrollment (feature 029): the tenant switch and its keys.
+  const autoEnroll = ref<AutoEnroll | null>(null)
+  async function loadAutoEnroll(): Promise<void> {
+    const res = await api<AutoEnroll>('GET', 'agents/auto-enroll')
+    autoEnroll.value = { ...res, enabled: res?.enabled === true, window_seconds: res?.window_seconds ?? 300, keys: Array.isArray(res?.keys) ? res.keys : [] }
+  }
+  async function setAutoEnroll(enabled: boolean): Promise<void> {
+    await api('PUT', 'agents/auto-enroll', { enabled })
+    await loadAutoEnroll()
+  }
+  async function createAutoKey(input: AutoEnrollKeyInput): Promise<AutoEnrollKeySecret> {
+    const res = await api<AutoEnrollKeySecret>('POST', 'agents/auto-enroll/keys', input)
+    await loadAutoEnroll()
+    return res
+  }
+  async function updateAutoKey(id: string, patch: Partial<AutoEnrollKeyInput> & { enabled?: boolean }): Promise<AutoEnrollKey> {
+    const res = await api<AutoEnrollKey>('PATCH', 'agents/auto-enroll/keys/' + id, patch)
+    await loadAutoEnroll()
+    return res
+  }
+  async function rotateAutoKey(id: string): Promise<AutoEnrollKeySecret> {
+    const res = await api<AutoEnrollKeySecret>('POST', 'agents/auto-enroll/keys/' + id + '/rotate')
+    await loadAutoEnroll()
+    return res
+  }
+  async function deleteAutoKey(id: string): Promise<void> {
+    await api('DELETE', 'agents/auto-enroll/keys/' + id)
+    await loadAutoEnroll()
+  }
+
   // patchOnline / patchOffline reflect live registry events without a refetch.
   function patchOnline(agent: ConnectedAgent): void {
     const i = fleet.value.findIndex((a) => a.agent_id === agent.agent_id)
@@ -96,5 +126,5 @@ export const useAgents = defineStore('inventory-agents', () => {
     if (i >= 0) fleet.value[i] = { ...fleet.value[i]!, online: false }
   }
 
-  return { fleet, connected, currentVersion, loading, error, listFleet, listConnected, refresh, mintEnrollToken, revoke, upgrade, upgradeAllOutdated, cancelUpgrade, releases, policy, loadPolicy, savePolicy, resumePolicy, patchOnline, patchOffline }
+  return { fleet, connected, currentVersion, loading, error, listFleet, listConnected, refresh, mintEnrollToken, revoke, upgrade, upgradeAllOutdated, cancelUpgrade, releases, policy, loadPolicy, savePolicy, resumePolicy, autoEnroll, loadAutoEnroll, setAutoEnroll, createAutoKey, updateAutoKey, rotateAutoKey, deleteAutoKey, patchOnline, patchOffline }
 })

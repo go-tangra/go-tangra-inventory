@@ -23,6 +23,7 @@ import (
 	"github.com/go-tangra/go-tangra-auth/sdk/v4/pkg/authclient"
 	"github.com/go-tangra/go-tangra-portal/sdk/v4/pkg/gatewayclient"
 
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/autoenroll"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/backup"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/config"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/enroll"
@@ -188,6 +189,8 @@ func Build(ctx context.Context, cfg config.Config, o Options) (a *App, err error
 	statsSvc.SetStaleAfter(cfg.StaleAfter())
 	backupSvc := backup.New(a.Repo)
 	a.Enroll = enroll.New(a.Repo, a.Env)
+	// Automatic enrollment (feature 029): off per tenant until switched on.
+	autoSvc := autoenroll.New(a.Repo, a.Env)
 
 	// Agent self-upgrade (feature 023): signed releases (bundled in the
 	// image, verified and copied into PostgreSQL at start) and the upgrade
@@ -217,7 +220,7 @@ func Build(ctx context.Context, cfg config.Config, o Options) (a *App, err error
 	}
 	a.HTTP.Register(httpapi.Deps{
 		Hosts: hostsSvc, Snapshots: snapsSvc, Stats: statsSvc, Backup: backupSvc,
-		Enroll: a.Enroll, Registry: a.Registry, Hub: a.Hub, Upgrades: upgSvc, Releases: relSvc,
+		Enroll: a.Enroll, Registry: a.Registry, Hub: a.Hub, Upgrades: upgSvc, Releases: relSvc, AutoEnroll: autoSvc,
 	})
 	a.Freya.HTTP().HandlePrefix("/", a.HTTP.Handler())
 
@@ -236,7 +239,8 @@ func Build(ctx context.Context, cfg config.Config, o Options) (a *App, err error
 	// the development opt-out ingest.insecure serves plaintext. A missing or
 	// unloadable certificate refuses start.
 	ingestSrv := ingest.New(a.Enroll, snapsSvc, a.Registry, a.Repo, cfg.Limits.MaxSnapshotBytes, instanceID).
-		WithUpgrades(upgSvc, relSvc, cfg.AgentReleases.MaxConcurrentDownloads, 10*time.Minute)
+		WithUpgrades(upgSvc, relSvc, cfg.AgentReleases.MaxConcurrentDownloads, 10*time.Minute).
+		WithAutoEnroll(autoSvc)
 	var ingestTLS *ingest.CertLoader
 	if !cfg.Ingest.Insecure {
 		if ingestTLS, err = ingest.NewCertLoader(cfg.Ingest.TLSCertFile, cfg.Ingest.TLSKeyFile); err != nil {

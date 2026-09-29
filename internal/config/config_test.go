@@ -377,6 +377,39 @@ insecure: true
 	}
 }
 
+// Automatic enrollment (feature 029) replaces the token file.
+func TestAgentConfigAutoEnroll(t *testing.T) {
+	good := DefaultAgent()
+	good.IngestEndpoint = "inv.example.org:9977"
+	good.CredentialFile = "/var/lib/inv/cred"
+	good.StateFile = "/var/lib/inv/state"
+	good.AutoEnroll = AgentAutoEnroll{KeyID: "ak_0123456789abcdef01234567", KeyFile: "/etc/inv/auto.key"}
+	if err := good.Validate(); err != nil {
+		t.Fatalf("valid auto-enroll config: %v", err)
+	}
+	cases := map[string]func(*AgentConfig){
+		"key_id":                         func(c *AgentConfig) { c.AutoEnroll.KeyID = "ak_nothex" },
+		"key_file is required":           func(c *AgentConfig) { c.AutoEnroll.KeyFile = "" },
+		"credential_file and state_file": func(c *AgentConfig) { c.CredentialFile = "" },
+		"state_file are required":        func(c *AgentConfig) { c.StateFile = "" },
+		"key_id must":                    func(c *AgentConfig) { c.AutoEnroll.KeyID = "" },
+	}
+	for want, mut := range cases {
+		c := good
+		mut(&c)
+		if err := c.Validate(); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: %v", want, err)
+		}
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agent.yaml")
+	_ = os.WriteFile(path, []byte("ingest_endpoint: x:1\ncredential_file: /c\nauto_enroll:\n  key_id: ak_0123456789abcdef01234567\n  key_file: /k\n"), 0o600)
+	a, err := LoadAgent(path)
+	if err != nil || a.AutoEnroll.KeyFile != "/k" || !a.AutoEnroll.Configured() {
+		t.Fatalf("load %+v %v", a.AutoEnroll, err)
+	}
+}
+
 func TestAgentConfigTLS(t *testing.T) {
 	dir := t.TempDir()
 	caFile := filepath.Join(dir, "ca.pem")

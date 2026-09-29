@@ -72,7 +72,14 @@ If the private key may be exposed:
 
 ## Other secrets
 
-Per-agent credentials and enrollment tokens are sealed with the platform
-key-encryption key and never logged, audited or exported. The ingest edge is
+Per-agent credentials, enrollment tokens and auto-enrollment key secrets are
+sealed with the platform key-encryption key and never logged, audited or
+exported. An auto-enrollment key (feature 029) is never sent by agents: they
+present an HMAC-SHA256 proof bound to the key id, a timestamp (±5 min), a
+single-use nonce and their identity, accepted only from the key's networks
+while the tenant switch and the key are enabled. A leaked key secret is
+contained by its networks, expiry and limit; disable or rotate it in
+Inventory > Agents > Automatic enrollment (agents already enrolled keep their
+own credentials, revoke them separately if needed). The ingest edge is
 off-mesh and authenticates every call with the agent credential over TLS; see
 [deploy/README.md](deploy/README.md#security-notes).

@@ -781,6 +781,23 @@ message EnrollRequest {
   string enrollment_token = 1;  // consumed single-use
   Identity identity = 2;
   string agent_version = 3;
+  // Automatic enrollment (feature 029), used instead of enrollment_token: a
+  // proof made with a tenant's auto-enrollment key. The key itself is never
+  // sent; see sdk/pkg/autoenroll for the canonical message.
+  AutoEnrollProof auto_enroll = 4;
+}
+
+// AutoEnrollProof authenticates an automatic enrollment: signature is the
+// base64url (no padding) HMAC-SHA256, keyed with the auto-enrollment key, of
+// the canonical message built by autoenroll.Message from key_id, timestamp,
+// nonce and the request identity. The server also requires the timestamp to
+// be recent, the nonce to be unused and the caller's address to be inside the
+// key's allowed networks.
+message AutoEnrollProof {
+  string key_id = 1;     // public key id ("ak_" + 24 hex)
+  int64 timestamp = 2;   // unix seconds
+  string nonce = 3;      // 16..64 chars of [A-Za-z0-9_-], single use
+  string signature = 4;  // base64url(HMAC-SHA256(key, message))
 }
 
 // EnrollResponse returns the per-agent credential exactly once; it is sealed at

@@ -44,6 +44,9 @@ type FleetEntry struct {
 	UpgradeReason  string     `json:"upgrade_reason,omitempty"`
 	UpgradeID      string     `json:"upgrade_id,omitempty"`
 	StateChangedAt time.Time  `json:"state_changed_at"`
+	// How the agent enrolled (feature 029): token | auto (+ key id).
+	EnrolledVia     string `json:"enrolled_via"`
+	AutoEnrollKeyID string `json:"auto_enroll_key_id,omitempty"`
 }
 
 // FleetFilter constrains Fleet. Cursor is the last agent id of the previous
@@ -116,7 +119,11 @@ func (s *Service) Fleet(ctx context.Context, tenantID string, f FleetFilter) ([]
 // entry derives the fleet state of one agent (first matching rule wins).
 func entry(a store.Agent, last store.AgentUpgrade, target string, now time.Time) FleetEntry {
 	e := FleetEntry{AgentID: a.ID, TenantID: a.TenantID, HostID: a.HostID, Version: a.AgentVersion, OS: a.OS, Arch: a.Arch,
-		InstallType: a.InstallType, LastSeen: a.LastSeen, TargetVersion: target, StateChangedAt: a.LastSeen, UpgradeID: last.ID}
+		InstallType: a.InstallType, LastSeen: a.LastSeen, TargetVersion: target, StateChangedAt: a.LastSeen, UpgradeID: last.ID,
+		EnrolledVia: a.EnrolledVia, AutoEnrollKeyID: a.AutoEnrollKeyID}
+	if e.EnrolledVia == "" {
+		e.EnrolledVia = store.EnrolledViaToken
+	}
 	if last.ID != "" {
 		e.StateChangedAt = last.UpdatedAt
 	}
