@@ -87,7 +87,8 @@ export const useAgents = defineStore('inventory-agents', () => {
   // Automatic enrollment (feature 029): the tenant switch and its keys.
   const autoEnroll = ref<AutoEnroll | null>(null)
   async function loadAutoEnroll(): Promise<void> {
-    autoEnroll.value = await api<AutoEnroll>('GET', 'agents/auto-enroll')
+    const res = await api<AutoEnroll>('GET', 'agents/auto-enroll')
+    autoEnroll.value = { ...res, enabled: res?.enabled === true, window_seconds: res?.window_seconds ?? 300, keys: Array.isArray(res?.keys) ? res.keys : [] }
   }
   async function setAutoEnroll(enabled: boolean): Promise<void> {
     await api('PUT', 'agents/auto-enroll', { enabled })
