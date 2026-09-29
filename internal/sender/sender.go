@@ -10,6 +10,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"github.com/go-tangra/go-tangra-inventory/sdk/v4/pkg/autoenroll"
 	"os"
 	"time"
 
@@ -135,6 +136,38 @@ func (s *Sender) Enroll(ctx context.Context, token string, ident store.Identity,
 	}
 	if agentID == "" || credential == "" {
 		return "", "", errors.New("sender: enroll returned empty agent id or credential")
+	}
+	return agentID, credential, nil
+}
+
+// EnrollAuto enrolls with an auto-enrollment key (feature 029). Every
+// attempt carries a fresh proof (new nonce and timestamp), so a retry after a
+// lost response is not refused as a replay; the key itself is never sent.
+func (s *Sender) EnrollAuto(ctx context.Context, key, keyID string, ident store.Identity, version string) (agentID, credential string, err error) {
+	client, conn, err := s.Dial()
+	if err != nil {
+		return "", "", err
+	}
+	defer conn.Close()
+
+	pid := autoenroll.Identity{HardwareUUID: ident.HardwareUUID, MachineID: ident.MachineID, Hostname: ident.Hostname}
+	err = s.retry(ctx, func(cctx context.Context) error {
+		p, e := autoenroll.NewProof(key, keyID, pid, time.Now())
+		if e != nil {
+			return e
+		}
+		resp, e := client.Enroll(cctx, &invv1.EnrollRequest{Identity: identityToProto(ident), AgentVersion: version, AutoEnroll: p})
+		if e != nil {
+			return e
+		}
+		agentID, credential = resp.GetAgentId(), resp.GetAgentCredential()
+		return nil
+	})
+	if err != nil {
+		return "", "", fmt.Errorf("sender: auto-enroll: %w", err)
+	}
+	if agentID == "" || credential == "" {
+		return "", "", errors.New("sender: auto-enroll returned empty agent id or credential")
 	}
 	return agentID, credential, nil
 }

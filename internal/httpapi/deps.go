@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"errors"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/autoenroll"
 	"net/http"
 
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/authz"
@@ -33,6 +34,9 @@ type Deps struct {
 	// are mounted; otherwise GET /agents lists live connections only.
 	Upgrades *upgrades.Service
 	Releases *releases.Service
+	// Automatic enrollment (feature 029), optional: mounts the
+	// /agents/auto-enroll routes when set.
+	AutoEnroll *autoenroll.Service
 }
 
 // subjects derives the authz subject from the verified platform identity. The

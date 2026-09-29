@@ -51,12 +51,14 @@ func main() {
 		insecure   = flag.Bool("insecure", false, "use a plaintext connection to the ingest edge (development only)")
 		caFile     = flag.String("ca-file", "", "PEM CA bundle that signs the ingest server certificate; pins trust to it (overrides config; default: system roots)")
 		serverName = flag.String("server-name", "", "name to verify in the ingest server certificate (overrides config; default: the endpoint host)")
+		autoKeyID  = flag.String("auto-enroll-key-id", "", "auto-enrollment key id ak_… (overrides config; enrolls without a token)")
+		autoKey    = flag.String("auto-enroll-key-file", "", "path to the auto-enrollment key secret aks_… (overrides config)")
 	)
 	flag.Parse()
 
 	collector.Version = version
 
-	fl := flags{ingest: *ingest, token: *token, insecure: *insecure, caFile: *caFile, serverName: *serverName}
+	fl := flags{ingest: *ingest, token: *token, insecure: *insecure, caFile: *caFile, serverName: *serverName, autoKeyID: *autoKeyID, autoKeyFile: *autoKey}
 	cfg, err := resolveConfig(*configPath, fl)
 	if err != nil {
 		fatalf("config: %v", err)
@@ -83,6 +85,8 @@ type flags struct {
 	ingest, token      string
 	insecure           bool
 	caFile, serverName string
+	autoKeyID          string // feature 029
+	autoKeyFile        string
 }
 
 // resolveConfig loads the optional config file and applies flag overrides.
@@ -109,6 +113,12 @@ func resolveConfig(configPath string, f flags) (config.AgentConfig, error) {
 	}
 	if f.serverName != "" {
 		cfg.ServerName = f.serverName
+	}
+	if f.autoKeyID != "" {
+		cfg.AutoEnroll.KeyID = f.autoKeyID
+	}
+	if f.autoKeyFile != "" {
+		cfg.AutoEnroll.KeyFile = f.autoKeyFile
 	}
 	return cfg, nil
 }
@@ -216,6 +226,13 @@ func handleService(action, configPath string, f flags) error {
 		}
 		if f.serverName != "" {
 			args = append(args, "-server-name", f.serverName)
+		}
+		if f.autoKeyID != "" {
+			args = append(args, "-auto-enroll-key-id", f.autoKeyID)
+		}
+		if f.autoKeyFile != "" {
+			abs, _ := filepath.Abs(f.autoKeyFile)
+			args = append(args, "-auto-enroll-key-file", abs)
 		}
 		if err := winsvc.Install(serviceName, "Freya Inventory Agent",
 			"Collects endpoint inventory and submits it to the Freya inventory service.",

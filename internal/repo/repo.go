@@ -15,6 +15,8 @@ import (
 var (
 	ErrNotFound = errors.New("not found")
 	ErrConflict = errors.New("conflict")
+	// ErrReplay reports a reused auto-enrollment nonce (feature 029).
+	ErrReplay = errors.New("replay")
 )
 
 // Stats is a per-tenant statistics rollup.
@@ -93,6 +95,7 @@ type Store interface {
 
 	ReleaseStore
 	UpgradeStore
+	AutoEnrollStore
 }
 
 // ArtifactOpener opens the content of one artifact of a release being
@@ -167,4 +170,25 @@ type UpgradeStore interface {
 	// TryTenantLock runs fn while holding a cluster-wide lock named key;
 	// acquired is false (fn not run) when another holder has it.
 	TryTenantLock(ctx context.Context, key string, fn func(context.Context) error) (acquired bool, err error)
+}
+
+// AutoEnrollStore persists automatic enrollment (feature 029): the tenant
+// switch, the keys and accepted enrollments.
+type AutoEnrollStore interface {
+	// GetAutoEnrollSettings returns the tenant's switch (found false: off).
+	GetAutoEnrollSettings(ctx context.Context, tenantID string) (store.AutoEnrollSettings, bool, error)
+	PutAutoEnrollSettings(ctx context.Context, s store.AutoEnrollSettings, row store.AuditRow) error
+	ListAutoEnrollKeys(ctx context.Context, tenantID string) ([]store.AutoEnrollKey, error)
+	// CreateAutoEnrollKey returns ErrConflict for a duplicate name or key id.
+	CreateAutoEnrollKey(ctx context.Context, k store.AutoEnrollKey, row store.AuditRow) error
+	// UpdateAutoEnrollKey applies fn to the stored key and writes its audit row.
+	UpdateAutoEnrollKey(ctx context.Context, tenantID, id string, fn func(*store.AutoEnrollKey) (store.AuditRow, error)) (store.AutoEnrollKey, error)
+	DeleteAutoEnrollKey(ctx context.Context, tenantID, id string, row store.AuditRow) error
+	// LookupAutoEnrollKey finds a key by its public id across tenants
+	// (system scope) together with its tenant's switch.
+	LookupAutoEnrollKey(ctx context.Context, keyID string) (store.AutoEnrollKey, bool, error)
+	// EnrollWithAutoKey applies an accepted enrollment atomically: ErrReplay
+	// when the nonce was used, ErrConflict when the key is no longer usable
+	// or the tenant switch is off.
+	EnrollWithAutoKey(ctx context.Context, e store.AutoEnrollment) error
 }

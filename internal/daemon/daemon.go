@@ -16,6 +16,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -191,13 +192,25 @@ func (d *Daemon) ensureEnrolled(ctx context.Context, ident store.Identity) error
 		return nil
 	}
 
-	token, err := d.readToken()
-	if err != nil {
-		return err
-	}
-	id, cred, err := d.sender.Enroll(ctx, token, ident, d.version)
-	if err != nil {
-		return err
+	var id, cred string
+	// A token that is present wins; without one, the auto-enrollment key is
+	// used (the packaged config always names a token_file).
+	if d.cfg.AutoEnroll.Configured() && !fileExists(d.cfg.TokenFile) {
+		key, err := d.readAutoKey()
+		if err != nil {
+			return err
+		}
+		if id, cred, err = d.sender.EnrollAuto(ctx, key, d.cfg.AutoEnroll.KeyID, ident, d.version); err != nil {
+			return err
+		}
+	} else {
+		token, err := d.readToken()
+		if err != nil {
+			return err
+		}
+		if id, cred, err = d.sender.Enroll(ctx, token, ident, d.version); err != nil {
+			return err
+		}
 	}
 	d.agentID, d.credential = id, cred
 	if err := d.saveEnrollment(id, cred); err != nil {
@@ -351,6 +364,31 @@ func (d *Daemon) readToken() (string, error) {
 		return "", errors.New("token_file is empty")
 	}
 	return token, nil
+}
+
+// fileExists reports whether path names an existing file ("" does not).
+func fileExists(path string) bool {
+	if path == "" {
+		return false
+	}
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// readAutoKey reads the auto-enrollment key secret (feature 029).
+func (d *Daemon) readAutoKey() (string, error) {
+	if fi, err := os.Stat(d.cfg.AutoEnroll.KeyFile); err == nil && runtime.GOOS != "windows" && fi.Mode().Perm()&0o077 != 0 {
+		log.Printf("daemon: warning: %s is readable by other users (mode %o); restrict it to 0600", d.cfg.AutoEnroll.KeyFile, fi.Mode().Perm())
+	}
+	b, err := os.ReadFile(d.cfg.AutoEnroll.KeyFile) // #nosec G304 -- operator-supplied key path
+	if err != nil {
+		return "", fmt.Errorf("read auto_enroll.key_file: %w", err)
+	}
+	key := strings.TrimSpace(string(b))
+	if key == "" {
+		return "", errors.New("auto_enroll.key_file is empty")
+	}
+	return key, nil
 }
 
 func writeFileSecure(path string, data []byte, perm os.FileMode) error {

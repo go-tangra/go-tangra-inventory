@@ -80,6 +80,8 @@ components:
       type: object
       description: One enrolled agent (online or not) with its upgrade state. The keys of the former connected-agents listing are kept.
       properties:
+        enrolled_via: { type: string, enum: [token, auto], description: 'enrollment method (feature 029)' }
+        auto_enroll_key_id: { type: string, description: 'public id of the auto-enrollment key, when enrolled_via = auto' }
         agent_id: { type: string, format: uuid }
         tenant_id: { type: string, format: uuid }
         host_id: { type: string }
@@ -166,6 +168,61 @@ components:
         paused_reason: { type: string, readOnly: true }
         updated_by: { type: string, readOnly: true }
         updated_at: { type: string, format: date-time, readOnly: true }
+    AutoEnrollSwitch:
+      type: object
+      additionalProperties: false
+      required: [enabled]
+      properties:
+        enabled: { type: boolean }
+    AutoEnroll:
+      type: object
+      properties:
+        enabled: { type: boolean }
+        updated_by: { type: string }
+        updated_at: { type: [string, 'null'], format: date-time }
+        window_seconds: { type: integer, description: 'accepted clock skew of a proof timestamp' }
+        keys: { type: array, items: { $ref: '#/components/schemas/AutoEnrollKey' } }
+    AutoEnrollKey:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        key_id: { type: string, pattern: '^ak_[0-9a-f]{24}$', description: 'public id agents send' }
+        name: { type: string }
+        allowed_cidrs: { type: array, items: { type: string } }
+        enabled: { type: boolean }
+        state: { type: string, enum: [active, disabled, expired, exhausted] }
+        expires_at: { type: [string, 'null'], format: date-time }
+        max_enrollments: { type: integer, description: '0 = unlimited' }
+        enrollments: { type: integer }
+        last_used_at: { type: [string, 'null'], format: date-time }
+        last_used_ip: { type: string }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    AutoEnrollKeySecret:
+      type: object
+      properties:
+        key: { $ref: '#/components/schemas/AutoEnrollKey' }
+        secret: { type: string, description: 'aks_…; shown once, never stored in clear' }
+    AutoEnrollKeyCreate:
+      type: object
+      additionalProperties: false
+      required: [name, allowed_cidrs]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        allowed_cidrs: { type: array, minItems: 1, maxItems: 32, items: { type: string, maxLength: 64 }, description: 'networks agents may enroll from (a bare address is a single host; /0 is refused)' }
+        enabled: { type: boolean }
+        expires_at: { type: [string, 'null'], format: date-time }
+        max_enrollments: { type: integer, minimum: 0, maximum: 1000000 }
+    AutoEnrollKeyUpdate:
+      type: object
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        allowed_cidrs: { type: array, minItems: 1, maxItems: 32, items: { type: string, maxLength: 64 } }
+        enabled: { type: boolean }
+        expires_at: { type: [string, 'null'], format: date-time, description: 'null removes the expiry' }
+        max_enrollments: { type: integer, minimum: 0, maximum: 1000000 }
     AgentReleaseInfo:
       type: object
       properties:
@@ -269,6 +326,65 @@ paths:
       x-freya-max-body-bytes: 1024
       parameters: [{ $ref: '#/components/parameters/csrf' }]
       responses: { '200': { description: resumed, content: { application/json: { schema: { $ref: '#/components/schemas/UpgradePolicy' } } } } }
+  /api/inventory/v1/agents/auto-enroll:
+    get:
+      operationId: getAutoEnroll
+      summary: The tenant's automatic enrollment switch and keys (secrets are never returned)
+      x-freya-permission: 'agents:manage'
+      responses: { '200': { description: settings and keys, content: { application/json: { schema: { $ref: '#/components/schemas/AutoEnroll' } } } } }
+    put:
+      operationId: setAutoEnroll
+      summary: Turn automatic enrollment on or off for the tenant
+      x-freya-permission: 'agents:manage'
+      x-freya-max-body-bytes: 1024
+      parameters: [{ $ref: '#/components/parameters/csrf' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/AutoEnrollSwitch' } } } }
+      responses:
+        '200': { description: stored }
+        '422': { description: validation_failed }
+  /api/inventory/v1/agents/auto-enroll/keys:
+    post:
+      operationId: createAutoEnrollKey
+      summary: Create an auto-enrollment key (the secret is returned once)
+      x-freya-permission: 'agents:manage'
+      x-freya-max-body-bytes: 16384
+      parameters: [{ $ref: '#/components/parameters/csrf' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/AutoEnrollKeyCreate' } } } }
+      responses:
+        '201': { description: 'created: {key, secret}', content: { application/json: { schema: { $ref: '#/components/schemas/AutoEnrollKeySecret' } } } }
+        '409': { description: conflict }
+        '422': { description: validation_failed }
+  /api/inventory/v1/agents/auto-enroll/keys/{id}:
+    patch:
+      operationId: updateAutoEnrollKey
+      summary: Change an auto-enrollment key (name, networks, on/off, expiry, limit)
+      x-freya-permission: 'agents:manage'
+      x-freya-max-body-bytes: 16384
+      parameters: [{ $ref: '#/components/parameters/csrf' }, { $ref: '#/components/parameters/id' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/AutoEnrollKeyUpdate' } } } }
+      responses:
+        '200': { description: updated, content: { application/json: { schema: { $ref: '#/components/schemas/AutoEnrollKey' } } } }
+        '404': { description: not_found }
+        '409': { description: conflict }
+        '422': { description: validation_failed }
+    delete:
+      operationId: deleteAutoEnrollKey
+      summary: Delete an auto-enrollment key (enrolled agents keep working)
+      x-freya-permission: 'agents:manage'
+      parameters: [{ $ref: '#/components/parameters/csrf' }, { $ref: '#/components/parameters/id' }]
+      responses:
+        '204': { description: deleted }
+        '404': { description: not_found }
+  /api/inventory/v1/agents/auto-enroll/keys/{id}/rotate:
+    post:
+      operationId: rotateAutoEnrollKey
+      summary: Replace the key's secret (returned once); the key id stays
+      x-freya-permission: 'agents:manage'
+      x-freya-max-body-bytes: 1024
+      parameters: [{ $ref: '#/components/parameters/csrf' }, { $ref: '#/components/parameters/id' }]
+      responses:
+        '200': { description: 'rotated: {key, secret}', content: { application/json: { schema: { $ref: '#/components/schemas/AutoEnrollKeySecret' } } } }
+        '404': { description: not_found }
   /api/inventory/v1/agent-releases:
     get:
       operationId: listAgentReleases

@@ -713,14 +713,14 @@ func (d *DB) ListChangesForSnapshot(ctx context.Context, tenantID, snapshotID st
 // ---- agents
 
 const agentCols = `id, tenant_id, coalesce(host_id::text,''), credential_sealed, enrolled_at, last_seen, agent_version, revoked, identity_hint,
-	os, arch, install_type, capabilities, platform_seen_at`
+	os, arch, install_type, capabilities, platform_seen_at, enrolled_via, auto_enroll_key_id`
 
 func scanAgent(sc scanner) (store.Agent, error) {
 	var a store.Agent
 	var seen *time.Time
 	if err := sc.Scan(&a.ID, &a.TenantID, &a.HostID, &a.CredentialSealed, &a.EnrolledAt,
 		&a.LastSeen, &a.AgentVersion, &a.Revoked, &a.IdentityHint,
-		&a.OS, &a.Arch, &a.InstallType, &a.Capabilities, &seen); err != nil {
+		&a.OS, &a.Arch, &a.InstallType, &a.Capabilities, &seen, &a.EnrolledVia, &a.AutoEnrollKeyID); err != nil {
 		return store.Agent{}, err
 	}
 	if seen != nil {
@@ -733,7 +733,12 @@ func scanAgent(sc scanner) (store.Agent, error) {
 }
 
 func (d *DB) CreateAgent(ctx context.Context, a store.Agent) error {
-	return d.tenant(ctx, a.TenantID, func(tx pgx.Tx) error {
+	return d.tenant(ctx, a.TenantID, func(tx pgx.Tx) error { return insertAgentTx(ctx, tx, a) })
+}
+
+// insertAgentTx inserts an agent row inside tx.
+func insertAgentTx(ctx context.Context, tx pgx.Tx, a store.Agent) error {
+	{
 		id := a.ID
 		if id == "" {
 			id = store.NewID()
@@ -750,12 +755,16 @@ func (d *DB) CreateAgent(ctx context.Context, a store.Agent) error {
 		if a.HostID != "" {
 			hostID = &a.HostID
 		}
+		via := a.EnrolledVia
+		if via == "" {
+			via = store.EnrolledViaToken
+		}
 		_, e := tx.Exec(ctx, `INSERT INTO inventory_agents
-			(id, tenant_id, host_id, credential_sealed, enrolled_at, last_seen, agent_version, revoked, identity_hint)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-			id, a.TenantID, hostID, a.CredentialSealed, enrolled, last, a.AgentVersion, a.Revoked, a.IdentityHint)
+			(id, tenant_id, host_id, credential_sealed, enrolled_at, last_seen, agent_version, revoked, identity_hint, enrolled_via, auto_enroll_key_id)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+			id, a.TenantID, hostID, a.CredentialSealed, enrolled, last, a.AgentVersion, a.Revoked, a.IdentityHint, via, a.AutoEnrollKeyID)
 		return mapErr(e)
-	})
+	}
 }
 
 func (d *DB) GetAgent(ctx context.Context, tenantID, id string) (out store.Agent, err error) {

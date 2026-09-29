@@ -10,6 +10,7 @@ import { enrollTokenSchema } from '@/schemas'
 import type { AgentFleetEntry, FleetState, MintedToken, UpgradeBatchResult } from '@/api/types'
 import { fleetStateLabel, reasonText, skipSummary, UPGRADABLE } from './upgrade-text'
 import PolicyCard from './PolicyCard.vue'
+import AutoEnrollCard from './AutoEnrollCard.vue'
 
 const agents = useAgents()
 const live = useLive()
@@ -136,6 +137,7 @@ const columns: Column<AgentFleetEntry>[] = [
   { key: 'version', label: 'Version', sortable: true },
   { key: 'target_version', label: 'Target', hideOnStack: true },
   { key: 'upgrade_state', label: 'Upgrade' },
+  { key: 'enrolled_via', label: 'Enrolled with', hideOnStack: true, format: (a) => (a.enrolled_via === 'auto' ? 'key ' + (a.auto_enroll_key_id ?? '') : 'token') },
   { key: 'state_changed_at', label: 'Last change', format: (a) => fmt(a.state_changed_at || a.last_seen || a.connected_at), hideOnStack: true },
 ]
 </script>
@@ -179,6 +181,7 @@ const columns: Column<AgentFleetEntry>[] = [
       </UiDataTable>
     </UiCard>
     <PolicyCard class="mt-4" />
+    <AutoEnrollCard v-if="canManage" class="mt-4" />
 
     <UiDrawer :model-value="enrollOpen" title="Issue enrollment token" size="md" @update:model-value="closeEnroll">
       <template v-if="!minted">

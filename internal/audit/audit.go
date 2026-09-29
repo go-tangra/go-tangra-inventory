@@ -52,6 +52,15 @@ const (
 	UpgradePolicyPaused    EventType = "upgrade_policy_paused"
 	UpgradePolicyResumed   EventType = "upgrade_policy_resumed"
 	AgentReleaseImported   EventType = "agent_release_imported"
+	// Feature 029: automatic enrollment. AgentAutoEnrolled carries the key
+	// id and the caller's address; AutoEnrollRefused a coarse reason code.
+	AutoEnrollSettingsUpdated EventType = "auto_enroll_settings_updated"
+	AutoEnrollKeyCreated      EventType = "auto_enroll_key_created"
+	AutoEnrollKeyUpdated      EventType = "auto_enroll_key_updated"
+	AutoEnrollKeyRotated      EventType = "auto_enroll_key_rotated"
+	AutoEnrollKeyDeleted      EventType = "auto_enroll_key_deleted"
+	AgentAutoEnrolled         EventType = "agent_auto_enrolled"
+	AutoEnrollRefused         EventType = "auto_enroll_refused"
 )
 
 // PlatformTenant is the tenant id of platform-scope events (agent release
@@ -69,6 +78,8 @@ const (
 	// Feature 023.
 	SubjectUpgradePolicy = "upgrade_policy"
 	SubjectRelease       = "release"
+	// Feature 029.
+	SubjectAutoEnrollKey = "auto_enroll_key"
 )
 
 // Outcomes (closed set).
@@ -99,6 +110,8 @@ func init() {
 		AgentUpgradeRequested, AgentUpgradeCancelled, AgentUpgradeDelivered, AgentUpgradeStarted, AgentUpgradeInstalling,
 		AgentUpgradeSucceeded, AgentUpgradeFailed, AgentUpgradeRolledBack, AgentUpgradeExpired, AgentUpgradeRefused,
 		UpgradePolicyUpdated, UpgradePolicyPaused, UpgradePolicyResumed, AgentReleaseImported,
+		AutoEnrollSettingsUpdated, AutoEnrollKeyCreated, AutoEnrollKeyUpdated, AutoEnrollKeyRotated, AutoEnrollKeyDeleted,
+		AgentAutoEnrolled, AutoEnrollRefused,
 	} {
 		known[t] = struct{}{}
 	}
@@ -143,7 +156,7 @@ func Validate(e Event) error {
 		return fmt.Errorf("audit: actor_kind %q", e.ActorKind)
 	}
 	switch e.SubjectKind {
-	case SubjectHost, SubjectSnapshot, SubjectAgent, SubjectToken, SubjectBackup, SubjectSystem, SubjectUpgradePolicy, SubjectRelease:
+	case SubjectHost, SubjectSnapshot, SubjectAgent, SubjectToken, SubjectBackup, SubjectSystem, SubjectUpgradePolicy, SubjectRelease, SubjectAutoEnrollKey:
 	default:
 		return fmt.Errorf("audit: subject_kind %q", e.SubjectKind)
 	}

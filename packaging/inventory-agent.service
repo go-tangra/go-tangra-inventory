@@ -4,9 +4,11 @@ Documentation=https://github.com/go-tangra/go-tangra-inventory
 Wants=network-online.target
 After=network-online.target
 # Start only once the agent can authenticate: an enrollment token to consume,
-# or the credential a previous enrollment stored (either one).
+# an auto-enrollment key (feature 029),
+# or the credential a previous enrollment stored (any one).
 ConditionPathExists=|/etc/inventory-agent/enrollment.token
 ConditionPathExists=|/var/lib/inventory-agent/credential
+ConditionPathExists=|/etc/inventory-agent/auto-enroll.key
 
 [Service]
 ExecStart=/usr/bin/inventory-agent -config /etc/inventory-agent/agent.yaml -daemon

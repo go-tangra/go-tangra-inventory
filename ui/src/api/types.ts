@@ -409,6 +409,9 @@ export interface AgentFleetEntry extends ConnectedAgent {
   upgrade_reason?: string
   upgrade_id?: string
   state_changed_at?: string
+  // Feature 029: how the agent enrolled.
+  enrolled_via?: 'token' | 'auto'
+  auto_enroll_key_id?: string
 }
 
 export interface AgentFleet {
@@ -497,4 +500,48 @@ export interface UpgradePolicy {
   paused_reason?: string
   updated_by?: string
   updated_at?: string
+}
+
+// --- automatic enrollment (feature 029) ---
+
+export type AutoEnrollKeyState = 'active' | 'disabled' | 'expired' | 'exhausted'
+
+// AutoEnrollKey is a reusable enrollment key; its secret is never listed.
+export interface AutoEnrollKey {
+  id: string
+  key_id: string
+  name: string
+  allowed_cidrs: string[]
+  enabled: boolean
+  state: AutoEnrollKeyState
+  expires_at: string | null
+  max_enrollments: number
+  enrollments: number
+  last_used_at: string | null
+  last_used_ip: string
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+
+// AutoEnroll is the tenant switch with its keys.
+export interface AutoEnroll {
+  enabled: boolean
+  updated_by?: string
+  updated_at?: string | null
+  window_seconds: number
+  keys: AutoEnrollKey[]
+}
+
+// AutoEnrollKeySecret is returned by create and rotate: the only time the secret is shown.
+export interface AutoEnrollKeySecret {
+  key: AutoEnrollKey
+  secret: string
+}
+
+export interface AutoEnrollKeyInput {
+  name: string
+  allowed_cidrs: string[]
+  expires_at: string | null
+  max_enrollments: number
 }

@@ -45,6 +45,7 @@ In the containerized platform stack it comes up with one command; see
 
 ```
 inventory-agent -ingest <host:port> -token <enrollment-token>   # one-shot enroll+collect+submit
+inventory-agent -ingest <host:port> -auto-enroll-key-id ak_… -auto-enroll-key-file <file>   # same, with an auto-enrollment key
 inventory-agent -config agent.yaml -daemon                      # enroll once, submit on an interval, hold a refresh stream
 inventory-agent -o ./out                                        # collect and write JSON (no submit)
 inventory-agent -service install | uninstall                    # Windows service only
@@ -84,6 +85,51 @@ The unit only starts once `/etc/inventory-agent/enrollment.token` or the
 stored credential `/var/lib/inventory-agent/credential` exists, so an
 unconfigured install stays idle instead of restarting in a loop. Upgrades
 restart a running agent; `apt purge` also removes the credential and state.
+
+### Automatic enrollment (without a token)
+
+A tenant can let agents enroll without a single-use token (feature 029), e.g.
+when go-tangra-client or configuration management installs agents on many
+hosts. In **Inventory > Agents > Automatic enrollment** an inventory
+administrator (`agents:manage`) turns the tenant switch on and creates
+**enrollment keys**. Each key has a name, the networks agents may enroll from
+(required; a bare address is one host; `/0` is refused), an optional expiry
+and an optional enrollment limit, and can be disabled, edited, rotated or
+deleted at any time. Its secret (`aks_…`) is shown once, at creation or
+rotation; afterwards only the public key id (`ak_…`) is visible.
+
+```sh
+sudo install -m 0600 /dev/stdin /etc/inventory-agent/auto-enroll.key <<< '<secret aks_… from the console>'
+sudoedit /etc/inventory-agent/agent.yaml     # auto_enroll: { key_id: ak_…, key_file: /etc/inventory-agent/auto-enroll.key }
+sudo systemctl start inventory-agent
+# or: inventory-agent -daemon -ingest <host:9977> -auto-enroll-key-id ak_… -auto-enroll-key-file /etc/inventory-agent/auto-enroll.key
+```
+
+The agent uses the key only when it has no stored credential and no token
+file exists. The key never travels: the request carries
+`AutoEnrollProof{key_id, timestamp, nonce, signature}` where signature is
+base64url(HMAC-SHA256(secret, canonical message)) over the key id, the unix
+timestamp, the nonce and the request identity (hardware UUID, machine id,
+hostname) — see `sdk/pkg/autoenroll` (`NewProof`, `Message`, a fixed test
+vector) for other implementations such as go-tangra-client. The ingest edge
+accepts it only when the tenant switch is on, the key is enabled, not
+expired and under its limit, the **caller's address** (the TCP peer of the
+ingest connection) is inside the key's networks, the signature matches, the
+timestamp is within 5 minutes of the server clock and the nonce was not used
+before. Every refusal is the same `PermissionDenied`; the reason
+(`address_not_allowed`, `bad_signature`, `stale_timestamp`, `replay`,
+`tenant_disabled`, `key_disabled`, `key_expired`, `key_exhausted`,
+`rate_limited`, `state_changed`) is audited in the key's tenant
+(`auto_enroll_refused`, at most once per key, reason and address every 10 s).
+A key accepts at most 60 enrollments per minute per replica, so a leaked
+secret cannot mint agents quickly; set an enrollment limit on keys that only
+serve a known batch of hosts. Accepted enrollments are audited as `agent_auto_enrolled` with
+the key id and address, and the fleet view shows which key enrolled an agent.
+
+Because the address check uses the TCP peer, the ingest port must be reached
+directly (Docker's published ports keep the client address); a TCP proxy or
+NAT in front of it makes every agent appear with the proxy's address. Key
+secrets are sealed with the module KEK and never exported by backups.
 
 ### Running the agent under systemd
 
@@ -343,7 +389,9 @@ updates live.
 ## Security notes
 
 - Off-mesh agents are untrusted until enrolled; **enrollment tokens** are
-  tenant-scoped, single-use and expiring. Per-agent and enrollment credentials
+  tenant-scoped, single-use and expiring; **auto-enrollment keys** (feature
+  029, off by default) are tenant-scoped, network-restricted, optionally
+  expiring and limited, and proven with an HMAC that never reveals the key. Per-agent and enrollment credentials
   are **sealed** (envelope encryption + KEK) and never returned in any response,
   log, audit entry or backup.
 - The ingest edge binds every accepted submission to the verified agent's

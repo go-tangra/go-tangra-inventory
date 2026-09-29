@@ -41,8 +41,10 @@ go-tangra-auth  <---->  go-tangra-portal (gateway)  <---->  go-tangra-inventory 
 | ingest edge | `:9977` | untrusted off-mesh agents, authenticated by a per-agent credential |
 | admin (health, readiness, metrics) | `127.0.0.1:9810` | the container runtime |
 
-An agent exchanges a tenant-scoped, single-use, expiring enrollment token for its
-per-agent credential, then submits snapshots and holds a command stream for refresh.
+An agent exchanges a tenant-scoped, single-use, expiring enrollment token — or,
+when the tenant allows it, a proof made with a network-restricted
+auto-enrollment key (feature 029) — for its per-agent credential, then submits
+snapshots and holds a command stream for refresh.
 
 ## Modules in this repository
 
