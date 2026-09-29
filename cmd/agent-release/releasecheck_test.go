@@ -33,7 +33,9 @@ func TestReleaseCheck(t *testing.T) {
 		if keys != "" {
 			ld += " -X github.com/go-tangra/go-tangra-inventory/v4/internal/agentrelease.productionKeys=" + keys
 		}
-		cmd := exec.Command("go", "build", "-trimpath", "-ldflags", ld, "-o", out, "../inventory-agent")
+		// -buildvcs=false: on a tagged commit the VCS stamp would put the
+		// tag's version into every test binary.
+		cmd := exec.Command("go", "build", "-trimpath", "-buildvcs=false", "-ldflags", ld, "-o", out, "../inventory-agent")
 		cmd.Env = append(cmd.Environ(), "CGO_ENABLED=0")
 		if b, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("build %s: %v\n%s", name, err, b)
@@ -45,24 +47,24 @@ func TestReleaseCheck(t *testing.T) {
 		b, err := exec.Command("bash", "../../scripts/check-release-binary.sh", "-keys", keys, "-version", version, bin).CombinedOutput()
 		return err == nil, string(b)
 	}
-	if ok, out := check(build("release", "4.5.0", release), release, "4.5.0"); !ok {
+	if ok, out := check(build("release", "9.8.7", release), release, "9.8.7"); !ok {
 		t.Fatalf("release build refused: %s", out)
 	}
 	for name, c := range map[string][2]string{
-		"devkey":   {"4.5.0", "dev-local:" + key},
-		"rotation": {"4.5.0", release + ",dev-local:" + key},
-		"nokey":    {"4.5.0", ""},
-		"describe": {"4.4.0~3-gabc123", release},
+		"devkey":   {"9.8.7", "dev-local:" + key},
+		"rotation": {"9.8.7", release + ",dev-local:" + key},
+		"nokey":    {"9.8.7", ""},
+		"describe": {"9.8.6~3-gabc123", release},
 	} {
-		if ok, out := check(build(name, c[0], c[1]), release, "4.5.0"); ok || !strings.Contains(out, "release-check") {
+		if ok, out := check(build(name, c[0], c[1]), release, "9.8.7"); ok || !strings.Contains(out, "release-check") {
 			t.Errorf("%s build accepted: %s", name, out)
 		}
 	}
 	// A dev keyring or a non-release version as the expectation is refused too.
-	if ok, _ := check(build("release2", "4.5.0", release), "dev-local:"+key, "4.5.0"); ok {
+	if ok, _ := check(build("release2", "9.8.7", release), "dev-local:"+key, "9.8.7"); ok {
 		t.Error("dev expectation accepted")
 	}
-	if ok, _ := check(build("release3", "4.5.0", release), release, "4.5.0~1-gabc"); ok {
+	if ok, _ := check(build("release3", "9.8.7", release), release, "9.8.7~1-gabc"); ok {
 		t.Error("describe expectation accepted")
 	}
 }
