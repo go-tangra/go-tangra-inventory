@@ -236,7 +236,7 @@ func Default() Config {
 		Gateway:     Gateway{Service: "gateway"},
 		Enroll:      Enroll{TokenTTLSeconds: 3600},
 		Limits:      Limits{MaxRequestBytes: 1 << 20, MaxSnapshotBytes: 8 << 20},
-		HostReports: HostReports{Consumers: []string{"ipam"}, MaxPageBytes: 3 << 20},
+		HostReports: HostReports{Consumers: []string{"ipam", "asset"}, MaxPageBytes: 3 << 20},
 		AgentReleases: AgentReleases{BundleDir: "/app/agent-releases", KeepVersions: 5, MaxConcurrentDownloads: 20,
 			ChunkBytes: 1 << 20, RequestTTLHours: 168, ProgressTimeoutMinutes: 15},
 	}

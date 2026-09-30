@@ -10,7 +10,7 @@ import (
 
 func TestHostReportsConfig(t *testing.T) {
 	d := Default()
-	if len(d.HostReports.Consumers) != 1 || d.HostReports.Consumers[0] != "ipam" || d.HostReports.MaxPageBytes != 3<<20 {
+	if len(d.HostReports.Consumers) != 2 || !d.HostReports.IsConsumer("ipam") || !d.HostReports.IsConsumer("asset") || d.HostReports.MaxPageBytes != 3<<20 {
 		t.Fatalf("host_reports defaults = %+v", d.HostReports)
 	}
 	if !d.HostReports.IsConsumer("ipam") || d.HostReports.IsConsumer("gateway") || d.HostReports.IsConsumer("") {
