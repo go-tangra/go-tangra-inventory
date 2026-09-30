@@ -13,9 +13,13 @@ rules:
     operations: ["*"]
     effect: allow
   - id: asset-sync
+    # asset imports hosts as assets; host reports carry the virtualization
+    # role its inventory-sync filter uses (asset feature 030).
     from: ["spiffe://example.org/svc/asset"]
     to: ["inventory"]
-    operations: ["/inventory.v1.InventoryHostService/ListHosts", "/inventory.v1.InventoryHostService/GetHost", "/grpc.health.v1.Health/Check"]
+    operations: ["/inventory.v1.InventoryHostService/ListHosts", "/inventory.v1.InventoryHostService/GetHost",
+                 "/inventory.v1.HostReportService/ListHostReports", "/inventory.v1.HostReportService/GetHostReport",
+                 "/grpc.health.v1.Health/Check"]
     effect: allow
   - id: ipam-hostsync
     # ipam pulls host reports (projection of the latest snapshot) to keep

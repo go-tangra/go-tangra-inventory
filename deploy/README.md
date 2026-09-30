@@ -289,7 +289,7 @@ in-memory), `retention` (`days`), `stale` (`after_seconds`), `jobs`, `events`,
 (`max_request_bytes`, `max_snapshot_bytes`), `agent_releases` (agent
 self-upgrade, see [above](#agent-self-upgrade)), and `host_reports`
 (`consumers` — mesh service names allowed to call HostReportService, default
-`[ipam]`; `max_page_bytes` — bound of one ListHostReports page, default 3 MiB). Framework `server`/`admin`/
+`[ipam, asset]` (asset reads the virtualization role for its inventory-sync filter); `max_page_bytes` — bound of one ListHostReports page, default 3 MiB). Framework `server`/`admin`/
 `discovery` sections supply the mesh gRPC/HTTP and admin listeners.
 
 ## Ingest TLS
@@ -358,7 +358,7 @@ last changed:
 - `GetHostReport(tenant, host)`.
 
 A caller needs both the inbound policy rule and its service name in
-`host_reports.consumers`. `deploy/policy.yaml` carries the rule for IPAM:
+`host_reports.consumers`. `deploy/policy.yaml` carries the rules for IPAM and asset (`asset-sync`); IPAM:
 
 ```yaml
   - id: ipam-hostsync
