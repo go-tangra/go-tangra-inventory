@@ -12,6 +12,10 @@
 //     SPIFFE mTLS channel, acting for the tenant named in each request
 //     (tenant_id). The actor identity comes from the verified SPIFFE peer.
 //
+//   * CertificateDeliveryService (feature 033), the deployer's mesh entry point
+//     for relaying lcm certificates to inventory agents: references only, it
+//     never carries certificate or key material.
+//
 //   * The off-mesh ingest edge (IngestService), served on a dedicated listener
 //     network-isolated from the mesh, where endpoint agents authenticate with a
 //     per-agent sealed credential presented in call metadata.
@@ -20,6 +24,8 @@
 // enrollment-token secret, with the single deliberate exception of
 // EnrollResponse.agent_credential (issued exactly once at enrollment) and
 // MintEnrollmentTokenResponse.token (the mint secret, returned exactly once).
+// CertificateBundle (FetchCertificate, feature 033) is the only message that
+// carries a private key; it is never logged, stored, cached or published.
 // Snapshot and host messages exclude sealed fields and are safe to log.
 
 package inventoryv1
@@ -1161,6 +1167,8 @@ const (
 	IngestService_CheckAgentUpdate_FullMethodName     = "/inventory.v1.IngestService/CheckAgentUpdate"
 	IngestService_DownloadAgentRelease_FullMethodName = "/inventory.v1.IngestService/DownloadAgentRelease"
 	IngestService_ReportUpgrade_FullMethodName        = "/inventory.v1.IngestService/ReportUpgrade"
+	IngestService_FetchCertificate_FullMethodName     = "/inventory.v1.IngestService/FetchCertificate"
+	IngestService_ReportCertificate_FullMethodName    = "/inventory.v1.IngestService/ReportCertificate"
 )
 
 // IngestServiceClient is the client API for IngestService service.
@@ -1179,6 +1187,10 @@ type IngestServiceClient interface {
 	CheckAgentUpdate(ctx context.Context, in *CheckAgentUpdateRequest, opts ...grpc.CallOption) (*CheckAgentUpdateResponse, error)
 	DownloadAgentRelease(ctx context.Context, in *DownloadAgentReleaseRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[DownloadAgentReleaseResponse], error)
 	ReportUpgrade(ctx context.Context, in *ReportUpgradeRequest, opts ...grpc.CallOption) (*ReportUpgradeResponse, error)
+	// Certificate delivery (feature 033), authenticated like every method
+	// except Enroll; bound to the verified agent's own delivery items.
+	FetchCertificate(ctx context.Context, in *FetchCertificateRequest, opts ...grpc.CallOption) (*CertificateBundle, error)
+	ReportCertificate(ctx context.Context, in *ReportCertificateRequest, opts ...grpc.CallOption) (*ReportCertificateResponse, error)
 }
 
 type ingestServiceClient struct {
@@ -1267,6 +1279,26 @@ func (c *ingestServiceClient) ReportUpgrade(ctx context.Context, in *ReportUpgra
 	return out, nil
 }
 
+func (c *ingestServiceClient) FetchCertificate(ctx context.Context, in *FetchCertificateRequest, opts ...grpc.CallOption) (*CertificateBundle, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CertificateBundle)
+	err := c.cc.Invoke(ctx, IngestService_FetchCertificate_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *ingestServiceClient) ReportCertificate(ctx context.Context, in *ReportCertificateRequest, opts ...grpc.CallOption) (*ReportCertificateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReportCertificateResponse)
+	err := c.cc.Invoke(ctx, IngestService_ReportCertificate_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // IngestServiceServer is the server API for IngestService service.
 // All implementations must embed UnimplementedIngestServiceServer
 // for forward compatibility.
@@ -1283,6 +1315,10 @@ type IngestServiceServer interface {
 	CheckAgentUpdate(context.Context, *CheckAgentUpdateRequest) (*CheckAgentUpdateResponse, error)
 	DownloadAgentRelease(*DownloadAgentReleaseRequest, grpc.ServerStreamingServer[DownloadAgentReleaseResponse]) error
 	ReportUpgrade(context.Context, *ReportUpgradeRequest) (*ReportUpgradeResponse, error)
+	// Certificate delivery (feature 033), authenticated like every method
+	// except Enroll; bound to the verified agent's own delivery items.
+	FetchCertificate(context.Context, *FetchCertificateRequest) (*CertificateBundle, error)
+	ReportCertificate(context.Context, *ReportCertificateRequest) (*ReportCertificateResponse, error)
 	mustEmbedUnimplementedIngestServiceServer()
 }
 
@@ -1310,6 +1346,12 @@ func (UnimplementedIngestServiceServer) DownloadAgentRelease(*DownloadAgentRelea
 }
 func (UnimplementedIngestServiceServer) ReportUpgrade(context.Context, *ReportUpgradeRequest) (*ReportUpgradeResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ReportUpgrade not implemented")
+}
+func (UnimplementedIngestServiceServer) FetchCertificate(context.Context, *FetchCertificateRequest) (*CertificateBundle, error) {
+	return nil, status.Error(codes.Unimplemented, "method FetchCertificate not implemented")
+}
+func (UnimplementedIngestServiceServer) ReportCertificate(context.Context, *ReportCertificateRequest) (*ReportCertificateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReportCertificate not implemented")
 }
 func (UnimplementedIngestServiceServer) mustEmbedUnimplementedIngestServiceServer() {}
 func (UnimplementedIngestServiceServer) testEmbeddedByValue()                       {}
@@ -1426,6 +1468,42 @@ func _IngestService_ReportUpgrade_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _IngestService_FetchCertificate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FetchCertificateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IngestServiceServer).FetchCertificate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IngestService_FetchCertificate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IngestServiceServer).FetchCertificate(ctx, req.(*FetchCertificateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IngestService_ReportCertificate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReportCertificateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IngestServiceServer).ReportCertificate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IngestService_ReportCertificate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IngestServiceServer).ReportCertificate(ctx, req.(*ReportCertificateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // IngestService_ServiceDesc is the grpc.ServiceDesc for IngestService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1449,6 +1527,14 @@ var IngestService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "ReportUpgrade",
 			Handler:    _IngestService_ReportUpgrade_Handler,
 		},
+		{
+			MethodName: "FetchCertificate",
+			Handler:    _IngestService_FetchCertificate_Handler,
+		},
+		{
+			MethodName: "ReportCertificate",
+			Handler:    _IngestService_ReportCertificate_Handler,
+		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
@@ -1462,5 +1548,272 @@ var IngestService_ServiceDesc = grpc.ServiceDesc{
 			ServerStreams: true,
 		},
 	},
+	Metadata: "inventory/v1/inventory.proto",
+}
+
+const (
+	CertificateDeliveryService_CreateCertificateDelivery_FullMethodName = "/inventory.v1.CertificateDeliveryService/CreateCertificateDelivery"
+	CertificateDeliveryService_GetCertificateDelivery_FullMethodName    = "/inventory.v1.CertificateDeliveryService/GetCertificateDelivery"
+	CertificateDeliveryService_PreviewCertificateTargets_FullMethodName = "/inventory.v1.CertificateDeliveryService/PreviewCertificateTargets"
+	CertificateDeliveryService_VerifyHostCertificates_FullMethodName    = "/inventory.v1.CertificateDeliveryService/VerifyHostCertificates"
+	CertificateDeliveryService_MarkCertificateRevoked_FullMethodName    = "/inventory.v1.CertificateDeliveryService/MarkCertificateRevoked"
+)
+
+// CertificateDeliveryServiceClient is the client API for CertificateDeliveryService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// CertificateDeliveryService relays lcm certificates to inventory agents
+// (feature 033). Callers pass references only; no message of this service
+// ever carries certificate or key material. Authorized by the inbound mesh
+// policy and, in the handler, by cert_delivery.sources; every method returns
+// FailedPrecondition while cert_delivery.enabled is false.
+type CertificateDeliveryServiceClient interface {
+	CreateCertificateDelivery(ctx context.Context, in *CreateCertificateDeliveryRequest, opts ...grpc.CallOption) (*CertificateDelivery, error)
+	GetCertificateDelivery(ctx context.Context, in *GetCertificateDeliveryRequest, opts ...grpc.CallOption) (*CertificateDelivery, error)
+	PreviewCertificateTargets(ctx context.Context, in *PreviewCertificateTargetsRequest, opts ...grpc.CallOption) (*PreviewCertificateTargetsResponse, error)
+	VerifyHostCertificates(ctx context.Context, in *VerifyHostCertificatesRequest, opts ...grpc.CallOption) (*VerifyHostCertificatesResponse, error)
+	MarkCertificateRevoked(ctx context.Context, in *MarkCertificateRevokedRequest, opts ...grpc.CallOption) (*MarkCertificateRevokedResponse, error)
+}
+
+type certificateDeliveryServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewCertificateDeliveryServiceClient(cc grpc.ClientConnInterface) CertificateDeliveryServiceClient {
+	return &certificateDeliveryServiceClient{cc}
+}
+
+func (c *certificateDeliveryServiceClient) CreateCertificateDelivery(ctx context.Context, in *CreateCertificateDeliveryRequest, opts ...grpc.CallOption) (*CertificateDelivery, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CertificateDelivery)
+	err := c.cc.Invoke(ctx, CertificateDeliveryService_CreateCertificateDelivery_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *certificateDeliveryServiceClient) GetCertificateDelivery(ctx context.Context, in *GetCertificateDeliveryRequest, opts ...grpc.CallOption) (*CertificateDelivery, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CertificateDelivery)
+	err := c.cc.Invoke(ctx, CertificateDeliveryService_GetCertificateDelivery_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *certificateDeliveryServiceClient) PreviewCertificateTargets(ctx context.Context, in *PreviewCertificateTargetsRequest, opts ...grpc.CallOption) (*PreviewCertificateTargetsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PreviewCertificateTargetsResponse)
+	err := c.cc.Invoke(ctx, CertificateDeliveryService_PreviewCertificateTargets_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *certificateDeliveryServiceClient) VerifyHostCertificates(ctx context.Context, in *VerifyHostCertificatesRequest, opts ...grpc.CallOption) (*VerifyHostCertificatesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(VerifyHostCertificatesResponse)
+	err := c.cc.Invoke(ctx, CertificateDeliveryService_VerifyHostCertificates_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *certificateDeliveryServiceClient) MarkCertificateRevoked(ctx context.Context, in *MarkCertificateRevokedRequest, opts ...grpc.CallOption) (*MarkCertificateRevokedResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MarkCertificateRevokedResponse)
+	err := c.cc.Invoke(ctx, CertificateDeliveryService_MarkCertificateRevoked_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// CertificateDeliveryServiceServer is the server API for CertificateDeliveryService service.
+// All implementations must embed UnimplementedCertificateDeliveryServiceServer
+// for forward compatibility.
+//
+// CertificateDeliveryService relays lcm certificates to inventory agents
+// (feature 033). Callers pass references only; no message of this service
+// ever carries certificate or key material. Authorized by the inbound mesh
+// policy and, in the handler, by cert_delivery.sources; every method returns
+// FailedPrecondition while cert_delivery.enabled is false.
+type CertificateDeliveryServiceServer interface {
+	CreateCertificateDelivery(context.Context, *CreateCertificateDeliveryRequest) (*CertificateDelivery, error)
+	GetCertificateDelivery(context.Context, *GetCertificateDeliveryRequest) (*CertificateDelivery, error)
+	PreviewCertificateTargets(context.Context, *PreviewCertificateTargetsRequest) (*PreviewCertificateTargetsResponse, error)
+	VerifyHostCertificates(context.Context, *VerifyHostCertificatesRequest) (*VerifyHostCertificatesResponse, error)
+	MarkCertificateRevoked(context.Context, *MarkCertificateRevokedRequest) (*MarkCertificateRevokedResponse, error)
+	mustEmbedUnimplementedCertificateDeliveryServiceServer()
+}
+
+// UnimplementedCertificateDeliveryServiceServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedCertificateDeliveryServiceServer struct{}
+
+func (UnimplementedCertificateDeliveryServiceServer) CreateCertificateDelivery(context.Context, *CreateCertificateDeliveryRequest) (*CertificateDelivery, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateCertificateDelivery not implemented")
+}
+func (UnimplementedCertificateDeliveryServiceServer) GetCertificateDelivery(context.Context, *GetCertificateDeliveryRequest) (*CertificateDelivery, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetCertificateDelivery not implemented")
+}
+func (UnimplementedCertificateDeliveryServiceServer) PreviewCertificateTargets(context.Context, *PreviewCertificateTargetsRequest) (*PreviewCertificateTargetsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method PreviewCertificateTargets not implemented")
+}
+func (UnimplementedCertificateDeliveryServiceServer) VerifyHostCertificates(context.Context, *VerifyHostCertificatesRequest) (*VerifyHostCertificatesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method VerifyHostCertificates not implemented")
+}
+func (UnimplementedCertificateDeliveryServiceServer) MarkCertificateRevoked(context.Context, *MarkCertificateRevokedRequest) (*MarkCertificateRevokedResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method MarkCertificateRevoked not implemented")
+}
+func (UnimplementedCertificateDeliveryServiceServer) mustEmbedUnimplementedCertificateDeliveryServiceServer() {
+}
+func (UnimplementedCertificateDeliveryServiceServer) testEmbeddedByValue() {}
+
+// UnsafeCertificateDeliveryServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to CertificateDeliveryServiceServer will
+// result in compilation errors.
+type UnsafeCertificateDeliveryServiceServer interface {
+	mustEmbedUnimplementedCertificateDeliveryServiceServer()
+}
+
+func RegisterCertificateDeliveryServiceServer(s grpc.ServiceRegistrar, srv CertificateDeliveryServiceServer) {
+	// If the following call panics, it indicates UnimplementedCertificateDeliveryServiceServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&CertificateDeliveryService_ServiceDesc, srv)
+}
+
+func _CertificateDeliveryService_CreateCertificateDelivery_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateCertificateDeliveryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CertificateDeliveryServiceServer).CreateCertificateDelivery(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CertificateDeliveryService_CreateCertificateDelivery_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CertificateDeliveryServiceServer).CreateCertificateDelivery(ctx, req.(*CreateCertificateDeliveryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CertificateDeliveryService_GetCertificateDelivery_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetCertificateDeliveryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CertificateDeliveryServiceServer).GetCertificateDelivery(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CertificateDeliveryService_GetCertificateDelivery_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CertificateDeliveryServiceServer).GetCertificateDelivery(ctx, req.(*GetCertificateDeliveryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CertificateDeliveryService_PreviewCertificateTargets_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PreviewCertificateTargetsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CertificateDeliveryServiceServer).PreviewCertificateTargets(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CertificateDeliveryService_PreviewCertificateTargets_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CertificateDeliveryServiceServer).PreviewCertificateTargets(ctx, req.(*PreviewCertificateTargetsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CertificateDeliveryService_VerifyHostCertificates_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(VerifyHostCertificatesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CertificateDeliveryServiceServer).VerifyHostCertificates(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CertificateDeliveryService_VerifyHostCertificates_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CertificateDeliveryServiceServer).VerifyHostCertificates(ctx, req.(*VerifyHostCertificatesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CertificateDeliveryService_MarkCertificateRevoked_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MarkCertificateRevokedRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CertificateDeliveryServiceServer).MarkCertificateRevoked(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CertificateDeliveryService_MarkCertificateRevoked_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CertificateDeliveryServiceServer).MarkCertificateRevoked(ctx, req.(*MarkCertificateRevokedRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// CertificateDeliveryService_ServiceDesc is the grpc.ServiceDesc for CertificateDeliveryService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var CertificateDeliveryService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "inventory.v1.CertificateDeliveryService",
+	HandlerType: (*CertificateDeliveryServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "CreateCertificateDelivery",
+			Handler:    _CertificateDeliveryService_CreateCertificateDelivery_Handler,
+		},
+		{
+			MethodName: "GetCertificateDelivery",
+			Handler:    _CertificateDeliveryService_GetCertificateDelivery_Handler,
+		},
+		{
+			MethodName: "PreviewCertificateTargets",
+			Handler:    _CertificateDeliveryService_PreviewCertificateTargets_Handler,
+		},
+		{
+			MethodName: "VerifyHostCertificates",
+			Handler:    _CertificateDeliveryService_VerifyHostCertificates_Handler,
+		},
+		{
+			MethodName: "MarkCertificateRevoked",
+			Handler:    _CertificateDeliveryService_MarkCertificateRevoked_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
 	Metadata: "inventory/v1/inventory.proto",
 }
