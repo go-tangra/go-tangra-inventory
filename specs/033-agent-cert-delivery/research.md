@@ -543,15 +543,13 @@ delivery id and counts; new `certificate_revocation_forwarded`.
 | **E**levation of privilege | Hook replaced by an unprivileged user | Root ownership and permission checks of the file and its directory before each run. |
 | **E** | Deployer user gains host access | Deployer users can place a certificate into the dedicated directory only; executing anything requires a locally configured hook. |
 
-## Open questions (for the user)
+## Resolved questions (user, 2026-10-02)
 
-- **Q1** Agent default `certificates.enabled`: chosen **true** (opt-out per
-  host) for v3 parity. Alternative: opt-in per host. Confirm.
-- **Q2** Job outcome with queued (offline) hosts: chosen "queued does not
-  fail the job, even with require_all_success". Alternative: with
-  require_all_success, queued hosts fail the job (and retries re-arm).
-- **Q3** Windows agents deferred (D15). Confirm.
-- **Q4** Directory-symlink layout (`live/<name>` → `archive/<name>/<gen>`)
-  instead of v3's plain directory with files. Consumers see identical
-  paths; tools that `stat` `live/<name>` as a directory still work; tools
-  that expect `live/<name>` *not* to be a symlink would not. Confirm.
+- **Q1** Agent default `certificates.enabled`: **true** — every Linux agent
+  accepts deliveries once the server switch is on; a host opts out locally.
+- **Q2** Queued (offline) hosts **do not** fail a job, even with
+  `require_all_success`; only real failures (hook failed, key mismatch,
+  unsupported agent) do.
+- **Q3** **Linux first**; Windows agents report `unsupported` (D15).
+- **Q4** Directory-symlink layout (`live/<name>` → `archive/<name>/<gen>`,
+  atomic switch) **accepted**.
