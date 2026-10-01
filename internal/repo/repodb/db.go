@@ -248,7 +248,8 @@ func hostWhere(tenantID string, f store.HostFilter) (string, []any) {
 		fmt.Fprintf(&b, cond, len(args))
 	}
 	if f.Hostname != "" {
-		add(" AND hostname ILIKE $%d", "%"+f.Hostname+"%")
+		// A literal substring: %, _ and \ in the filter match themselves.
+		add(" AND hostname ILIKE $%d", "%"+escapeLike(f.Hostname)+"%")
 	}
 	if f.OSName != "" {
 		add(" AND os_name = $%d", f.OSName)
@@ -274,6 +275,12 @@ func hostWhere(tenantID string, f store.HostFilter) (string, []any) {
 	}
 	return b.String(), args
 }
+
+// likeEscaper escapes the LIKE metacharacters for the default escape
+// character (backslash).
+var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+
+func escapeLike(s string) string { return likeEscaper.Replace(s) }
 
 // ListHosts is the id-DESC keyset listing (gRPC ListHosts, backup, internal
 // callers): hosts with an id below f.CursorID, at most f.Limit (<= 0: all).

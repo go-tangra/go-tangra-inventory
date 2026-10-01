@@ -3,6 +3,7 @@ package grpcapi
 import (
 	"context"
 	"time"
+	"unicode/utf8"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -33,6 +34,9 @@ func (s *HostServer) ListHosts(ctx context.Context, req *invv1.ListHostsRequest)
 		Hostname: req.GetHostname(), OSName: req.GetOsName(), Manufacturer: req.GetManufacturer(),
 		Status: hostStatusFromPB(req.GetStatus()), Tag: req.GetTag(),
 		Limit: int(req.GetLimit()), CursorID: req.GetCursorId(),
+	}
+	if utf8.RuneCountInString(f.Hostname) > store.MaxSearchLen {
+		return nil, status.Error(codes.InvalidArgument, "hostname filter too long")
 	}
 	if v := req.GetLastSeenFrom(); v > 0 {
 		t := time.Unix(v, 0).UTC()

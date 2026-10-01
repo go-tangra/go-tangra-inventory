@@ -779,7 +779,7 @@ type AuditRow struct {
 
 // HostFilter constrains ListHosts. Empty fields match all.
 type HostFilter struct {
-	Hostname     string
+	Hostname     string // case-insensitive substring, at most MaxSearchLen characters
 	OSName       string
 	Manufacturer string
 	Status       string
@@ -789,6 +789,10 @@ type HostFilter struct {
 	Limit        int
 	CursorID     string
 }
+
+// MaxSearchLen caps the free-text hostname filter (in characters): a longer
+// value is rejected as invalid instead of being scanned against every row.
+const MaxSearchLen = 200
 
 // ReportCursor is the keyset position (report_changed_at, host id) of the
 // last host row returned by a host report listing. A zero ChangedAt stands

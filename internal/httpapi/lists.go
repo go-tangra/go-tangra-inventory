@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-tangra/go-tangra/v4/listquery"
 
@@ -41,6 +42,9 @@ func hostFilter(q url.Values) (store.HostFilter, string) {
 		Manufacturer: q.Get("manufacturer"),
 		Status:       q.Get("status"),
 		Tag:          q.Get("tag"),
+	}
+	if utf8.RuneCountInString(f.Hostname) > store.MaxSearchLen {
+		return f, "hostname"
 	}
 	for _, p := range []struct {
 		name string
