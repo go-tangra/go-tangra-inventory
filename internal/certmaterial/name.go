@@ -46,18 +46,20 @@ func DefaultName(cn string) (string, bool) {
 	if strings.HasPrefix(s, "*.") {
 		s = "wildcard." + s[2:]
 	}
-	var b strings.Builder
-	for _, r := range s {
-		c := byte('_')
-		if r < utf8.RuneSelf && isNameByte(byte(r)) {
-			c = byte(r)
+	s = strings.Map(func(r rune) rune {
+		if isNameRune(r) {
+			return r
 		}
-		if c == '.' && strings.HasSuffix(b.String(), ".") {
+		return '_'
+	}, s)
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == '.' && i > 0 && s[i-1] == '.' {
 			continue
 		}
-		b.WriteByte(c)
+		b.WriteByte(s[i])
 	}
-	out := strings.TrimLeftFunc(b.String(), func(r rune) bool { return !isAlnum(byte(r)) })
+	out := strings.TrimLeftFunc(b.String(), func(r rune) bool { return !isAlnumRune(r) })
 	if len(out) > MaxNameLen {
 		out = out[:MaxNameLen]
 	}
@@ -65,6 +67,14 @@ func DefaultName(cn string) (string, bool) {
 		return "", false
 	}
 	return out, true
+}
+
+func isAlnumRune(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
+}
+
+func isNameRune(r rune) bool {
+	return isAlnumRune(r) || r == '.' || r == '_' || r == '-'
 }
 
 // ValidTag reports whether s is a host tag selector: "key" or "key=value",
