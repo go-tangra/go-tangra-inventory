@@ -60,8 +60,23 @@ func hostFilter(q url.Values) (store.HostFilter, string) {
 	return f, ""
 }
 
-// legacyLimit is the page size a legacy limit stands for on the paged
-// variants (absent or invalid: the list default; at most listquery.MaxPageSize).
+// legacyDefaultLimit is the page size of a legacy request without a usable
+// limit (cursor only, or limit absent, invalid or < 1).
+const legacyDefaultLimit = 50
+
+// legacyLimit is the page size a legacy cursor/limit request stands for:
+// always 1..listquery.MaxPageSize, legacyDefaultLimit when the limit is
+// absent, invalid or < 1. A legacy request never reads an unbounded list.
 func legacyLimit(q url.Values) int {
-	return min(atoiDefault(q.Get("limit"), 0), listquery.MaxPageSize)
+	return clampLimit(q.Get("limit"), legacyDefaultLimit)
+}
+
+// clampLimit parses a limit query value into 1..listquery.MaxPageSize; an
+// absent, invalid or non-positive value stands for def.
+func clampLimit(v string, def int) int {
+	n := atoiDefault(v, def)
+	if n < 1 {
+		n = def
+	}
+	return min(n, listquery.MaxPageSize)
 }
