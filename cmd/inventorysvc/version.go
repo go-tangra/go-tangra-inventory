@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"os"
+
+	"github.com/go-tangra/go-tangra-portal/sdk/v4/pkg/gatewayclient"
 )
 
 // version is stamped at build time (-ldflags "-X main.version=..."); "dev" for
@@ -15,3 +17,6 @@ func init() {
 		os.Exit(0)
 	}
 }
+
+// Report the release to the gateway at registration.
+func init() { gatewayclient.SetBuildVersion(version) }
