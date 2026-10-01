@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 
@@ -37,7 +38,7 @@ func (s *Server) Register(d Deps) {
 		if listquery.Legacy(q) {
 			// Legacy cursor/limit (kept one release): the id-DESC keyset page
 			// in its previous shape, plus the total.
-			f.Limit, f.CursorID = atoiDefault(q.Get("limit"), 0), q.Get("cursor")
+			f.Limit, f.CursorID = legacyLimit(q), q.Get("cursor")
 			items, err := d.Hosts.List(r.Context(), subj, f)
 			if err != nil {
 				failSvc(w, err)
@@ -143,7 +144,7 @@ func (s *Server) Register(d Deps) {
 		hostID := r.PathValue("id")
 		if listquery.Legacy(q) {
 			// Legacy cursor/limit (kept one release), plus the total.
-			items, err := d.Snapshots.ListForHost(r.Context(), subj, hostID, atoiDefault(q.Get("limit"), 0), q.Get("cursor"))
+			items, err := d.Snapshots.ListForHost(r.Context(), subj, hostID, legacyLimit(q), q.Get("cursor"))
 			if err != nil {
 				failSvc(w, err)
 				return
@@ -443,7 +444,20 @@ func (s *Server) listConnected(d Deps) func(http.ResponseWriter, *http.Request) 
 			agents = []registry.ConnectedAgent{}
 		}
 		if listquery.Legacy(q) {
-			WriteJSON(w, http.StatusOK, map[string]any{"items": agents, "total": len(agents)})
+			// Legacy cursor/limit: agent-id ordered, after the cursor, at
+			// most legacyLimit entries, plus the total.
+			total := len(agents)
+			sort.Slice(agents, func(i, j int) bool { return agents[i].AgentID < agents[j].AgentID })
+			cursor, out := q.Get("cursor"), []registry.ConnectedAgent{}
+			for _, a := range agents {
+				if cursor != "" && a.AgentID <= cursor {
+					continue
+				}
+				if out = append(out, a); len(out) == legacyLimit(q) {
+					break
+				}
+			}
+			WriteJSON(w, http.StatusOK, map[string]any{"items": out, "total": total})
 			return
 		}
 		// Live connections carry no hostname or upgrade state: those sorts

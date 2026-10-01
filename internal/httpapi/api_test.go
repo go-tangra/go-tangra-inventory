@@ -45,6 +45,7 @@ func (f fakeVerifier) Verify(_ context.Context, token string) (authclient.Identi
 type apiFixture struct {
 	s   *Server
 	mem *memstore.Mem
+	reg *registry.Memory
 }
 
 func newAPI(t *testing.T) *apiFixture {
@@ -66,11 +67,12 @@ func newAPI(t *testing.T) *apiFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
+	reg := registry.NewMemory()
 	s.Register(Deps{
 		Hosts: hostsSvc, Snapshots: snapsSvc, Stats: stats.New(mem),
-		Backup: backup.New(mem), Enroll: enroll.New(mem, env), Registry: registry.NewMemory(),
+		Backup: backup.New(mem), Enroll: enroll.New(mem, env), Registry: reg,
 	})
-	return &apiFixture{s: s, mem: mem}
+	return &apiFixture{s: s, mem: mem, reg: reg}
 }
 
 // req drives one JSON request as the caller (empty tok => no Authorization).

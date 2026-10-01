@@ -97,7 +97,7 @@ func (s *Server) registerUpgrades(d Deps, p string) {
 			return
 		}
 		q := r.URL.Query()
-		limit := atoiDefault(q.Get("limit"), 100)
+		limit := clampLimit(q.Get("limit"), 100)
 		items, err := u.List(r.Context(), tenant, repo.UpgradeFilter{State: q.Get("state"), AgentID: q.Get("agent_id"), CursorID: q.Get("cursor"), Limit: limit + 1})
 		if err != nil {
 			failUpgrade(w, err)
@@ -261,7 +261,7 @@ func (s *Server) listFleet(u *upgrades.Service) func(http.ResponseWriter, *http.
 				failUpgrade(w, err)
 				return
 			}
-			f.Cursor, f.Limit = q.Get("cursor"), atoiDefault(q.Get("limit"), 0)
+			f.Cursor, f.Limit = q.Get("cursor"), legacyLimit(q)
 			items, current, err := u.Fleet(r.Context(), tenant, f)
 			if err != nil {
 				failUpgrade(w, err)
