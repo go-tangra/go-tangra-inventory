@@ -21,12 +21,12 @@ save-time validation.
   "test_connection": false,
   "schema_version": 1,
   "config_fields": [
-    {"key": "host_ids", "label": "Hosts", "type": "host_selector", "group": "connection", "max_items": 1000, "help": "Inventory hosts that receive the certificate"},
-    {"key": "host_tags", "label": "Host tags", "type": "string_list", "group": "connection", "max_items": 16, "pattern": "^[A-Za-z0-9_.:/-]{1,63}(=[^\\u0000-\\u001f]{0,255})?$", "placeholder": "role=web", "help": "key or key=value; a host must match all"},
-    {"key": "cert_name", "label": "Certificate name", "type": "string", "group": "options", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$", "placeholder": "www", "help": "Directory name under live/ on the host; default from the common name"},
-    {"key": "key_policy", "label": "Private key", "type": "enum", "group": "options", "options": [{"value": "require", "label": "Required"}, {"value": "certificate_only", "label": "Certificate only (keep the host's key)"}], "default": "require"},
-    {"key": "require_all_success", "label": "Require all hosts", "type": "bool", "group": "options", "default": false},
-    {"key": "wait_seconds", "label": "Wait for hosts (s)", "type": "int", "group": "options", "min": 0, "max": 240, "default": 60}
+    {"key": "host_ids", "overridable": true, "label": "Hosts", "type": "host_selector", "group": "connection", "max_items": 1000, "help": "Inventory hosts that receive the certificate"},
+    {"key": "host_tags", "overridable": true, "label": "Host tags", "type": "string_list", "group": "connection", "max_items": 16, "pattern": "^[A-Za-z0-9_.:/-]{1,63}(=[^\\u0000-\\u001f]{0,255})?$", "placeholder": "role=web", "help": "key or key=value; a host must match all"},
+    {"key": "cert_name", "overridable": true, "label": "Certificate name", "type": "string", "group": "options", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$", "placeholder": "www", "help": "Directory name under live/ on the host; default from the common name"},
+    {"key": "key_policy", "overridable": true, "label": "Private key", "type": "enum", "group": "options", "options": [{"value": "require", "label": "Required"}, {"value": "certificate_only", "label": "Certificate only (keep the host's key)"}], "default": "require"},
+    {"key": "require_all_success", "overridable": true, "label": "Require all hosts", "type": "bool", "group": "options", "default": false},
+    {"key": "wait_seconds", "overridable": true, "label": "Wait for hosts (s)", "type": "int", "group": "options", "min": 0, "max": 240, "default": 60}
   ],
   "credential_fields": [],
   "one_of_required": [["host_ids", "host_tags"]]
@@ -38,6 +38,14 @@ The "at least one of `host_ids`/`host_tags`" rule is expressed by
 `ValidateConfig` adds the rules a descriptor cannot express (UUID format of
 `host_ids`, `cert_name` without `..`). The UI labels the validate action
 "Preview hosts".
+
+Every field is `overridable` (research D25, open question Q8): a shared
+configuration may leave the host selection empty — both members of the
+`one_of_required` group are then target-supplied, and each target that
+attaches it must supply `host_ids` and/or `host_tags` in its override
+(422 `config_overrides.host_ids` / `config_overrides.host_tags`
+`one_of_required:host_ids,host_tags` otherwise). `ValidateConfig` runs on
+the merged config at attach time as well.
 
 ## 2. Config JSON schema (`TargetConfiguration.config`, target overrides)
 
@@ -116,8 +124,12 @@ error)`); other providers return `{"valid": true}` as today.
 - `configs.Create/Update`: the generic descriptor validator
   `provider.ValidateInput` (US5, deployer-config-ui.md §3) runs for every
   provider, then `if v, ok := p.(provider.ConfigValidator); ok
-  { v.ValidateConfig(in.Config) }`; targets: validate the merged effective
-  config for every configuration override (all providers, US5).
+  { v.ValidateConfig(in.Config) }` (on the values present; target-supplied
+  fields may be empty, D25); targets: `provider.ValidateOverride` +
+  `ValidateConfig` on the merged effective config for every attached
+  configuration (all providers, US5, deployer-config-ui.md §4a).
+- `provider.Result.Permanent` (US8): permanent provider failures are not
+  retried and their `details` are stored in the job result.
 - Events consumer: `certificate.revoked` → if the tenant has an active
   `inventory-agent` configuration, `MarkCertificateRevoked` (best effort,
   logged, audited `certificate_revocation_forwarded`).

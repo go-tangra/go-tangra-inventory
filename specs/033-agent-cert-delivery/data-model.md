@@ -296,7 +296,14 @@ certificates:
 ## 2. Deployer (`go-tangra-deployer-v4`)
 
 No migration. The provider configuration lives in the existing
-`TargetConfiguration.Config` JSON and per-target `ConfigOverrides`.
+`TargetConfiguration.Config` JSON and per-target `ConfigOverrides`
+(`map[configuration id]map[string]any`, stored **unsealed** in the target
+row). After this feature an override may hold only keys the provider
+declares `overridable` (never credentials or secrets, research D25); a
+configuration may leave required overridable fields empty
+("target-supplied") and every attached target's merged config must
+satisfy them. Existing rows are not rewritten; they are re-validated when
+edited and checked for required values at job start.
 
 ### 2.1 Provider config (validated by `ValidateConfig`)
 
@@ -309,7 +316,10 @@ No migration. The provider configuration lives in the existing
 | `require_all_success` | bool | `false` | |
 | `wait_seconds` | int | `60` | 0–240, clamped to job deadline − 10 s |
 
-At least one of `host_ids`/`host_tags` is required. Unknown keys rejected.
+At least one of `host_ids`/`host_tags` is required on the merged
+(configuration + target override) config; all six keys are overridable,
+so a configuration may leave the selection to its targets. Unknown keys
+rejected.
 
 ### 2.2 Provider package types (`internal/provider/provider.go`, additive)
 
@@ -332,6 +342,7 @@ type Field struct {
     MaxLength int           `json:"max_length,omitempty"`
     Pattern   string        `json:"pattern,omitempty"` // RE2, anchored
     MaxItems  int           `json:"max_items,omitempty"`
+    Overridable bool        `json:"overridable,omitempty"` // config fields only, never with Secret (D25)
 }
 type Capabilities struct {
     /* existing */
@@ -341,10 +352,14 @@ type Capabilities struct {
     SchemaVersion       int        `json:"schema_version"`
     OneOfRequired       [][]string `json:"one_of_required,omitempty"`
 }
-type FieldErrors map[string]string // "config.<key>"|"credentials.<key>" → code (never a value)
+type FieldErrors map[string]string // "config.<key>"|"credentials.<key>"|"config_overrides.<key>" → code (never a value)
+type Mode int // ModeConfiguration (target-supplied allowed) | ModeEffective (everything required)
 func CheckCapabilities(c Capabilities) error
-func ValidateInput(c Capabilities, config, creds map[string]any) FieldErrors
+func ValidateInput(c Capabilities, config, creds map[string]any, m Mode) (FieldErrors, []string /* target_supplied */)
+func ValidateOverride(c Capabilities, config, override map[string]any) FieldErrors
+func TargetSupplied(c Capabilities, config map[string]any) []string
 func MissingRequired(c Capabilities, effective map[string]any) []string // labels
+// Result gains (US8): Permanent bool — no retry, failure details stored in the job result
 type JobMeta struct { TenantID, JobID, ConfigurationID, TargetID, Trigger string }
 func WithJob(ctx context.Context, m JobMeta) context.Context
 func JobFrom(ctx context.Context) (JobMeta, bool)
@@ -353,7 +368,10 @@ type ConfigValidator interface { ValidateConfig(config map[string]any) error }
 
 Configuration view/input additions (US5, `internal/configs`):
 `View.CredentialsSet []string`, `View.CredentialsPublic map[string]any`
-(manage only), `Input.ClearCredentials []string`; credentials remain one
+(manage only), `View.TargetSupplied []string` (computed),
+`Input.ClearCredentials []string`; targets (`internal/targets`): attach
+validation per configuration, `View.MissingRequired map[configuration
+id][]string` (computed); credentials remain one
 sealed blob (`CredentialsSealed`, AD = configuration id), merged per field
 on update. No migration.
 

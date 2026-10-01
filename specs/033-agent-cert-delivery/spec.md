@@ -21,6 +21,23 @@ configuration drawer change: make it more user-friendly, add required
 fields per provider just like v3 does." → User Story 5, FR-023–FR-031,
 SR-011–SR-014, SC-007–SC-008.
 
+**Clarifications** (2026-10-02, user answers to research Q5–Q7):
+
+- Q5 — the v3 provider options BIG-IP `ssl_profile` (bind into an existing
+  client-SSL profile) and FortiGate `default_ssl_profile` (update the named
+  SSL/SSH inspection profile in place) are **included in 033** → User
+  Story 8, FR-037–FR-042, SR-016, SC-009.
+- Q6 — non-secret credential values are shown, on edit, to users who may
+  manage the configuration (US5 scenario 5, FR-028, SR-011) — **confirmed**.
+- Q7 — a required field **may be supplied only by a deployment target
+  override** (v3 backend behaviour) when the provider marks it
+  overridable → US5 scenarios 3, 10–12, FR-032–FR-036, SR-015, SC-007.
+- The credential-redirect settings (aws_acm `endpoint`, cloudflare
+  `api_base`, authentication headers in webhook custom headers) are fixed
+  by a separate deployer hotfix (`fix/provider-endpoint-exfil`); SR-014
+  stays a requirement of 033, which keeps regression tests through the
+  shared validator.
+
 **Binding user decisions** (2026-10-02):
 
 1. Delivery is configured as a **new deployer provider `inventory-agent`**:
@@ -269,7 +286,8 @@ entered.
    and focused and a message naming the rule; **and** the server
    independently refuses the same input with HTTP 422 naming the field
    (`config.<key>` / `credentials.<key>`), so a direct API call cannot
-   bypass the rule.
+   bypass the rule. The only exception is an empty required field that
+   the provider declares **overridable** (scenario 10).
 4. **Given** a secret field (password, token, secret key), **Then** it is
    masked with an optional reveal, never pre-filled, and never returned by
    any read; **when** editing a configuration whose secret is stored,
@@ -299,6 +317,35 @@ entered.
 9. **Given** a keyboard or screen-reader user, **Then** every field is
    reachable and labelled, required state, help text and errors are
    announced, and the sections are headed.
+10. **Given** a Cloudflare configuration whose API token is shared by
+    several zones, **When** the administrator leaves the required
+    **Zone ID** empty (the provider marks it overridable) and saves,
+    **Then** the save succeeds, the field shows "To be provided by each
+    target", a warning states that the configuration cannot be deployed
+    on its own and every target using it must supply Zone ID, and the
+    configuration list shows the badge "Needs target values: Zone ID";
+    deploying the configuration directly is disabled in the UI and refused
+    by the server before any endpoint is contacted. A required field that
+    is **not** overridable (any credential, Webhook URL) is still refused
+    as in scenario 3.
+11. **Given** that configuration, **When** an administrator attaches it to
+    a deployment target, **Then** the target form lists, for this
+    configuration, the fields the target must supply (Zone ID, marked
+    required) and the optional fields it may override (showing the
+    configuration's value as "inherited"); saving the target without Zone
+    ID is refused in the browser and by the server with HTTP 422 naming
+    `config_overrides.zone_id` (with the configuration id); an override of
+    a field that is not overridable (for example a credential or the
+    Webhook URL) is refused with 422 `config_overrides.<key>`
+    "not overridable"; nothing is saved on any error.
+12. **Given** a configuration attached to targets that rely on its value
+    of an overridable required field, **When** an administrator clears
+    that value, **Then** the save is refused with 422 naming the field and
+    listing the targets that would become incomplete; **and given** a
+    target whose merged configuration is incomplete for any other reason
+    (a provider upgrade, a row saved before this feature), **When** a job
+    runs, **Then** it fails before the provider contacts the endpoint with
+    "configuration incomplete: <label> must be provided by the target".
 
 ---
 
@@ -357,6 +404,88 @@ audits both, and leaves the host files untouched.
    **Then** it is never delivered (cancelled with reason "certificate
    revoked"/"certificate expired").
 
+---
+
+### User Story 8 - Bind renewed certificates into existing appliance profiles (v3 parity) (Priority: P3)
+
+A network administrator already serves `www.example.com` from a BIG-IP
+virtual server whose client-SSL profile `/Common/www_clientssl_prod` was
+created by hand, and protects an inbound web server on a FortiGate with
+the SSL/SSH inspection profile `inbound-www` (shared with two other
+domains). In v3 she set **SSL profile** on the BIG-IP configuration and
+**Default SSL profile** on the FortiGate configuration, and every renewal
+landed in those profiles without anyone touching the appliances. In v4
+she sets the same two options in the guided form (US5); after the next
+renewal the BIG-IP profile presents the new certificate and key, and the
+FortiGate profile lists the new certificate in place of the old one while
+the two other domains' certificates stay in the list.
+
+**Why this priority**: Parity for operators migrating from v3 who bind
+certificates into production profiles; without it a v4 renewal uploads the
+certificate but leaves the live profile on the old one (BIG-IP) or fails
+because the referenced certificate cannot be replaced (FortiGate). P3:
+the default behaviour without these options is unchanged and already
+works; the options matter only for profiles managed outside the deployer.
+
+**Independent Test**: Against fake appliances (iControl REST, FortiOS
+REST), deploying with `ssl_profile` updates exactly that existing profile
+and creates no other profile; deploying with `default_ssl_profile`
+imports the renewed certificate under a new name, replaces only the same
+certificate's entry in the profile's server-certificate list and deletes
+nothing; every precondition failure leaves the appliance unchanged;
+Verify and Rollback behave as in the scenarios below.
+
+**Acceptance Scenarios**:
+
+1. **Given** a BIG-IP configuration with **SSL profile**
+   `www_clientssl_prod` (a name in the configured partition, or a full
+   path `/Partition/name`), **When** a certificate is deployed, **Then**
+   the provider uploads the certificate, key and chain as today and points
+   that **existing** client-SSL profile at them (certificate, key and,
+   when a chain was uploaded, chain); it does **not** create its own
+   `<name>_clientssl` profile; the job details name the profile.
+2. **Given** an SSL profile name that does not exist on the appliance,
+   **Then** the deployment fails with "client-SSL profile <name> not
+   found" before anything is uploaded, and **Test connection** reports the
+   same on the SSL profile field.
+3. **Given** a deployment bound into an existing BIG-IP profile, **When**
+   Verify runs, **Then** it succeeds only if the certificate object exists
+   **and** the profile references this certificate and key; **When**
+   Rollback runs, **Then** it never deletes or modifies the operator's
+   profile and reports "certificate is bound to client-SSL profile <name>;
+   bind another certificate before rolling back" without deleting
+   anything.
+4. **Given** a FortiGate configuration with **Default SSL profile**
+   `inbound-www`, **When** a certificate is deployed, **Then** the
+   provider reuses a certificate already on the device with the same
+   serial number, or imports the certificate under a new dated name
+   (`<base>_<yyyymmdd>`, `_<nn>` for a second import on the same day)
+   without deleting or overwriting any existing certificate; it then
+   replaces, in the profile's server-certificate list, the entries of the
+   same certificate family (`<base>` and its dated names) with the new
+   name, keeps every other entry, appends the new name when no family
+   entry is present, and updates the profile in place (never deletes or
+   recreates it); the job details list the certificate name, the profile
+   action (updated, appended, unchanged) and the firewall policies bound
+   to the profile.
+5. **Given** a default SSL profile that does not exist, or whose
+   server-certificate mode is not "replace", or a certificate family that
+   is also referenced by objects the provider does not manage (a VIP, the
+   SSL-VPN settings, the administrator GUI certificate, another SSL/SSH
+   profile), **Then** the job fails as **"manual review required"** with
+   the reason and the referencing objects; the certificate may have been
+   uploaded, but no profile, reference or certificate was changed or
+   deleted.
+6. **Given** a FortiGate deployment into a default SSL profile, **When**
+   Verify runs, **Then** it succeeds only if a local certificate with this
+   certificate's serial exists **and** the profile lists it; **When**
+   Rollback runs, **Then** the profile entry is pointed back to the
+   newest other certificate of the family still on the device and the
+   deployed certificate is then deleted if nothing references it; with no
+   previous certificate the rollback fails without changing anything.
+7. **Given** neither option is set, **Then** both providers behave exactly
+   as before this feature.
+
 ### Edge Cases
 
 - **Certificate without a key in lcm** (issued from a CSR, or the key was
@@ -398,13 +527,44 @@ audits both, and leaves the host files untouched.
   guided form may hold undeclared settings or miss a required field; they
   keep working until edited (US5 scenario 8); a deployment that lacks a
   required field fails before contacting the endpoint.
-- **Configuration drawer — required value supplied by a target override**:
-  v3 validated required config fields on the merged (configuration +
-  target override) config; here the configuration itself must be complete
-  and overrides may only change declared values (research D25).
+- **Configuration drawer — required value supplied by a target override**
+  (v3 backend behaviour, research D25): allowed only for fields the
+  provider marks overridable — non-secret configuration fields that do not
+  decide where credentials are sent. Credentials (secret or not) and
+  endpoint-defining settings (Webhook URLs, TLS switch, custom headers)
+  are never overridable, because target overrides are stored unsealed
+  and a target manager must not be able to redirect a configuration's
+  sealed credentials.
+- **Configuration with target-supplied fields deployed directly** (no
+  target): refused before the endpoint is contacted ("configuration
+  incomplete: <label> must be provided by the target"); the UI disables
+  the action.
+- **"At least one of" group left to targets** (Inventory agent hosts and
+  host tags, both overridable): each target must supply at least one of
+  them; the target form highlights both.
+- **Clearing a configuration value that targets rely on**: refused with
+  the list of targets that would become incomplete (US5 scenario 12).
+- **Stored override no longer valid** (provider upgrade changed a rule,
+  row saved before this feature): the target still opens, the form
+  highlights the field, and a job fails fast if a required value is
+  missing.
 - **Configuration drawer — secret typed into a non-secret field** (for
   example an `Authorization` header in webhook custom headers): refused;
   such values belong in the sealed credential fields.
+- **BIG-IP SSL profile in another partition**: a full path
+  (`/Common/www_clientssl_prod`) binds a certificate stored in the
+  configured partition into that profile; a bare name refers to the
+  configured partition.
+- **FortiGate same-day reissue**: a second, different certificate on the
+  same day is imported as `<base>_<yyyymmdd>_01` (up to `_99`); a
+  re-deployment of the same certificate (same serial) imports nothing.
+- **FortiGate profile shared by several domains**: only entries of the
+  deployed certificate's family are replaced; entries of other domains
+  are kept in their order.
+- **Appliance change between pre-check and write** (profile deleted while
+  deploying): the write fails, the job fails with the appliance's error
+  code (no credential or key in the message), and a retry re-runs the
+  pre-checks.
 - **Provider removed or renamed** after configurations were saved: the
   drawer shows the stored values read-only with "provider not available";
   saving is refused.
@@ -530,23 +690,26 @@ audits both, and leaves the host files untouched.
   credential field it accepts with: key, label, kind (text, multi-line
   text, URL, integer, boolean, choice, list of values, key/value pairs,
   host selection), required, secret, default, choices, help text,
-  placeholder, display group (Connection, Credentials, Options) and
+  placeholder, display group (Connection, Credentials, Options),
+  overridable (may be supplied or changed by a deployment target) and
   validation rules (pattern, minimum/maximum, maximum length, maximum
   items), plus "at least one of" groups; the deployer MUST serve these
   descriptions with the provider catalogue.
 - **FR-024**: The descriptions MUST be the single source of truth: the UI
   builds its form and client-side validation from them, and the deployer
   MUST validate every configuration create, update, validate request and
-  target override (merged effective configuration) against the same
-  descriptions, refusing invalid input with HTTP 422 that names each
-  offending field (`config.<key>` / `credentials.<key>`) and the rule
-  violated; settings a provider does not declare MUST be refused.
+  target override against the same descriptions, refusing invalid input
+  with HTTP 422 that names each offending field (`config.<key>` /
+  `credentials.<key>` / `config_overrides.<key>`) and the rule violated;
+  settings a provider does not declare MUST be refused.
 - **FR-025**: Every setting the existing providers read MUST be declared
   (contracts/deployer-config-ui.md §7), including the webhook settings the
   v4 drawer omits today (authorization header, API key, timeout, TLS
-  verification switch, custom headers, metadata) and FortiGate's import
-  scope; test-only endpoint overrides MUST NOT be accepted from stored
-  configurations.
+  verification switch, custom headers, metadata), FortiGate's import
+  scope and the v3 profile options of US8; test-only endpoint overrides
+  MUST NOT be accepted from stored configurations (delivered by the
+  deployer hotfix `fix/provider-endpoint-exfil`; 033 keeps regression
+  tests through the shared validator).
 - **FR-026**: The required fields per provider MUST at least match v3
   (AWS ACM: region, access key id, secret access key; BIG-IP: host,
   username, password, partition; Cloudflare: zone id, API token;
@@ -576,6 +739,84 @@ audits both, and leaves the host files untouched.
   save) and missing required fields; a deployment whose effective
   configuration lacks a required field MUST fail before the provider runs
   with "configuration incomplete" naming the field's label.
+
+**Target-supplied required fields (Q7)**
+
+- **FR-032**: A provider MAY mark a configuration field **overridable**.
+  Only non-secret configuration fields that do not decide where
+  credentials are sent or how the endpoint is authenticated may be
+  overridable; credential fields (secret or not), Webhook URLs, the TLS
+  verification switch and custom headers MUST NOT be. The overridable
+  set per provider is fixed in contracts/deployer-config-ui.md §7.
+- **FR-033**: A configuration MUST be accepted (create, update) with a
+  required field — or every field of an "at least one of" group — left
+  empty only when all of those fields are overridable; the response MUST
+  list them as `target_supplied`. Any other missing required field is
+  refused as in FR-024.
+- **FR-034**: The drawer MUST show an empty overridable required field as
+  "To be provided by each target", warn on save that the configuration
+  cannot be deployed on its own, and mark it in the configuration list
+  ("Needs target values: <labels>"); direct deployment of such a
+  configuration MUST be disabled in the UI and refused by the server
+  before the endpoint is contacted.
+- **FR-035**: When configurations are attached to a target with
+  overrides, the deployer MUST accept override keys only for declared,
+  overridable fields of that configuration's provider, validate each
+  value against its description, and require that configuration plus
+  override together satisfy every required field and "at least one of"
+  group; otherwise it MUST refuse the whole request (nothing saved) with
+  HTTP 422 naming `config_overrides.<key>` and the configuration id. The
+  target form MUST show, per attached configuration, the fields the
+  target must supply (required) and the fields it may override (with the
+  inherited value), instead of a raw JSON text area.
+- **FR-036**: A configuration update that would leave an attached target
+  without a required value MUST be refused with HTTP 422 naming the
+  field and listing the affected targets; at job start the merged
+  configuration of every job MUST be checked again and an incomplete one
+  MUST fail before the certificate is fetched and before the endpoint is
+  contacted ("configuration incomplete: <label> must be provided by the
+  target").
+
+**Provider parity with v3 (Q5)**
+
+- **FR-037**: The BIG-IP provider MUST accept an optional, overridable
+  `ssl_profile` (profile name in the configured partition or full path
+  `/Partition/name`). When set, a deployment MUST check that the
+  client-SSL profile exists before uploading anything (a missing profile
+  fails the job without automatic retries), upload
+  certificate, key and chain as without the option, then update that
+  profile in place to reference the certificate, key and (when uploaded)
+  chain, and MUST NOT create its own `<name>_clientssl` profile.
+- **FR-038**: With `ssl_profile` set, BIG-IP Verify MUST also confirm that
+  the profile references the deployed certificate and key; Rollback MUST
+  NOT delete or modify the operator's profile and MUST refuse (no
+  deletion) while the certificate is bound to it.
+- **FR-039**: The FortiGate provider MUST accept an optional, overridable
+  `default_ssl_profile` (an existing SSL/SSH inspection profile in
+  server-certificate "replace" mode). When set, a deployment MUST reuse a
+  device certificate with the same serial or import the certificate under
+  a new dated name without deleting or overwriting any certificate, and
+  update the profile's server-certificate list in place, replacing only
+  entries of the same certificate family, keeping all other entries, and
+  appending when no family entry exists.
+- **FR-040**: Before any profile write, the FortiGate provider MUST stop
+  with "manual review required" (job failed without automatic retries,
+  reason and references shown in the job details; nothing bound, changed
+  or deleted) when the profile does not exist, its server-certificate mode is
+  not "replace", or the certificate family is referenced by objects
+  outside that profile (VIPs, SSL-VPN settings, administrator GUI
+  certificate, other SSL/SSH profiles), naming the reason and the
+  referencing objects.
+- **FR-041**: With `default_ssl_profile` set, FortiGate Verify MUST
+  confirm that a certificate with the deployed serial exists and is listed
+  in the profile; Rollback MUST point the family entry back to the newest
+  other family certificate on the device and then delete the deployed
+  certificate only if nothing references it; without a previous
+  certificate it MUST fail without changes.
+- **FR-042**: Without these options both providers MUST behave as before
+  this feature; job details MUST name the profile and the action taken
+  (and, for FortiGate, the firewall policies bound to the profile, best
+  effort) and MUST NOT contain credentials or key material.
 
 ### Security Requirements
 
@@ -634,7 +875,23 @@ audits both, and leaves the host files untouched.
 - **SR-014**: Settings that can redirect where credentials are sent (test
   endpoint overrides) MUST NOT be accepted from user input, and custom
   HTTP headers MUST NOT carry authentication headers (those belong in
-  sealed credential fields).
+  sealed credential fields). *Delivered by the deployer hotfix
+  `fix/provider-endpoint-exfil` (merged before 033's deployer work
+  starts); 033 keeps the requirement and its regression tests through the
+  shared descriptor validator (undeclared `endpoint`/`api_base` refused,
+  forbidden header names refused).*
+- **SR-015**: Target overrides are stored unsealed; therefore secrets and
+  credential fields MUST never be overridable or accepted in an override
+  (descriptor rule enforced at registration, plus the existing
+  credential-key guard), and settings that decide where a configuration's
+  credentials are sent or how its endpoint's TLS is verified MUST NOT be
+  overridable, so a target manager cannot redirect a configuration's
+  sealed credentials. Override errors follow SR-012 (no value echoed).
+- **SR-016**: The v3 profile options (US8) MUST never delete or recreate
+  a profile, MUST never delete or overwrite a certificate during
+  deployment, MUST perform all pre-checks before the first write to a
+  profile, and MUST not include credentials or key material in results,
+  errors or logs.
 
 ### Key Entities
 
@@ -652,8 +909,13 @@ audits both, and leaves the host files untouched.
   generations and `renewal/<name>.json` metadata.
 - **Provider field description** (deployer): per provider, the declared
   configuration and credential fields with kind, required, secret,
-  default, choices, help, placeholder, group and validation rules; served
-  with the provider catalogue and used for save-time validation.
+  overridable, default, choices, help, placeholder, group and validation
+  rules; served with the provider catalogue and used for save-time
+  validation.
+- **Target override** (deployer, existing): per target and attached
+  configuration, values for overridable configuration fields (never
+  credentials); together with the configuration it must satisfy every
+  required field.
 
 ## Success Criteria *(mandatory)*
 
@@ -676,14 +938,25 @@ audits both, and leaves the host files untouched.
   first deployment in under 5 minutes without editing JSON (US6).
 - **SC-007**: An operator configures each of the seven providers through
   the drawer without consulting documentation or typing JSON (every field
-  has a label, help and an example), and 100 % of saves with a missing or
-  invalid required field are refused — in the browser with the field
-  highlighted and focused, and by the API with HTTP 422 naming the field
-  (tested for every required field of every provider).
+  has a label, help and an example), and 100 % of saves with a missing
+  non-overridable required field or any invalid value are refused — in
+  the browser with the field highlighted and focused, and by the API with
+  HTTP 422 naming the field (tested for every required field of every
+  provider). For every overridable required field, a configuration
+  without it is saved with the "to be provided by each target" warning,
+  100 % of target attachments that do not supply it are refused with
+  HTTP 422 naming `config_overrides.<key>`, and 100 % of jobs whose merged
+  configuration lacks it fail before the endpoint is contacted.
 - **SC-008**: 0 secret values (submitted passwords, tokens, keys) appear in
   configuration read/list/validate responses, validation messages,
   deployer logs or audit rows after the drawer test suites (automated scan
   for the submitted test secrets).
+- **SC-009**: Against fake appliances, 100 % of deployments with BIG-IP
+  `ssl_profile` or FortiGate `default_ssl_profile` leave the named profile
+  referencing the new certificate, and 0 profile or certificate
+  deletions/recreations occur during deployment; 100 % of precondition
+  failures (profile missing, wrong mode, foreign references) leave every
+  profile and reference unchanged.
 
 ## Assumptions
 
@@ -705,6 +978,13 @@ audits both, and leaves the host files untouched.
 - Feature 023 (agent self-upgrade, persisted commands, capability
   announcement) and 029 (auto-enroll) in inventory.
 - Deployer feature 008 (providers, jobs, events consumer, Verify).
+- Deployer hotfix `fix/provider-endpoint-exfil` (aws_acm `endpoint`,
+  cloudflare `api_base` no longer read from stored configurations;
+  authentication headers refused in webhook custom headers) merged to the
+  deployer `main` before the 033 deployer branch is cut (SR-014).
+- v3 provider sources for US8: `go-tangra-deployer/pkg/deploy/providers/
+  bigip/bigip.go` (`createOrUpdateSSLProfile`) and
+  `.../fortigate/{ssl_profile.go,references.go,certificate.go}`.
 - lcm feature 007 (`Certificates/Download`, lifecycle events).
 - Feature 032 (server-side lists) conventions for the new inventory lists.
 - `@go-tangra/ui` kit ≥ 4.3 form components (`useZodForm` server field

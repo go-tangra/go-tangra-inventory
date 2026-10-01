@@ -128,6 +128,15 @@ prefix are in go-tangra-inventory-v4; others are prefixed with the repo.
   the kit's `useZodForm.setServerError` already maps
   `detail.fields` to inline errors (`go-tangra/ui/kit/src/forms/useZodForm.ts:127-145`).
   `GET /providers` requires `configurations:read`.
+- v4 target overrides (`internal/targets/targets.go` `Attach`): a map
+  `configuration id → config overlay`, stored **unsealed** in the target
+  row (`ConfigOverrides`); the only check is `rejectCredentialKeys` (a
+  fixed list of credential-shaped key names). The scheduler merges
+  `config ⊕ override` (`internal/jobs/scheduler.go:192-220`). The target
+  form (`ui/src/views/targets/index.vue:115`) is a raw JSON text area
+  "Per-config overrides (JSON: {configId: {...}})". Permissions:
+  `targets:manage` vs `configurations:manage` are separate (the built-in
+  `operator` grant holds both; the module role "operator" holds neither).
 - Kit (`go-tangra/ui/kit` 4.3.1): `UiForm`/`useZodForm`, `zodToFields` +
   `UiFieldRenderer` (types text, number, date, select, textarea,
   checkbox, secret, tags), `UiInput`, `UiTextarea`, `UiSelect`,
@@ -135,6 +144,57 @@ prefix are in go-tangra-inventory-v4; others are prefixed with the repo.
   (masked, reveal, autocomplete off, password-manager ignore),
   `UiTagEditor` (key=value map), `UiSection`, `UiDrawer`. No
   list-of-strings chip input.
+
+### v3 profile options (Q5, US8)
+
+- **v3 BIG-IP `ssl_profile`** (`go-tangra-deployer/pkg/deploy/providers/
+  bigip/bigip.go:152-181,527-600`): optional config key. After uploading
+  `/<partition>/<base>.crt`, `.key` and (best effort) `<base>_chain.crt`,
+  when `ssl_profile` is non-empty the provider POSTs
+  `ltm/profile/client-ssl` `{name: /<partition>/<ssl_profile>, cert, key,
+  chain: "none", ciphers: "DEFAULT"}`; on HTTP 409 (exists) it PATCHes
+  `ltm/profile/client-ssl/~<partition>~<name>` with `{cert, key}` only
+  (chain and every other profile setting untouched). A missing profile is
+  therefore **created** with default ciphers. Details carry
+  `ssl_profile`. Verify checks only that the certificate object exists.
+  Rollback deletes the client-SSL profile named by `ssl_profile`
+  (best effort, errors ignored), then cert, key and chain.
+- **v4 BIG-IP today** (`go-tangra-deployer-v4/internal/providers/bigip/
+  bigip.go`, `main`): always binds into its own profile
+  `/<partition>/<base>_clientssl` (POST, PATCH `{cert, key, chain}` on
+  409); no `ssl_profile`; Rollback deletes `<base>_clientssl`, cert, key,
+  chain. Certificate objects are reinstalled with `overwrite` under the
+  same name, so a renewal keeps the object names stable.
+- **v3 FortiGate `default_ssl_profile`** (`.../fortigate/fortigate.go:
+  41-60`, `ssl_profile.go`, `references.go`, `certificate.go:270-357`):
+  part of the default `replace_strategy: ssl_profile` (other strategies
+  `rebind`, `delete`; knobs `profile_suffix`, `rebind_references`,
+  `prune_old`). Deploy: (1) find a local certificate with the same serial
+  (FortiOS rejects re-importing identical content, error −145) and reuse
+  it, else import under `<base>_<yyyymmdd>` (`_<nn>` on a same-day
+  collision, names ≤ 35 characters) — never delete or overwrite;
+  (2) **reference scan** of the certificate family (`<base>`, dated and
+  sequence names): SSL/SSH profiles' `server-cert`, `vpn.ssl/settings
+  servercert`, `system/global admin-server-cert`, `firewall/vip
+  ssl-certificate`; any reference outside the audit profile and the
+  default profile → **manual review** result (Success false, nothing
+  bound); (3) pre-validate the default profile: must exist and have
+  `server-cert-mode` `replace` (or empty), else manual review; (4) create
+  (cloned from a replace-mode template) or update the per-certificate
+  **audit profile** `<base>_ssl_profile`; (5) update the default profile
+  in place: PUT `server-cert` with family entries replaced by the new
+  name, other entries kept, appended when no family entry exists
+  ("updated", "appended", "no-change"); best-effort list of firewall
+  policies bound to the profile. Never deletes certificates or profiles.
+  Verify: any family member present. Rollback: deletes unreferenced
+  family members.
+- **v4 FortiGate today** (`go-tangra-deployer-v4/internal/providers/
+  fortigate/fortigate.go`, `main`): single strategy — delete an existing
+  certificate with the same name, then import under `<base>` (the package
+  comment says it "drops tangra's naming/versioning, reference-rebinding
+  and ssl-profile machinery"). FortiOS refuses to delete a certificate
+  that a profile references, so **a renewal of a certificate bound into an
+  SSL/SSH profile fails** in v4 today (F13).
 
 ### lcm (go-tangra-lcm-v4)
 
@@ -244,6 +304,20 @@ prefix are in go-tangra-inventory-v4; others are prefixed with the repo.
   highlight anything; webhook custom `headers` are stored unsealed in
   config and may carry auth headers. → `detail.fields`; refuse auth
   header names in `headers` (D24).
+- **F12** (US8) v4 BIG-IP cannot bind into an operator-managed client-SSL
+  profile; a v3 configuration with `ssl_profile` migrated to v4 silently
+  binds into a new `<base>_clientssl` that no virtual server uses, leaving
+  production on the old certificate. → `ssl_profile` (D26).
+- **F13** (US8) v4 FortiGate deletes and re-imports under the same name;
+  for a certificate bound into an SSL/SSH profile FortiOS refuses the
+  delete, so renewals of profile-bound certificates fail. → dated import
+  names + in-place profile update when `default_ssl_profile` is set
+  (D27).
+- **F14** (US5, Q7) v4 overrides are an unvalidated, unsealed JSON overlay
+  with a name-list guard; making required fields satisfiable by overrides
+  needs descriptor-level rules for which keys may be overridden, or a
+  target manager could override, e.g., a Webhook URL and receive the
+  configuration's sealed token. → `overridable` descriptor flag (D25).
 - **F7** The deployer consumer starts at the stream tail: events while the
   deployer is down are lost (existing behaviour, affects renewal
   delivery). Out of scope; noted as risk with the manual "deploy" as
@@ -333,7 +407,11 @@ broader policy).
    `MaxLength`, `Pattern`, `MaxItems`) and `Capabilities` gains
    `Description`, `TestConnection`, `SchemaVersion`, `OneOfRequired` — JSON
    additive (`omitempty`); declarations of the existing providers are
-   completed in US5.
+   completed in US5. `Field.Overridable` (D25) is part of the descriptor.
+5. `provider.Result.Permanent bool` (US8, D27): the scheduler fails a job
+   whose provider returns a permanent failure without retries, and stores
+   failure `details` in the job result (today only success details are
+   kept).
 
 **Alternatives**: put tenant/job into `CertificateData` (it is "material",
 and every provider would see job internals); a separate provider
@@ -605,6 +683,15 @@ refuse `Authorization`, `Proxy-Authorization`, `Cookie`, `X-API-Key`,
 required field fails before the provider runs ("configuration
 incomplete: <label>").
 
+**Delivery split (2026-10-02)**: the exfiltration fix itself (`endpoint`/
+`api_base` no longer read from stored config, authentication header
+names refused in webhook `headers`) ships first as the deployer hotfix
+`fix/provider-endpoint-exfil`; 033 does not re-implement it. 033 adds the
+descriptor-level guard (undeclared keys → `unknown_field`, the hotfix's
+forbidden-header list reused by `ValidateInput` → `forbidden_header`) and
+keeps regression tests for both, so the hole cannot reopen through the
+new validator or through target overrides (D25).
+
 **Rationale**: F10 is a credential-exfiltration path; strict keys make
 the descriptor list authoritative. Not rewriting legacy rows avoids a
 data migration of opaque JSON.
@@ -613,20 +700,214 @@ data migration of opaque JSON.
 mistakes); data migration that strips unknown keys (risky, needs a
 backup, gains nothing for rows nobody edits).
 
-### D25 — Where "required" is enforced (US5)
+### D25 — Where "required" is enforced: target-supplied fields (US5, Q7 — revised 2026-10-02)
 
-**Decision**: required fields are enforced on the **configuration**
-(create/update, client and server), and the merged effective config is
-re-validated on target save (types/rules; credentials stay non-overridable
-as today) and at job start (required). This matches the v3 drawer (which
-required every required field on the configuration form); it does not
-reproduce v3's backend allowance of a configuration whose required
-config field is supplied only by a target override.
+**Context**: the user decided (Q7) that a required field may be supplied
+only by a deployment target override, as the v3 backend allowed
+(`effective_config.go:38-60` checked required keys on the merged
+configuration). The original default (configuration must be complete) is
+withdrawn.
 
-**Alternatives rejected**: v3 backend semantics (required only on the
-merged config) — the configuration form could not tell the operator what
-is missing, and every target would need its own validation UI. Recorded
-as Q7 in case shared credential-only configurations are needed.
+**Decision**:
+1. **Descriptor flag** `overridable: bool` (default false). Allowed only
+   on `config_fields` and never with `secret` (`CheckCapabilities` panics
+   at registration otherwise). Per-provider choice (contract §7):
+   overridable = non-secret configuration values that select *what* or
+   *where inside the same account/appliance* to deploy — aws_acm
+   `region`, `certificate_arn`; bigip `partition`, `ssl_profile`;
+   cloudflare `zone_id`; fortigate `vdom`, `import_scope`,
+   `default_ssl_profile`; dummy `fail`; webhook `timeout_seconds`,
+   `metadata`; inventory-agent all six fields. **Not** overridable:
+   every credential field (secret or not: BIG-IP/FortiGate `host`,
+   `username`, AWS `access_key_id` — they are sealed with AD = the
+   configuration id, and `host` decides where the sealed password/token
+   is sent), webhook `url`, `verify_url`, `rollback_url` (receive the
+   sealed token/secret), `skip_tls_verify` (weakens the TLS that protects
+   those credentials) and `headers` (authentication surface).
+2. **Secrets in overrides are forbidden, not sealed.** `ConfigOverrides`
+   is stored unsealed in the target row; a secret can never be
+   overridable, an override key that is a credential field or not
+   overridable is refused (`not_overridable`), and the existing
+   `rejectCredentialKeys` name guard stays as defence in depth.
+3. **Configuration save** (`ValidateInput` mode `configuration`): a
+   missing required field — or a fully empty `one_of_required` group — is
+   accepted iff every field concerned is overridable; the view returns
+   `target_supplied: [keys]` (computed, not stored). Non-overridable
+   missing fields → 422 `required` as before. All other rules apply to
+   the values that are present.
+4. **Target attach** (`targets.Attach`, used by the target form on create
+   and edit; replaces the override of every listed configuration):
+   `ValidateOverride(caps, config, override)` per configuration — keys
+   must be declared and overridable, values follow the descriptor rules,
+   and the merged config (mode `effective`) must satisfy every required
+   field and group. Errors → 422 `detail.fields` with
+   `config_overrides.<key>` and `detail.configuration_id`; the request is
+   atomic (validated completely before any write). Attaching a
+   configuration with `target_supplied` fields without an override that
+   supplies them is refused the same way.
+5. **Configuration update** re-checks every target the configuration is
+   attached to; if clearing a value would leave a target without a
+   required value → 422 `config.<key>: required_by_targets` and
+   `detail.targets: [{id, name}]` (≤ 20).
+6. **Job start**: `MissingRequired(caps, merged)` before the lcm fetch and
+   before the provider runs; message "configuration incomplete: <label>
+   must be provided by the target" (labels only). A direct deployment of
+   a configuration with `target_supplied` fields fails the same way (and
+   the UI disables it).
+7. **Validate / Test connection** on a configuration with
+   `target_supplied` fields uses the descriptor default for an empty field
+   when one exists (FortiGate `vdom` → `root`), otherwise runs only the
+   input checks; the response says `checked: "partial"` and lists
+   `deferred` keys.
+8. **UI**: the drawer labels an empty overridable required field "To be
+   provided by each target" (hint on the input: "Required — or leave
+   empty and let each target provide it"), shows a non-blocking warning
+   on save and a list badge "Needs target values"; the target form
+   renders, per attached configuration, `ProviderConfigForm` in
+   `override` mode (only overridable fields; `target_supplied` ones
+   required; others show the inherited value as placeholder; empty =
+   inherit), replacing the JSON text area.
+
+**Rationale**: v3 parity for shared configurations (one Cloudflare token
+for many zones, one AWS key for many regions/ARNs, one appliance with
+several partitions/VDOMs, one inventory-agent configuration for many host
+groups) without reopening F10/F14: what a target may change is declared
+per field and never includes where credentials go. Validating on attach
+and on configuration update makes incompleteness visible when it is
+created, and the job-start check covers rows that predate the rules.
+
+**Alternatives rejected**:
+- *Configuration must be complete* (previous default) — rejected by the
+  user (Q7); forces one configuration (and one copy of the sealed
+  credentials) per zone/region/VDOM.
+- *Any config key overridable, required checked only at job start* (v3
+  backend exactly) — the operator learns about a missing value only when a
+  renewal fails, and a target manager could override Webhook URLs and
+  receive sealed tokens (F14).
+- *Seal overrides (per-target sealed blob) so credentials could be
+  overridden too* — needs a new sealed column, AD binding to target +
+  configuration, a second write-only merge UX in the target form and a
+  migration; and a per-target host for BIG-IP/FortiGate would still let a
+  target manager redirect the configuration's password. A target that
+  needs different credentials uses its own configuration.
+- *Overridable flag chosen by the operator per configuration* — moves a
+  security decision (which fields may move credentials) into user data;
+  the provider author knows which fields are safe.
+- *Allow target-supplied fields only through a separate "template
+  configuration" type* — new entity and UI for the same effect.
+
+**Note on inventory-agent**: making `host_ids`/`host_tags` overridable
+lets a holder of `targets:manage` choose which tenant hosts receive a
+certificate *with its key* through a shared configuration. That is the
+v3 behaviour (v3 overrides were unrestricted) and the receiving hosts are
+still limited to the tenant's enrolled `cert.v1` agents, with every
+delivery audited; recorded as open question Q8.
+
+### D26 — BIG-IP `ssl_profile` (US8, Q5)
+
+**Decision**: optional config field `ssl_profile` (string, group
+Options, overridable, pattern
+`^(/[A-Za-z0-9_.-]{1,64}/)?[A-Za-z0-9_][A-Za-z0-9_.-]{0,254}$`; a bare
+name is resolved in the configured `partition`, a full path is used as
+is). When set:
+1. **Pre-check** (before any upload): `GET ltm/profile/client-ssl/~P~name`;
+   404 → `Result{Success: false, Permanent: true, Message: "client-SSL
+   profile <path> not found"}` (D27 §6), nothing uploaded. Other errors →
+   error (job retry).
+2. Upload `<base>.crt`, `<base>.key`, `<base>_chain.crt` exactly as
+   without the option (same names, `overwrite` on renewal).
+3. `PATCH ltm/profile/client-ssl/~P~name` with `cert`, `key` and — only
+   when a chain object was installed — `chain` (v3 PATCHed `{cert, key}`;
+   v4's own profile binding already sets the chain). Every other profile
+   setting is untouched. No POST, no `<base>_clientssl`.
+4. Details: `ssl_profile` (full path), `ssl_profile_mode: "existing"`.
+- **Verify**: certificate object exists **and** the profile's `cert` /
+  `key` equal the deployed object paths; otherwise `Success: false`
+  "profile <path> is bound to a different certificate".
+- **Rollback**: never deletes or PATCHes the operator's profile (v3
+  deleted it — would take down every virtual server using it). If the
+  profile still references the deployed cert/key (BIG-IP refuses to
+  delete referenced objects anyway) → `Success: false` "certificate is
+  bound to client-SSL profile <path>; bind another certificate before
+  rolling back"; nothing deleted. If the profile no longer references
+  them, cert/key/chain are deleted as today.
+- **Test connection**: after the credential probe, when `ssl_profile` is
+  set, the profile GET; 404 → 422 `config.ssl_profile:
+  not_found_on_endpoint`.
+
+**Deviation from v3 (deliberate)**: v3 *created* a missing profile
+(POST with default ciphers and no chain); 033 refuses instead — the user's
+answer says "existing", and a typo would otherwise create an unused
+profile while production keeps the old certificate (F12 again).
+
+**Alternatives rejected**: `certKeyChain` array manipulation (multi-cert
+profiles: RSA + ECDSA) — not v3 behaviour; the top-level `cert`/`key`/
+`chain` attributes update the default entry, which is what v3 relied on;
+recorded as Q10 if dual-key profiles are needed.
+
+### D27 — FortiGate `default_ssl_profile` (US8, Q5)
+
+**Decision**: optional config field `default_ssl_profile` (string, group
+Options, overridable, pattern `^[^\x00-\x1f"\\/]{1,35}$`, help "Existing
+SSL/SSH inspection profile in server-certificate mode replace (protecting
+an SSL server); its server certificate list is updated in place"). When
+set, Deploy follows the v3 `ssl_profile` strategy **without** the audit
+profile:
+1. Leaf only (FortiOS rejects chains, −145); `base` from the leaf subject
+   (v4 `certName`). Reuse a local certificate with the same serial
+   (`findLocalCertBySerial`); otherwise resolve a free name
+   `<base>_<yyyymmdd>` / `<base>_<yyyymmdd>_<nn>` (nn 01–99, ≤ 35 chars,
+   v3 `resolveFreeImportName`) and import; verify presence. Never delete
+   or overwrite a certificate.
+2. Reference scan (v3 `scanReferences`) of the family (`familyMatcher`:
+   `<base>`, dated, dated+sequence names): SSL/SSH profiles other than
+   `default_ssl_profile`, VIPs, SSL-VPN `servercert`, admin GUI
+   certificate → any hit → manual review. A scan error → manual review.
+3. Pre-validate the profile: exists, `server-cert-mode` is `replace` or
+   empty → else manual review.
+4. `PUT firewall/ssl-ssh-profile/<name>` with only `server-cert`: family
+   entries replaced by the new name (order kept, duplicates removed),
+   others kept; append if no family entry; skip the PUT when already
+   current. Actions `updated`/`appended`/`unchanged`.
+5. Best effort: firewall policies bound to the profile (`bound_policies`);
+   failure ignored.
+6. Manual review = `Result{Success: false, Message: "MANUAL REVIEW
+   REQUIRED: …"}` with `details.manual_review_required`, `reason`,
+   `foreign_references`, `imported`. Today the scheduler retries every
+   failed `Result` and stores `details` only on success
+   (`internal/jobs/scheduler.go:97-105`); 033 adds `Result.Permanent bool`
+   — a permanent failure goes to `fail` without retries — and stores the
+   failure `details` in the job result, so the manual-review reason and
+   references are visible in the job drawer. BIG-IP "profile not found"
+   (D26) is permanent too.
+- **Verify**: a local certificate with the deployed serial exists **and**
+  its name is in the profile's `server-cert` list.
+- **Rollback**: find the newest other family member on the device (dated
+  names sort chronologically; `<base>` oldest); PUT the profile list with
+  it in place of the deployed name; then delete the deployed certificate
+  (left in place and reported if FortiOS says it is still referenced). No
+  other family member → `Success: false` "no previous certificate to
+  restore; profile unchanged".
+- Without `default_ssl_profile`: unchanged v4 behaviour (delete +
+  import under `<base>`).
+
+**Not carried over** (recorded as Q9): v3 per-certificate audit profile
+`<base>_ssl_profile` cloned from a replace-mode template, the
+`replace_strategy` alternatives `rebind`/`delete` and the knobs
+`profile_suffix`, `rebind_references`, `prune_old`; v3 also excused
+references from the audit profile in the scan — without it, only
+`default_ssl_profile` is excused. "Server SSL profile" in the user's answer
+is read as this SSL/SSH inspection profile in "protecting SSL server"
+(replace) mode, which is the only profile type v3 updated; FortiOS
+`firewall ssl-server` (SSL offload) objects are out of scope (Q9).
+
+**Rationale**: fixes F13 (renewal of a profile-bound certificate) and
+restores v3's production-safe behaviour; the code is ported from v3 with
+its tests (`naming_test.go`, `deploy_test.go` vectors) onto the v4 client.
+
+**Alternatives rejected**: keep delete+import and temporarily unbind the
+profile (outage window, fails for VIPs); always use dated names even
+without the option (changes object names for existing v4 users).
 
 ### D14 — Revocation
 
@@ -742,6 +1023,8 @@ delivery id and counts; new `certificate_revocation_forwarded`.
 | **I** (US5) | Secret echoed by the configuration drawer or API | Write-only secrets (`credentials_set` names only), `credentials_public` only for non-secret fields and only to managers, error codes built from descriptors only (fuzz test), SC-008 scan of responses/logs/audit for submitted test secrets. |
 | **I** (US5) | Stored config redirects sealed credentials to an attacker host (`endpoint`, `api_base`, auth headers in `headers`) | Undeclared keys refused at save, test overrides not read from stored config, auth header names refused in `headers` (D24). |
 | **T** (US5) | Client-side validation bypassed by a direct API call | Same descriptors enforced server-side on create/update/validate/target override (D21); API tests per required field (SC-007). |
+| **T/I** (US5, Q7) | Target manager redirects a configuration's sealed credentials through a target override (Webhook URL, appliance host) or smuggles a secret into the unsealed override JSON | Only descriptor-declared `overridable` fields accepted in overrides (never credentials, secrets, URLs, TLS switch, headers), enforced at attach and re-checked at job start; `rejectCredentialKeys` kept; `CheckCapabilities` refuses `overridable` on credential/secret fields (D25). |
+| **D** (US8) | Deployment breaks a production appliance profile (wrong profile, profile shared by other domains, certificate referenced elsewhere) | Pre-checks before the first write (profile exists, FortiGate mode `replace`, reference scan → manual review), in-place update of only the family entry, never delete/recreate profiles or certificates during deploy, Rollback never touches the operator's BIG-IP profile (D26, D27). |
 | **E** | Deployer user gains host access | Deployer users can place a certificate into the dedicated directory only; executing anything requires a locally configured hook. |
 
 ## Resolved questions (user, 2026-10-02)
@@ -755,17 +1038,38 @@ delivery id and counts; new `certificate_revocation_forwarded`.
 - **Q4** Directory-symlink layout (`live/<name>` → `archive/<name>/<gen>`,
   atomic switch) **accepted**.
 
-## Open questions (US5 amendment, defaults chosen)
+- **Q5** v3 fields missing in v4 (BIG-IP `ssl_profile`, FortiGate
+  `default_ssl_profile`): **include in 033** with v3 behaviour → US8,
+  D26, D27 (the earlier default "out of scope" is withdrawn).
+- **Q6** Non-secret credential values (host, username, AWS access key id)
+  shown to managers on edit: **yes** — the default is kept (D23, SR-011).
+- **Q7** A required field may be supplied only by a deployment target
+  override: **yes, allowed** (v3 backend behaviour) → D25 rewritten
+  (`overridable` descriptor flag, target-supplied fields, validation on
+  attach, configuration update and job start).
+- The credential-exfiltration issue (aws_acm `endpoint`, cloudflare
+  `api_base`, webhook authentication headers) is fixed by the separate
+  deployer hotfix `fix/provider-endpoint-exfil`; 033 keeps SR-014 and the
+  regression tests through the shared validator (D24).
 
-- **Q5** v3 fields missing in v4: BIG-IP `ssl_profile` (bind into an
-  existing client-SSL profile) and FortiGate `default_ssl_profile` (also
-  update the production ssl-ssh-profile in place). They need provider
-  behaviour, not only a form field. **Default**: out of scope for 033;
-  follow-up deployer feature; the drawer declares only what v4 providers
-  implement.
-- **Q6** Should non-secret credential values (host, username, AWS access
-  key id) be shown to managers on edit? **Default**: yes (D23,
-  SR-011) — needed to pre-fill; readers without manage see only key names.
-- **Q7** Allow a configuration to leave a required config field empty when
-  every target supplies it by override (v3 backend semantics)?
-  **Default**: no (D25).
+## Open questions (raised by the Q5/Q7 redesign, defaults chosen)
+
+- **Q8** Inventory-agent `host_ids`/`host_tags` overridable? It lets a
+  holder of `targets:manage` direct certificates *with keys* to any
+  enrolled `cert.v1` host of the tenant through a shared configuration
+  (v3 allowed any override). **Default**: overridable (v3 parity; all
+  deliveries audited). Alternative: not overridable — one inventory-agent
+  configuration per host group.
+- **Q9** v3 FortiGate extras not carried over: per-certificate audit
+  profile `<base>_ssl_profile` cloned from a template, `replace_strategy`
+  `rebind`/`delete`, `profile_suffix`, `rebind_references`, `prune_old`,
+  and FortiOS `firewall ssl-server` (SSL offload) objects. **Default**: out
+  of scope for 033 (the user named only `default_ssl_profile`); follow-up
+  if v3 configurations use them.
+- **Q10** BIG-IP dual-certificate profiles (RSA + ECDSA in
+  `certKeyChain`): **Default**: not supported — `ssl_profile` updates the
+  profile's default certificate/key/chain like v3.
+- **Q11** BIG-IP `ssl_profile` naming a profile that does not exist: v3
+  created it; **Default**: refuse ("existing" in the user's answer; a typo
+  must not create an unused profile). Alternative: a "create if missing"
+  switch.

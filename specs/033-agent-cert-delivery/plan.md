@@ -38,7 +38,20 @@ validator enforces them on save/validate/target override (422 with
 `detail.fields`), credentials merge per field on edit (secrets
 write-only), and the UI renders provider-first, grouped, typed inputs
 from the descriptors with "Test connection"; the inventory-agent form
-(US6) plugs a host picker into that generic form.
+(US6) plugs a host picker into that generic form. Per the user's answers
+to Q5–Q7 (2026-10-02): providers mark fields **overridable**, so a
+configuration may leave a required field to its deployment targets
+(validated when a target attaches it, when the configuration changes and
+at job start; never credentials, secrets or credential-redirecting
+settings; the target form renders the overridable fields instead of
+JSON), and the v3 profile options return (US8): BIG-IP `ssl_profile`
+binds into an existing client-SSL profile, FortiGate
+`default_ssl_profile` imports renewals under dated names and updates the
+named SSL/SSH inspection profile in place (ported from v3, pre-checks and
+"manual review" before any write, nothing deleted). The
+credential-redirect fix (aws_acm `endpoint`, cloudflare `api_base`,
+webhook auth headers) ships separately as deployer hotfix
+`fix/provider-endpoint-exfil`, which 033 builds on.
 
 ## Technical Context
 
@@ -74,7 +87,11 @@ Deployer drawer (US5): descriptor validator unit + fuzz tests at 100 %,
 shared accept/reject vectors (`api/testdata/provider-field-vectors.json`)
 run by Go and by vitest (`fieldsToZod`), golden capability JSON per
 provider, secret-echo scan of responses/logs/audit (SC-008), vitest-axe
-and Playwright drawer flow.
+and Playwright drawer flow; target override validation (attach,
+configuration update, job start) unit/HTTP tests and a target-form vitest
+(Q7). Provider parity (US8): BIG-IP and FortiGate profile behaviour
+against `httptest` fake iControl/FortiOS servers, with the v3 naming and
+reference-scan test vectors ported.
 
 **Target Platform**: Linux containers (freya-stack / production compose)
 for inventory, deployer, lcm; agent on Linux amd64/arm64 (deb, rpm,
@@ -106,8 +123,9 @@ existing security packages + `internal/certmaterial`,
 deployer, lcm policy); 3 new inventory packages, 1 new deployer
 provider; 1 migration; 1 new mesh service (5 RPCs), 2 new ingest RPCs, 1
 command type, 4 inventory HTTP operations; 0 new permissions. Drawer
-(US5): 7 providers × ≤ 12 fields, 0 new deployer routes (3 extended:
-`GET /providers`, configuration write/read, validate), 0 migrations.
+(US5): 7 providers × ≤ 12 fields, 0 new deployer routes (4 extended:
+`GET /providers`, configuration write/read, validate, target attach),
+0 migrations. US8: 2 new provider options (BIG-IP, FortiGate).
 
 ## Constitution Check
 
@@ -130,7 +148,8 @@ command type, 4 inventory HTTP operations; 0 new permissions. Drawer
 - [x] **III. Boundary Validation**: proto bounds documented; provider
       field descriptors enforced server-side on every configuration
       write/validate/target override with unknown keys refused (US5,
-      D21/D24); provider `ValidateConfig` (deployer), request validation (inventory mesh),
+      D21/D24), overrides limited to declared overridable fields and
+      re-checked at job start (D25); provider `ValidateConfig` (deployer), request validation (inventory mesh),
       `certmaterial.ParseBundle` on lcm material before relaying, agent
       re-validation (name, PEM, key match, validity, sizes), DB CHECKs,
       OpenAPI `additionalProperties: false`; bounds table research D17.
@@ -209,7 +228,8 @@ go-tangra-deployer-v4
   go-tangra-deployer-v4/internal/provider/schema.go             # NEW pure: descriptor checks + ValidateInput (100 %)
   go-tangra-deployer-v4/internal/providers/{awsacm,bigip,cloudflare,dummy,fortigate,webhook}/*.go   # full descriptors; endpoint/api_base → test options
   go-tangra-deployer-v4/internal/configs/configs.go             # schema validation, per-field credential merge, credentials_set/public, validate(configuration_id)
-  go-tangra-deployer-v4/internal/targets/targets.go             # merged override validation
+  go-tangra-deployer-v4/internal/targets/targets.go             # ValidateOverride on attach (atomic), missing_required in views
+  go-tangra-deployer-v4/ui/src/views/targets/index.vue, ui/src/schemas/target.ts, ui/src/stores/targets.ts   # per-configuration override forms (Q7)
   go-tangra-deployer-v4/internal/jobs/scheduler.go              # "configuration incomplete" pre-check
   go-tangra-deployer-v4/internal/httpapi/{deps.go,handlers.go}, api/openapi/deployer.yaml   # 422 detail.fields, schemas
   go-tangra-deployer-v4/api/testdata/provider-field-vectors.json   # shared Go/TS vectors
@@ -218,6 +238,11 @@ go-tangra-deployer-v4
   go-tangra-deployer-v4/ui/src/views/configurations/index.vue   # drawer rewrite (provider-first, sections, test connection)
   go-tangra-deployer-v4/ui/src/stores/{providers.ts,configurations.ts}, ui/src/api/{types.ts,schema.d.ts}
   go-tangra-deployer-v4/ui/tests/unit/{provider-form.spec.ts,provider-schema.spec.ts}, ui/tests/e2e/{deployer-flow.spec.ts,a11y.spec.ts}
+
+  # US8 — v3 profile options (research D26/D27)
+  go-tangra-deployer-v4/internal/providers/bigip/{bigip.go,profile.go}           # ssl_profile: pre-check, PATCH existing profile, Verify/Rollback
+  go-tangra-deployer-v4/internal/providers/fortigate/{fortigate.go,profile.go,naming.go,references.go}   # default_ssl_profile: dated import, reference scan, in-place server-cert update
+  go-tangra-deployer-v4/internal/provider/provider.go, internal/jobs/scheduler.go   # Result.Permanent, failure details kept
 
 go-tangra-lcm-v4
   go-tangra-lcm-v4/deploy/policy.yaml          # rule inventory-download (+ policy test)
@@ -249,8 +274,12 @@ are covered by a privileged container test.
    inventory and lcm (lcm needs no release: production mounts
    `policies/lcm.yaml`).
 5. **deployer v4.4.0** (inventory SDK v4.4.0, provider, schema-driven
-   drawer for all providers, UI). Deploy. Existing configurations keep
-   working (legacy rows are validated only when edited).
+   drawer for all providers, target-supplied fields, BIG-IP/FortiGate
+   profile options, UI), built on deployer `main` **after** the hotfix
+   `fix/provider-endpoint-exfil` is merged and released. Deploy. Existing
+   configurations and target overrides keep working (legacy rows are
+   validated only when edited; required values are checked at job
+   start).
 6. Verify on one production host (quickstart manual 1–3) before enabling
    auto-deploy targets.
 
@@ -267,4 +296,6 @@ user-confirmed steps (tasks.md Phase 10).
 | Directory-symlink generation swap | Atomic replacement of the certificate *and* key set (FR-015) | Per-file rename exposes cert/key mismatch windows; directory rename over non-empty directory is impossible |
 | Persisted delivery items + replay on connect | Registry delivery is fire-and-forget; v3 lost pushes to offline clients | Pub/sub only repeats v3's weakness |
 | Deployer-local form renderer instead of extending the kit `FieldDef` (US5) | Needs groups, slots, URL/switch/list types and "stored secret" state now | Kit-first change needs a kit release and re-pin of every remote before the deployer ships; can be upstreamed later |
+| `overridable` descriptor flag + attach-time validation of target overrides (Q7) | User decision: required fields may come from targets; overrides are unsealed, so which keys may move must be declared per field | v3 "any key, check at job start": failures appear only at renewal and lets target managers redirect sealed credentials (F14) |
+| FortiGate profile mode ported from v3 (dated names, reference scan) | Profile-bound certificates cannot be deleted on FortiOS; in-place update is the only safe renewal (F13) | Delete+reimport (today's v4) fails for bound certificates; unbind/rebind causes an outage window |
 | Shared `internal/certmaterial` used by agent and service | Same name/bundle rules on both sides (defence in depth) without drift | Two implementations drift; deployer keeps a tested copy of the name rule only (cross-module test vectors) |

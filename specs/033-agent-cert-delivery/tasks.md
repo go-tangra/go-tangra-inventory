@@ -26,7 +26,7 @@ executed. Commits carry no Co-Authored-By trailer.
 ## Format: `[ID] [P?] [Story] Description`
 
 - **[P]**: can run in parallel (different files/repos, no dependency on an unfinished task)
-- **[Story]**: US1–US7 from spec.md
+- **[Story]**: US1–US8 from spec.md
 
 ---
 
@@ -34,10 +34,10 @@ executed. Commits carry no Co-Authored-By trailer.
 
 **Purpose**: branches, gates, package skeletons, fixtures.
 
-- [ ] T001 Create branch `033-agent-cert-delivery` in `go-tangra-deployer-v4` and `go-tangra-lcm-v4` from `main` (this repo already on it)
+- [ ] T001 Create branch `033-agent-cert-delivery` in `go-tangra-deployer-v4` and `go-tangra-lcm-v4` from `main` (this repo already on it); the deployer branch is cut only after the hotfix `fix/provider-endpoint-exfil` (aws_acm `endpoint`, cloudflare `api_base`, webhook auth headers — SR-014) is merged to deployer `main`; 033 does not re-implement that fix
 - [ ] T002 [P] Add `internal/certmaterial`, `internal/certdelivery`, `internal/agentcerts` to `SECURITY_PKGS` in `scripts/coverage-gate.sh`; exclude `internal/agentcerts/*_linux.go` OS glue from `COVERPKG` in `Makefile` like `internal/collector`; add `FuzzValidName`, `FuzzParseBundle`, `FuzzHostTag`, `FuzzReportCertificate`, `FuzzAgentCertsConfig` to the `fuzz` target in `Makefile`; add target `test-agent-certs` (privileged container test, `//go:build agentcerts_e2e`)
 - [ ] T003 [P] Add a `fuzz` target (with `FuzzInventoryAgentConfig`, `FuzzValidateInput`) and a coverage check for `internal/providers/inventoryagent` and `internal/provider` (100 %) to `go-tangra-deployer-v4/Makefile`
-- [ ] T004 Add a temporary `replace github.com/go-tangra/go-tangra-inventory/sdk/v4 => ../go-tangra-inventory-v4/sdk` to `go-tangra-deployer-v4/go.mod` for development (removed in T111); `GOWORK=off go build ./...`
+- [ ] T004 Add a temporary `replace github.com/go-tangra/go-tangra-inventory/sdk/v4 => ../go-tangra-inventory-v4/sdk` to `go-tangra-deployer-v4/go.mod` for development (removed in T118); `GOWORK=off go build ./...`
 - [ ] T005 [P] Package skeletons with doc comments stating their security role: `internal/certmaterial/doc.go`, `internal/certdelivery/doc.go`, `internal/agentcerts/doc.go`, `internal/lcmclient/doc.go`, `go-tangra-deployer-v4/internal/providers/inventoryagent/doc.go`, `go-tangra-deployer-v4/internal/inventoryclient/doc.go`
 - [ ] T006 [P] Test fixtures generator `internal/certmaterial/testdata_test.go`: RSA-2048, ECDSA P-256 and Ed25519 leaf + key pairs, a 2-level chain, an expired leaf, a not-yet-valid leaf, a mismatched key, oversized chains, PKCS#1/PKCS#8/SEC1 key encodings; also exported as files under `internal/certmaterial/testdata/` for agent and deployer tests (deployer copies the vectors into `go-tangra-deployer-v4/internal/providers/inventoryagent/testdata/`)
 
@@ -75,14 +75,14 @@ hooks. **No user story work starts before this phase is complete.**
 
 ### Tests first — deployer core
 
-- [ ] T025 [P] `go-tangra-deployer-v4/internal/provider/provider_test.go`: `Field` JSON includes every descriptor key of contracts/deployer-config-ui.md §2 (`type, help, placeholder, group, options, default, min, max, max_length, pattern, max_items`) and `Capabilities` `description, test_connection, schema_version, one_of_required` only when set (existing providers' JSON unchanged until US5 — golden); `Capabilities.DeliversByReference` serialised; `WithJob`/`JobFrom` round-trip, absent → `ok=false`
-- [ ] T026 [P] `go-tangra-deployer-v4/internal/jobs/scheduler_errors_test.go` + `us1_test.go`: a fake provider with `DeliversByReference` gets `FetchCertificate(includeKey=false)` and `PrivateKeyPEM == ""`; other providers still `true`; `JobFrom(ctx)` inside Deploy/Verify carries tenant, job id, configuration id, parent target id, trigger; Verify of a reference provider fetches without key
+- [ ] T025 [P] `go-tangra-deployer-v4/internal/provider/provider_test.go`: `Field` JSON includes every descriptor key of contracts/deployer-config-ui.md §2 (`type, help, placeholder, group, options, default, min, max, max_length, pattern, max_items, overridable`) and `Capabilities` `description, test_connection, schema_version, one_of_required` only when set (existing providers' JSON unchanged until US5 — golden); `Capabilities.DeliversByReference` serialised; `WithJob`/`JobFrom` round-trip, absent → `ok=false`
+- [ ] T026 [P] `go-tangra-deployer-v4/internal/jobs/scheduler_errors_test.go` + `us1_test.go`: a fake provider with `DeliversByReference` gets `FetchCertificate(includeKey=false)` and `PrivateKeyPEM == ""`; other providers still `true`; `JobFrom(ctx)` inside Deploy/Verify carries tenant, job id, configuration id, parent target id, trigger; Verify of a reference provider fetches without key; a provider `Result{Success:false, Permanent:true}` fails the job without retry and stores the failure `details` in the job result, a non-permanent failure still retries (US8, research D27)
 - [ ] T027 [P] `go-tangra-deployer-v4/internal/configs/configs_test.go`: a provider implementing `ConfigValidator` rejects bad config on Create/Update (422 field); providers without it unchanged; `Validate` returns provider preview details when the provider implements `Previewer`
 
 ### Implementation — deployer core
 
-- [ ] T028 `go-tangra-deployer-v4/internal/provider/provider.go`: `Field` descriptor additions and `Capabilities` additions (contracts/deployer-config-ui.md §1–§2), `DeliversByReference`, `JobMeta`/`WithJob`/`JobFrom`, `ConfigValidator`, `Previewer`
-- [ ] T029 `go-tangra-deployer-v4/internal/jobs/scheduler.go` and `go-tangra-deployer-v4/internal/jobs/jobs.go`: `includeKey = !caps.DeliversByReference` (rollback unchanged for others), `provider.WithJob` around Deploy/Verify/Rollback
+- [ ] T028 `go-tangra-deployer-v4/internal/provider/provider.go`: `Field` descriptor additions and `Capabilities` additions (contracts/deployer-config-ui.md §1–§2), `DeliversByReference`, `JobMeta`/`WithJob`/`JobFrom`, `ConfigValidator`, `Previewer`, `Result.Permanent`
+- [ ] T029 `go-tangra-deployer-v4/internal/jobs/scheduler.go` and `go-tangra-deployer-v4/internal/jobs/jobs.go`: `includeKey = !caps.DeliversByReference` (rollback unchanged for others), `provider.WithJob` around Deploy/Verify/Rollback, permanent failures → `fail` (no retry) with failure details kept in `j.Result`
 - [ ] T030 `go-tangra-deployer-v4/internal/configs/configs.go` (ValidateConfig on create/update, preview details on validate), `go-tangra-deployer-v4/internal/targets/targets.go` (validate merged overrides), `go-tangra-deployer-v4/internal/httpapi/handlers.go` + `go-tangra-deployer-v4/api/openapi/deployer.yaml` (validate response `details`, capability field schema)
 
 **Checkpoint**: contracts compile, storage and rules exist, deployer core
@@ -205,31 +205,36 @@ configuration in the deployer).
 
 ## Phase 7: User Story 5 — Schema-driven configuration drawer for all providers (Priority: P2)
 
-**Goal**: provider-first, grouped, typed configuration drawer generated from backend field descriptors; required/rule validation in the browser and on the server (422 with field paths); write-only secrets with per-field merge on edit; test connection; every provider (incl. inventory-agent) declared completely. Deployer only; depends on Phase 2 (T028), not on US1–US4.
+**Goal**: provider-first, grouped, typed configuration drawer generated from backend field descriptors; required/rule validation in the browser and on the server (422 with field paths); write-only secrets with per-field merge on edit; test connection; every provider (incl. inventory-agent) declared completely. Required fields may be left to deployment targets when the provider marks them overridable (Q7, research D25): validated at configuration save, target attach, configuration update and job start; the target form renders override fields instead of JSON. Deployer only; depends on Phase 2 (T028) and on the deployer hotfix `fix/provider-endpoint-exfil` being merged (T001), not on US1–US4.
 
-**Independent Test**: quickstart manual 11; for every provider and every required field a save without it is refused in the browser (field highlighted) and by the API (422 `config.<key>`/`credentials.<key>`) (SC-007); secret scan of responses/logs/audit (SC-008).
+**Independent Test**: quickstart manual 11–12; for every provider and every non-overridable required field a save without it is refused in the browser (field highlighted) and by the API (422 `config.<key>`/`credentials.<key>`); for every overridable required field the configuration saves as target-supplied and a target attach without it is refused (422 `config_overrides.<key>`) (SC-007); secret scan of responses/logs/audit (SC-008).
 
 ### Tests for User Story 5 (MANDATORY) ⚠️
 
-- [ ] T079 [P] [US5] `go-tangra-deployer-v4/internal/provider/schema_test.go` (100 %): descriptor checks of contracts/deployer-config-ui.md §2 (duplicate keys across both lists, unknown type/group, `secret` on a non-string type or in `config_fields`, enum without options, default of the wrong type or violating its bounds/pattern, non-compiling pattern) run over every registered provider (`provider.List()`); `ValidateInput`: required (empty string/list/map = missing), `one_of_required`, `wrong_type` (incl. `1.5` for int), pattern, bounds, `max_length`, `max_items`, enum, URL scheme, unknown key → `unknown_field`, forbidden webhook header names (case-insensitive); paths `config.<key>`/`credentials.<key>`; runs the shared vectors `go-tangra-deployer-v4/api/testdata/provider-field-vectors.json`; `FuzzValidateInput` in `go-tangra-deployer-v4/internal/provider/schema_fuzz_test.go` (no panic; **no error message contains any submitted string value**, SR-012)
-- [ ] T080 [P] [US5] Provider declaration tests: golden capability JSON `go-tangra-deployer-v4/internal/providers/all/testdata/capabilities.golden.json` equal to contracts/deployer-config-ui.md §7 (keys, types, required, secret, defaults, groups) with the v3 required-parity table of FR-026 asserted in `go-tangra-deployer-v4/internal/providers/all/all_test.go`; per provider `TestDeclaredKeysCoverReads` in `go-tangra-deployer-v4/internal/providers/{awsacm,bigip,cloudflare,dummy,fortigate,webhook}/*_test.go` (every key the code reads is declared); aws_acm `endpoint` and cloudflare `api_base` in a stored config are ignored (requests go to the real host builder; tests use the unexported option)
-- [ ] T081 [P] [US5] Service tests `go-tangra-deployer-v4/internal/configs/configs_schema_test.go`: create with each missing required field → `ValidationError` with that path; unknown key → `unknown_field`; update merge (blank keeps, value replaces only that key, `clear_credentials` removes an optional key, clearing a required key → `credentials.<key>: required`, provider change → 422), merged result validated before sealing; view `credentials_set` (names) and `credentials_public` (non-secret keys, manage only; readers get neither), no secret value in any view JSON; `Validate(configuration_id)` merges stored credentials, requires manage on that row, foreign/unknown → NotFound, provider mismatch → 422, schema errors before the provider call, provider error → `credentials_rejected` with a fixed message (provider text carrying the secret not returned; captured log redacted); legacy row with an undeclared key and a missing required field stays readable and deployable; `go-tangra-deployer-v4/internal/targets/targets_test.go`: override with an undeclared key or rule violation → 422 `config.<key>`; `go-tangra-deployer-v4/internal/jobs/scheduler_errors_test.go`: effective config missing a required field → job failed "configuration incomplete: <label>" before Deploy and without an lcm fetch
-- [ ] T082 [P] [US5] HTTP/OpenAPI tests `go-tangra-deployer-v4/internal/httpapi/configurations_test.go`: 422 body `{"reason":"validation_failed","detail":{"fields":{…}}}` for create, update, validate and target attach; reason `credentials_rejected`; `GET /providers` without `configurations:read` → 403, validate without manage → 403 (SR-013); OpenAPI contract test for `ProviderCapabilities`, `ProviderField`, `ConfigurationInput.clear_credentials`, `ValidateRequest.configuration_id`, unchanged `x-freya-permission`; **secret scan**: the suite's submitted test secrets appear in no response body, captured log line or audit row (SC-008)
-- [ ] T083 [P] [US5] `go-tangra-deployer-v4/ui/tests/unit/provider-form.spec.ts`: provider select first, no provider fields before a choice; each descriptor type renders its kit component (contract §6 table); required marker; defaults pre-filled on create; help and placeholder; sections in order, empty ones hidden, Options collapsed at defaults; secret inputs masked with autocomplete off; edit pre-fills config and `credentials_public`, secret empty with "Stored — leave blank to keep", Clear → `clear_credentials`, blank secrets omitted from the payload, provider select disabled; switching provider with values → confirm, cancel restores; server 422 `detail.fields` → inline errors and focus on the first; `credentials_rejected` → alert; action label Test connection / Check settings / Preview hosts per capability, client validation first, `configuration_id` sent on edit; legacy undeclared keys listed and dropped on save; read-only view shows "stored" badges for secrets; `vitest-axe` clean for create and edit
-- [ ] T084 [P] [US5] `go-tangra-deployer-v4/ui/tests/unit/provider-schema.spec.ts`: `fieldsToZod` over `go-tangra-deployer-v4/api/testdata/provider-field-vectors.json` yields the same accept/reject and field paths as the Go validator (T079); `ProviderField`/`ProviderCapabilities` types match the generated `ui/src/api/schema.d.ts`
-- [ ] T085 [P] [US5] Playwright `go-tangra-deployer-v4/ui/tests/e2e/deployer-flow.spec.ts` and `go-tangra-deployer-v4/ui/tests/e2e/a11y.spec.ts`: create a Cloudflare configuration through the drawer; save with the zone id empty → field highlighted, no request sent; direct API POST without `zone_id` → 422 `config.zone_id`; edit with a blank token keeps the stored token (deploy to the dummy-backed fake still authenticates); axe on the open drawer
+- [ ] T079 [P] [US5] `go-tangra-deployer-v4/internal/provider/schema_test.go` (100 %): descriptor checks of contracts/deployer-config-ui.md §2 (duplicate keys across both lists, unknown type/group, `secret` on a non-string type or in `config_fields`, enum without options, default of the wrong type or violating its bounds/pattern, non-compiling pattern) plus `overridable` in `credential_fields` or with `secret` run over every registered provider (`provider.List()`); `ValidateInput`: required (empty string/list/map = missing) — in `ModeConfiguration` a missing overridable required field or fully overridable empty `one_of_required` group is returned as `target_supplied` instead of an error, in `ModeEffective` it is `required`; `ValidateOverride`: undeclared key → `unknown_field`, declared but not overridable (incl. every credential key) → `not_overridable`, rule violations, merged config missing a required field/group → `config_overrides.<key>: required`/`one_of_required:…`; `TargetSupplied`; `one_of_required`, `wrong_type` (incl. `1.5` for int), pattern, bounds, `max_length`, `max_items`, enum, URL scheme, unknown key → `unknown_field`, forbidden webhook header names (case-insensitive); paths `config.<key>`/`credentials.<key>`/`config_overrides.<key>`; runs the shared vectors (incl. target-supplied and override cases) `go-tangra-deployer-v4/api/testdata/provider-field-vectors.json`; `FuzzValidateInput` in `go-tangra-deployer-v4/internal/provider/schema_fuzz_test.go` (no panic; **no error message contains any submitted string value**, SR-012)
+- [ ] T080 [P] [US5] Provider declaration tests: golden capability JSON `go-tangra-deployer-v4/internal/providers/all/testdata/capabilities.golden.json` equal to contracts/deployer-config-ui.md §7 (keys, types, required, secret, overridable, defaults, groups; US8 adds `bigip.ssl_profile` and `fortigate.default_ssl_profile` to the golden in its own tasks) with the v3 required-parity table of FR-026 asserted, and the overridable set asserted exactly (no credential field; webhook `url`, `verify_url`, `rollback_url`, `skip_tls_verify`, `headers` not overridable — SR-015) in `go-tangra-deployer-v4/internal/providers/all/all_test.go`; per provider `TestDeclaredKeysCoverReads` in `go-tangra-deployer-v4/internal/providers/{awsacm,bigip,cloudflare,dummy,fortigate,webhook}/*_test.go` (every key the code reads is declared); regression guard for the hotfix `fix/provider-endpoint-exfil` (behaviour delivered there, not re-implemented): aws_acm `endpoint` and cloudflare `api_base` in a stored config are ignored by the providers, refused by the shared validator at save (`unknown_field`) and in overrides (`not_overridable`/`unknown_field`), and webhook auth header names in `headers` stay refused (`forbidden_header`)
+- [ ] T081 [P] [US5] Service tests `go-tangra-deployer-v4/internal/configs/configs_schema_test.go`: create with each missing non-overridable required field → `ValidationError` with that path; create with an empty overridable required field (Cloudflare `zone_id`, inventory-agent hosts+tags) → saved, view `target_supplied` lists it; update clearing a value that an attached target relies on → 422 `config.<key>: required_by_targets` with `detail.targets` (≤ 20) and nothing saved; unknown key → `unknown_field`; update merge (blank keeps, value replaces only that key, `clear_credentials` removes an optional key, clearing a required key → `credentials.<key>: required`, provider change → 422), merged result validated before sealing; view `credentials_set` (names) and `credentials_public` (non-secret keys, manage only; readers get neither), no secret value in any view JSON; `Validate(configuration_id)` merges stored credentials, requires manage on that row, foreign/unknown → NotFound, provider mismatch → 422, schema errors before the provider call, provider error → `credentials_rejected` with a fixed message (provider text carrying the secret not returned; captured log redacted); `Validate` of a configuration with target-supplied fields → `checked: "partial"`, `deferred` keys, descriptor default used for the probe when declared (FortiGate `vdom`); legacy row with an undeclared key and a missing required field stays readable and deployable; `go-tangra-deployer-v4/internal/jobs/scheduler_errors_test.go`: effective config missing a required field → job failed "configuration incomplete: <label>" before Deploy and without an lcm fetch; a target-supplied field missing from the merged config → "configuration incomplete: <label> must be provided by the target"; direct deployment of a configuration with `target_supplied` fields → same failure, no lcm fetch
+- [ ] T082 [P] [US5] Target override tests `go-tangra-deployer-v4/internal/targets/targets_overrides_test.go` (+ memstore): `Attach` validates every listed configuration before any write — override key not declared → `config_overrides.<key>: unknown_field`; declared but not overridable (credential key, webhook `url`, `skip_tls_verify`, `headers`) → `not_overridable`; rule violation → its code; configuration with `target_supplied` fields attached without (or with an empty) override → `config_overrides.<key>: required` / `one_of_required:host_ids,host_tags`; 422 carries `detail.configuration_id`; on any error nothing is persisted (attachments and overrides unchanged); a valid override replaces an existing configuration's override; empty override values mean inherit; `rejectCredentialKeys` still refuses credential-shaped names (defence in depth); target view returns `missing_required` per configuration for a legacy row; no override value appears in any error message (SR-012)
+- [ ] T083 [P] [US5] HTTP/OpenAPI tests `go-tangra-deployer-v4/internal/httpapi/configurations_test.go`: 422 body `{"reason":"validation_failed","detail":{"fields":{…}}}` for create, update, validate and target attach (attach also `detail.configuration_id`; configuration update `detail.targets` for `required_by_targets`); reason `credentials_rejected`; `GET /providers` without `configurations:read` → 403, validate without manage → 403 (SR-013); OpenAPI contract test for `ProviderCapabilities`, `ProviderField` (+ `overridable`), `ConfigurationView.target_supplied`, `ConfigurationInput.clear_credentials`, `ValidateRequest.configuration_id`, `ValidateResult.deferred`, `TargetView.missing_required`, unchanged `x-freya-permission`; **secret scan**: the suite's submitted test secrets appear in no response body, captured log line or audit row (SC-008)
+- [ ] T084 [P] [US5] `go-tangra-deployer-v4/ui/tests/unit/provider-form.spec.ts`: provider select first, no provider fields before a choice; each descriptor type renders its kit component (contract §6 table); required marker; defaults pre-filled on create; help and placeholder; sections in order, empty ones hidden, Options collapsed at defaults; secret inputs masked with autocomplete off; edit pre-fills config and `credentials_public`, secret empty with "Stored — leave blank to keep", Clear → `clear_credentials`, blank secrets omitted from the payload, provider select disabled; switching provider with values → confirm, cancel restores; server 422 `detail.fields` → inline errors and focus on the first; `credentials_rejected` → alert; action label Test connection / Check settings / Preview hosts per capability, client validation first, `configuration_id` sent on edit; legacy undeclared keys listed and dropped on save; read-only view shows "stored" badges for secrets; overridable required field shows "Required — or leave empty and let each target provide it", saving it empty is allowed with the non-blocking warning and the "To be provided by each target" label, the list shows "Needs target values: <labels>" and disables Deploy, 422 `required_by_targets` shows the target names under the field; `vitest-axe` clean for create and edit
+- [ ] T085 [P] [US5] `go-tangra-deployer-v4/ui/tests/unit/target-overrides.spec.ts`: target form renders one `ProviderConfigForm mode="override"` per attached configuration with only `overridable` fields; target-supplied fields required (client refusal, focus); other fields show "Inherited: <value>" placeholders; payload carries only non-empty values keyed by configuration id; server 422 `config_overrides.<key>` + `configuration_id` → inline error on that configuration's input; inventory-agent with target-supplied hosts highlights both `host_ids` and `host_tags`; the JSON text area is gone; `vitest-axe` clean
+- [ ] T086 [P] [US5] `go-tangra-deployer-v4/ui/tests/unit/provider-schema.spec.ts`: `fieldsToZod` (configuration mode) and `overrideToZod` (override mode) over `go-tangra-deployer-v4/api/testdata/provider-field-vectors.json` yield the same accept/reject, `target_supplied` and field paths as the Go validator (T079); `ProviderField`/`ProviderCapabilities` types match the generated `ui/src/api/schema.d.ts`
+- [ ] T087 [P] [US5] Playwright `go-tangra-deployer-v4/ui/tests/e2e/deployer-flow.spec.ts` and `go-tangra-deployer-v4/ui/tests/e2e/a11y.spec.ts`: create a Cloudflare configuration through the drawer; save with the zone id empty → field highlighted, no request sent; direct API POST without `zone_id` → 422 `config.zone_id`; edit with a blank token keeps the stored token (deploy to the dummy-backed fake still authenticates); second Cloudflare configuration without zone id → saved with the target-supplied warning and list badge; attaching it to a target without a zone id → field highlighted, API attach → 422 `config_overrides.zone_id`; with a zone id → attach succeeds; axe on the open drawer and the target form
 
 ### Implementation for User Story 5
 
-- [ ] T086 [US5] `go-tangra-deployer-v4/internal/provider/schema.go`: `CheckCapabilities` (called by `Register`; invalid declaration panics at start), `ValidateInput(caps, config, creds) FieldErrors`, `MissingRequired(caps, effective)`, error codes of contracts/deployer-config-ui.md §3, forbidden header list
-- [ ] T087 [P] [US5] Full descriptors in `go-tangra-deployer-v4/internal/providers/{awsacm,bigip,cloudflare,dummy,fortigate,webhook}/*.go` per contracts/deployer-config-ui.md §7 (labels without "(optional)", help, placeholders, groups, types, defaults, patterns, `description`, `test_connection`); declare webhook `timeout_seconds`, `skip_tls_verify`, `headers`, `metadata`, `authorization`, `api_key`, fortigate `import_scope`, dummy `fail`; move aws_acm `endpoint` and cloudflare `api_base` to unexported test options so stored config is never read for them
-- [ ] T088 [US5] `go-tangra-deployer-v4/internal/configs/configs.go` (`ValidateInput` before `ConfigValidator` on create/update; per-field credential merge + `ClearCredentials`; `View.CredentialsSet`/`CredentialsPublic` with the manage check; `Validate` with `configuration_id`, fixed `credentials_rejected`, redacted log; audit `configuration_validated`), `go-tangra-deployer-v4/internal/targets/targets.go` (merged override validation), `go-tangra-deployer-v4/internal/jobs/scheduler.go` (`MissingRequired` pre-check), `go-tangra-deployer-v4/internal/audit/audit.go`
-- [ ] T089 [US5] `go-tangra-deployer-v4/internal/httpapi/deps.go` (`failSvc` → `WriteDetail` with `fields`; `credentials_rejected`), `go-tangra-deployer-v4/internal/httpapi/handlers.go` (`clear_credentials`, `configuration_id`, `checked`), `go-tangra-deployer-v4/api/openapi/deployer.yaml` (schemas and 422 responses), regenerated `go-tangra-deployer-v4/ui/src/api/schema.d.ts`
-- [ ] T090 [P] [US5] UI building blocks: `go-tangra-deployer-v4/ui/src/schemas/providerFields.ts` (`fieldsToZod`, defaults, payload builder dropping undeclared keys and blank secrets), `go-tangra-deployer-v4/ui/src/components/ProviderConfigForm.vue` (sections via `UiSection`, kit input per type, `field-<key>` slots, `data-field="config.<key>"`), `go-tangra-deployer-v4/ui/src/components/StringListInput.vue`, `go-tangra-deployer-v4/ui/src/api/types.ts` (descriptor types; drop `required_config`/`required_credentials`), `go-tangra-deployer-v4/ui/src/stores/providers.ts` and `go-tangra-deployer-v4/ui/src/stores/configurations.ts` (validate with `configuration_id`, `clear_credentials`), `credentials_rejected` message via kit `registerReasons`
-- [ ] T091 [US5] Drawer rewrite `go-tangra-deployer-v4/ui/src/views/configurations/index.vue` + `go-tangra-deployer-v4/ui/src/schemas/configuration.ts` (provider first, `ProviderConfigForm`, switch-provider confirm, edit pre-fill, legacy-keys notice, validate action per capability, read-only view; JSON text areas removed); provider field table in `go-tangra-deployer-v4/README.md`
+- [ ] T088 [US5] `go-tangra-deployer-v4/internal/provider/schema.go`: `CheckCapabilities` (called by `Register`; invalid declaration — incl. `overridable` on a credential/secret field — panics at start), `ValidateInput(caps, config, creds, mode)` returning field errors and `target_supplied`, `ValidateOverride(caps, config, override)`, `TargetSupplied`, `MissingRequired(caps, effective)`, error codes of contracts/deployer-config-ui.md §3 (incl. `not_overridable`, `required_by_targets`, `not_found_on_endpoint`); the forbidden header list is the one introduced by the hotfix (imported, not duplicated)
+- [ ] T089 [P] [US5] Full descriptors in `go-tangra-deployer-v4/internal/providers/{awsacm,bigip,cloudflare,dummy,fortigate,webhook}/*.go` per contracts/deployer-config-ui.md §7 (labels without "(optional)", help, placeholders, groups, types, defaults, patterns, `description`, `test_connection`); declare webhook `timeout_seconds`, `skip_tls_verify`, `headers`, `metadata`, `authorization`, `api_key`, fortigate `import_scope`, dummy `fail`; `overridable` exactly as the contract's O column; aws_acm `endpoint` / cloudflare `api_base` stay undeclared (already removed from stored-config reads by the hotfix — no change here)
+- [ ] T090 [US5] `go-tangra-deployer-v4/internal/configs/configs.go` (`ValidateInput` before `ConfigValidator` on create/update; per-field credential merge + `ClearCredentials`; `View.CredentialsSet`/`CredentialsPublic` with the manage check; `Validate` with `configuration_id`, fixed `credentials_rejected`, redacted log; audit `configuration_validated`), `View.TargetSupplied`, configuration update re-check of attached targets (`required_by_targets`), validate `checked: partial`/`deferred`; `go-tangra-deployer-v4/internal/targets/targets.go` (`Attach`: `ValidateOverride` + `ConfigValidator` on the merged config for every listed configuration before any write, override replacement, `View.MissingRequired`), `go-tangra-deployer-v4/internal/jobs/scheduler.go` and `go-tangra-deployer-v4/internal/jobs/jobs.go` (`MissingRequired` pre-check before the lcm fetch with the "must be provided by the target" wording, direct deployment of a configuration with target-supplied fields), `go-tangra-deployer-v4/internal/audit/audit.go`
+- [ ] T091 [US5] `go-tangra-deployer-v4/internal/httpapi/deps.go` (`failSvc` → `WriteDetail` with `fields`, `configuration_id`, `targets`; `credentials_rejected`), `go-tangra-deployer-v4/internal/httpapi/handlers.go` (`clear_credentials`, `configuration_id`, `checked`, `deferred`, `target_supplied`, attach override errors, target `missing_required`), `go-tangra-deployer-v4/api/openapi/deployer.yaml` (schemas and 422 responses), regenerated `go-tangra-deployer-v4/ui/src/api/schema.d.ts`
+- [ ] T092 [P] [US5] UI building blocks: `go-tangra-deployer-v4/ui/src/schemas/providerFields.ts` (`fieldsToZod`, defaults, payload builder dropping undeclared keys and blank secrets), `go-tangra-deployer-v4/ui/src/components/ProviderConfigForm.vue` (sections via `UiSection`, kit input per type, `field-<key>` slots, `data-field="config.<key>"`; `mode="override"` renders only overridable fields with inherited placeholders and `data-field="config_overrides.<key>"`), `overrideToZod` in `providerFields.ts`, `go-tangra-deployer-v4/ui/src/components/StringListInput.vue`, `go-tangra-deployer-v4/ui/src/api/types.ts` (descriptor types; drop `required_config`/`required_credentials`), `go-tangra-deployer-v4/ui/src/stores/providers.ts` and `go-tangra-deployer-v4/ui/src/stores/configurations.ts` (validate with `configuration_id`, `clear_credentials`), `credentials_rejected` message via kit `registerReasons`
+- [ ] T093 [US5] Drawer rewrite `go-tangra-deployer-v4/ui/src/views/configurations/index.vue` + `go-tangra-deployer-v4/ui/src/schemas/configuration.ts` (provider first, `ProviderConfigForm`, switch-provider confirm, edit pre-fill, legacy-keys notice, validate action per capability, target-supplied hint/warning, list badge "Needs target values" and Deploy disabled, read-only view; JSON text areas removed); provider field table in `go-tangra-deployer-v4/README.md`
+- [ ] T094 [US5] Target form `go-tangra-deployer-v4/ui/src/views/targets/index.vue` + `go-tangra-deployer-v4/ui/src/schemas/target.ts` + `go-tangra-deployer-v4/ui/src/stores/targets.ts`: per attached configuration a collapsible `ProviderConfigForm mode="override"` (descriptors from the providers store, configuration values as inherited placeholders, target-supplied fields required), one attach call carrying the overrides of every changed configuration, 422 `config_overrides.<key>` mapped to the configuration's sub-form, `missing_required` notice for legacy rows; the "Per-config overrides (JSON)" text area removed
 
 **Checkpoint**: every provider is configured through the guided form with
-client and server enforcement; quickstart manual 11 passes; the
+client and server enforcement; target-supplied required fields work end to
+end (configuration, target form, attach, job start); quickstart manual
+11–12 pass; the
 inventory-agent provider (once US1 registered it) appears in the drawer
 with its descriptors and a manual host-id input until US6 adds the picker.
 
@@ -243,15 +248,15 @@ with its descriptors and a manual host-id input until US6 adds the picker.
 
 ### Tests for User Story 6 (MANDATORY) ⚠️
 
-- [ ] T092 [P] [US6] `go-tangra-deployer-v4/ui/tests/unit/inventory-agent-config.spec.ts`: form ↔ config JSON round-trip (incl. overrides) through `ProviderConfigForm` with `HostPicker` in the `field-host_ids` slot; descriptor-derived zod mirrors contracts/deployer-provider.md §2 (bad name, 17 tags, no selector → both `config.host_ids` and `config.host_tags` "select hosts or enter tags"); Credentials section hidden; action labelled "Preview hosts"
-- [ ] T093 [P] [US6] `go-tangra-deployer-v4/ui/tests/unit/host-picker.spec.ts`: server-paged search against a mocked `/api/inventory/v1/hosts`, selection chips, capability/online badges from `/api/inventory/v1/agents`, 401/403/404 → manual-entry notice and textarea; Validate shows `matched_hosts`
-- [ ] T094 [P] [US6] `go-tangra-deployer-v4/ui/tests/unit/jobs.spec.ts`: job drawer renders `details.counts` and `details.hosts` for `inventory-agent`
+- [ ] T095 [P] [US6] `go-tangra-deployer-v4/ui/tests/unit/inventory-agent-config.spec.ts`: form ↔ config JSON round-trip (incl. overrides) through `ProviderConfigForm` with `HostPicker` in the `field-host_ids` slot; descriptor-derived zod mirrors contracts/deployer-provider.md §2 (bad name, 17 tags, no selector → both `config.host_ids` and `config.host_tags` "select hosts or enter tags"); Credentials section hidden; action labelled "Preview hosts"
+- [ ] T096 [P] [US6] `go-tangra-deployer-v4/ui/tests/unit/host-picker.spec.ts`: server-paged search against a mocked `/api/inventory/v1/hosts`, selection chips, capability/online badges from `/api/inventory/v1/agents`, 401/403/404 → manual-entry notice and textarea; Validate shows `matched_hosts`
+- [ ] T097 [P] [US6] `go-tangra-deployer-v4/ui/tests/unit/jobs.spec.ts`: job drawer renders `details.counts` and `details.hosts` for `inventory-agent`
 
 ### Implementation for User Story 6
 
-- [ ] T095 [P] [US6] `go-tangra-deployer-v4/ui/src/api/inventory.ts` (gateway calls with the user's session), `go-tangra-deployer-v4/ui/src/components/HostPicker.vue`
-- [ ] T096 [US6] `HostPicker` wired into the `field-host_ids` slot of `ProviderConfigForm` in `go-tangra-deployer-v4/ui/src/views/configurations/index.vue`; "Preview hosts" result table for `details.matched_hosts` (no provider-specific schema or form file — the descriptors come from the provider, T051)
-- [ ] T097 [US6] Per-host results in `go-tangra-deployer-v4/ui/src/views/jobs/index.vue`
+- [ ] T098 [P] [US6] `go-tangra-deployer-v4/ui/src/api/inventory.ts` (gateway calls with the user's session), `go-tangra-deployer-v4/ui/src/components/HostPicker.vue`
+- [ ] T099 [US6] `HostPicker` wired into the `field-host_ids` slot of `ProviderConfigForm` in `go-tangra-deployer-v4/ui/src/views/configurations/index.vue`; "Preview hosts" result table for `details.matched_hosts` (no provider-specific schema or form file — the descriptors come from the provider, T051)
+- [ ] T100 [US6] Per-host results in `go-tangra-deployer-v4/ui/src/views/jobs/index.vue`
 
 ---
 
@@ -263,30 +268,51 @@ with its descriptors and a manual host-id input until US6 adds the picker.
 
 ### Tests for User Story 7 (MANDATORY) ⚠️
 
-- [ ] T098 [P] [US7] `internal/certdelivery/revoke_test.go` (100 %): `MarkCertificateRevoked` cancels active items of that certificate (`cancelled/certificate_revoked`), sets `revoked_at` on host certificates holding it, idempotent, audit `host_certificate_revoked`; a later install of another certificate under the name clears `revoked_at`; fetch of a revoked/expired certificate → `failed/certificate_revoked|certificate_expired` (covered with T032 cases)
-- [ ] T099 [P] [US7] `go-tangra-deployer-v4/internal/events/consumer_test.go`: `certificate.revoked` → `MarkCertificateRevoked` only when the tenant has an active `inventory-agent` configuration; errors logged and audited `certificate_revocation_forwarded/failed`, never block issued/renewed handling; loop guard unchanged; extend the consumer fuzz test
+- [ ] T101 [P] [US7] `internal/certdelivery/revoke_test.go` (100 %): `MarkCertificateRevoked` cancels active items of that certificate (`cancelled/certificate_revoked`), sets `revoked_at` on host certificates holding it, idempotent, audit `host_certificate_revoked`; a later install of another certificate under the name clears `revoked_at`; fetch of a revoked/expired certificate → `failed/certificate_revoked|certificate_expired` (covered with T032 cases)
+- [ ] T102 [P] [US7] `go-tangra-deployer-v4/internal/events/consumer_test.go`: `certificate.revoked` → `MarkCertificateRevoked` only when the tenant has an active `inventory-agent` configuration; errors logged and audited `certificate_revocation_forwarded/failed`, never block issued/renewed handling; loop guard unchanged; extend the consumer fuzz test
 
 ### Implementation for User Story 7
 
-- [ ] T100 [US7] `internal/certdelivery/revoke.go`, mesh handler method in `internal/grpcapi/certdelivery.go`
-- [ ] T101 [US7] `go-tangra-deployer-v4/internal/events/consumer.go` (`certificate.revoked`), audit type in `go-tangra-deployer-v4/internal/audit/audit.go`, wiring in `go-tangra-deployer-v4/internal/app/app.go`
-- [ ] T102 [P] [US7] Revoked badge and filter in `ui/src/views/hosts/detail.vue` (uses T078 store)
+- [ ] T103 [US7] `internal/certdelivery/revoke.go`, mesh handler method in `internal/grpcapi/certdelivery.go`
+- [ ] T104 [US7] `go-tangra-deployer-v4/internal/events/consumer.go` (`certificate.revoked`), audit type in `go-tangra-deployer-v4/internal/audit/audit.go`, wiring in `go-tangra-deployer-v4/internal/app/app.go`
+- [ ] T105 [P] [US7] Revoked badge and filter in `ui/src/views/hosts/detail.vue` (uses T078 store)
 
 ---
 
-## Phase 10: Polish, security review & release
+## Phase 10: User Story 8 — Bind into existing appliance profiles, v3 parity (Priority: P3)
 
-- [ ] T103 [P] Security review checklist `specs/033-agent-cert-delivery/checklists/security-review.md` (STRIDE rows → test ids; key-scan evidence; policy diffs)
-- [ ] T104 [P] `govulncheck` (`make vuln`) in inventory and deployer; `buf lint`; `gosec` clean for new packages (G304/G302 file modes justified inline)
-- [ ] T105 [P] Coverage gates: `make cover` inventory (100 % new security packages, ≥ 80 % total) and deployer (100 % `inventoryagent` and `internal/provider`, ≥ 80 % total)
-- [ ] T106 [P] Docs: `README.md` (feature overview, agent config, layout, hook), `deploy/README.md` (service config, policies, stack diffs), `SECURITY.md` (key handling statement), `go-tangra-deployer-v4/README.md` (provider)
-- [ ] T107 Local freya-stack validation with locally built images (quickstart manual 1–11); record results in `specs/033-agent-cert-delivery/checklists/security-review.md`
-- [ ] T108 Run `/speckit-analyze` consistency check across spec/plan/tasks; fix drift
-- [ ] T109 Release inventory SDK: PR merge, tag `sdk/v4.4.0` (**user confirmation**)
-- [ ] T110 Release inventory v4.7.0: PR merge, tag; approve the `release` environment signing job (**user approval in GitHub**); verify the GitHub release carries the signed agent artifacts (**user confirmation**)
-- [ ] T111 Deployer: replace the temporary `replace` with `github.com/go-tangra/go-tangra-inventory/sdk/v4 v4.4.0` in `go-tangra-deployer-v4/go.mod`; `GOWORK=off go build ./... && go test ./...`
-- [ ] T112 Release deployer v4.4.0 and push lcm policy change (`go-tangra-lcm-v4` PR, no release needed) (**user confirmation**)
-- [ ] T113 Production (**user confirmation**, backups first): pin inventory 4.7.0 and deployer 4.4.0 in go-tangra-docker, apply policies/configs from contracts/mesh-policy.md, deploy, migration 0010, "Upgrade all" agents, quickstart manual 1–3 on one production host before enabling auto-deploy targets
+**Goal**: BIG-IP `ssl_profile` binds into an existing client-SSL profile; FortiGate `default_ssl_profile` imports renewals under dated names and updates the named SSL/SSH inspection profile in place; pre-checks and manual review before any write; nothing deleted during deployment (research D26, D27). Deployer only; depends on Phase 2 (T028/T029 `Result.Permanent`) and US5 (T088 validator, T089 descriptors, `not_found_on_endpoint`).
+
+**Independent Test**: quickstart manual 13; SC-009 against fake appliances.
+
+### Tests for User Story 8 (MANDATORY) ⚠️
+
+- [ ] T106 [P] [US8] `go-tangra-deployer-v4/internal/providers/bigip/bigip_profile_test.go` (`httptest` fake iControl recording every call): `ssl_profile` bare name → `/<partition>/<name>`, full path used as is, pattern negatives refused by the descriptor; pre-check 404 → `Result{Success:false, Permanent:true}` "client-SSL profile … not found" and **zero** upload/install calls; existing profile → uploads as without the option, then exactly one PATCH of that profile with `cert`, `key` (+ `chain` only when a chain object was installed), no POST of `<base>_clientssl`; details `ssl_profile`, `ssl_profile_mode`; Verify: bound → success, profile pointing elsewhere → failure "bound to a different certificate"; Rollback with the profile still referencing the objects → failure, zero DELETE/PATCH; profile no longer referencing → cert/key/chain deleted, profile untouched; `ValidateCredentials` with a missing profile → `not_found_on_endpoint` on `config.ssl_profile`; without `ssl_profile` the existing tests stay green (unchanged behaviour); password never in any message/details (scan)
+- [ ] T107 [P] [US8] `go-tangra-deployer-v4/internal/providers/fortigate/fortigate_profile_test.go` + `naming_test.go` (`httptest` fake FortiOS with injectable clock; v3 `naming_test.go`/`deploy_test.go` vectors ported): same serial on the device → reused, no import; else `<base>_<yyyymmdd>`, same-day collision `_01`…`_99`, names ≤ 35 chars, `familyMatcher` vectors; profile missing / `server-cert-mode` ≠ replace / foreign references (VIP, SSL-VPN `servercert`, admin GUI certificate, another SSL/SSH profile) / scan error → `Permanent` "MANUAL REVIEW REQUIRED" result with `reason`, `foreign_references`, `imported` and **no** PUT/DELETE; profile PUT carries only `server-cert`: family entries replaced (order kept, duplicates removed), other domains kept, appended when no family entry, no PUT when already current (actions updated/appended/unchanged); no DELETE of any certificate or profile during Deploy; `bound_policies` listed, its failure ignored; Verify: serial present and listed → success, else failure; Rollback: profile re-pointed to the newest other family member, then deployed certificate deleted (referenced → left and reported), no previous member → failure without any write; without `default_ssl_profile` the existing delete+import tests stay green; token never in any message/details (scan)
+
+### Implementation for User Story 8
+
+- [ ] T108 [US8] BIG-IP: `go-tangra-deployer-v4/internal/providers/bigip/profile.go` (pre-check, PATCH existing profile, bound check) and `go-tangra-deployer-v4/internal/providers/bigip/bigip.go` (`ssl_profile` descriptor per contracts/deployer-config-ui.md §7, Deploy/Verify/Rollback/ValidateCredentials branches, `Permanent` for a missing profile); golden capabilities updated
+- [ ] T109 [US8] FortiGate: `go-tangra-deployer-v4/internal/providers/fortigate/naming.go` (versioned names, `resolveFreeImportName`, `familyMatcher`, serial lookup — ported from v3 `certificate.go`), `go-tangra-deployer-v4/internal/providers/fortigate/references.go` (reference scan, SSL/SSH profile read/PUT of `server-cert`, bound policies — ported from v3 `references.go`), `go-tangra-deployer-v4/internal/providers/fortigate/profile.go` (deploy/verify/rollback in profile mode, manual-review result), `go-tangra-deployer-v4/internal/providers/fortigate/fortigate.go` (`default_ssl_profile` descriptor, branch on the option); golden capabilities updated
+
+**Checkpoint**: v3 configurations with `ssl_profile` / `default_ssl_profile`
+can be recreated in v4 and renew in place; quickstart manual 13 passes.
+
+---
+
+## Phase 11: Polish, security review & release
+
+- [ ] T110 [P] Security review checklist `specs/033-agent-cert-delivery/checklists/security-review.md` (STRIDE rows → test ids; key-scan evidence; policy diffs)
+- [ ] T111 [P] `govulncheck` (`make vuln`) in inventory and deployer; `buf lint`; `gosec` clean for new packages (G304/G302 file modes justified inline)
+- [ ] T112 [P] Coverage gates: `make cover` inventory (100 % new security packages, ≥ 80 % total) and deployer (100 % `inventoryagent` and `internal/provider`, ≥ 90 % for the new BIG-IP/FortiGate profile code, ≥ 80 % total)
+- [ ] T113 [P] Docs: `README.md` (feature overview, agent config, layout, hook), `deploy/README.md` (service config, policies, stack diffs), `SECURITY.md` (key handling statement), `go-tangra-deployer-v4/README.md` (provider, field table incl. overridable fields and the BIG-IP/FortiGate profile options, migration note for v3 `ssl_profile`/`default_ssl_profile` users)
+- [ ] T114 Local freya-stack validation with locally built images (quickstart manual 1–13); record results in `specs/033-agent-cert-delivery/checklists/security-review.md`
+- [ ] T115 Run `/speckit-analyze` consistency check across spec/plan/tasks; fix drift
+- [ ] T116 Release inventory SDK: PR merge, tag `sdk/v4.4.0` (**user confirmation**)
+- [ ] T117 Release inventory v4.7.0: PR merge, tag; approve the `release` environment signing job (**user approval in GitHub**); verify the GitHub release carries the signed agent artifacts (**user confirmation**)
+- [ ] T118 Deployer: replace the temporary `replace` with `github.com/go-tangra/go-tangra-inventory/sdk/v4 v4.4.0` in `go-tangra-deployer-v4/go.mod`; `GOWORK=off go build ./... && go test ./...`
+- [ ] T119 Release deployer v4.4.0 (on top of the released hotfix `fix/provider-endpoint-exfil`) and push lcm policy change (`go-tangra-lcm-v4` PR, no release needed) (**user confirmation**)
+- [ ] T120 Production (**user confirmation**, backups first): pin inventory 4.7.0 and deployer 4.4.0 in go-tangra-docker, apply policies/configs from contracts/mesh-policy.md, deploy, migration 0010, "Upgrade all" agents, quickstart manual 1–3 on one production host before enabling auto-deploy targets
 
 ---
 
@@ -301,13 +327,18 @@ with its descriptors and a manual host-id input until US6 adds the picker.
   parallel (different packages: `certdelivery` replay/sweep vs.
   `agentcerts` hook).
 - US4 (Phase 6) depends on US1 (data) — parallel to US2/US3.
-- US5 (Phase 7, deployer drawer) depends on Phase 2 only (T025/T028
-  descriptors) — can run in parallel with US1–US4; it covers the
-  inventory-agent provider automatically once T051 registers it.
+- US5 (Phase 7, deployer drawer + target-supplied fields) depends on
+  Phase 2 (T025/T028 descriptors) and on the deployer hotfix
+  `fix/provider-endpoint-exfil` being merged (T001) — can run in parallel
+  with US1–US4; it covers the inventory-agent provider automatically once
+  T051 registers it.
 - US6 (Phase 8) depends on US1 (provider, preview) and US5 (generic form,
   `field-host_ids` slot) — parallel to US4.
 - US7 (Phase 9) depends on US1 (and the T078 store for its UI task).
-- Phase 10 after the stories chosen for the release (P1 minimum).
+- US8 (Phase 10, BIG-IP/FortiGate profile options) depends on Phase 2
+  (`Result.Permanent`) and US5 (validator, descriptors) — independent of
+  US1–US4/US6/US7; ships in the same deployer release as US5.
+- Phase 11 after the stories chosen for the release (P1 minimum).
 
 ### Within each story
 
@@ -316,7 +347,7 @@ Tests → pure packages → service/handlers → wiring → UI.
 ### Cross-repo order
 
 inventory proto + SDK (T016, T049) → deployer provider (T051+) using the
-temporary `replace` (T004) → SDK tag (T109) → `go.mod` pin (T111).
+temporary `replace` (T004) → SDK tag (T116) → `go.mod` pin (T118).
 
 ## Parallel Example: Phase 2
 
@@ -364,13 +395,17 @@ Task: "Policy tests in internal/app/policy_test.go and go-tangra-lcm-v4/internal
    later; US5 and US6 ship together in the same deployer release (US6
    needs US5, and the drawer change should not ship half-done).
 3. US7 (revocation flag) — minor release.
+4. US8 (v3 profile options) — with US5 in deployer v4.4.0 (preferred,
+   so migrated v3 configurations renew in place) or a deployer minor.
 
 ### Parallel Team Strategy
 
 - Developer A: inventory relay (`certdelivery`, mesh, ingest, storage).
 - Developer B: agent (`agentcerts`, hook, daemon, packaging).
 - Developer C: deployer (core changes, provider, consumer, host picker).
-- Developer E: deployer configuration drawer (US5) right after Phase 2.
+- Developer E: deployer configuration drawer and target-supplied fields
+  (US5) right after Phase 2, then the BIG-IP/FortiGate profile options
+  (US8).
 - Developer D: inventory UI (after US1 data exists).
 
 ---
@@ -386,8 +421,14 @@ Task: "Policy tests in internal/app/policy_test.go and go-tangra-lcm-v4/internal
 - Every delivery transition must appear in `inventory_audit_events` in the
   same transaction; tests assert audit rows next to data rows.
 - Secrets entered in the deployer drawer must never be echoed — T079
-  (fuzz on messages), T081 and T082 (secret scan) guard it.
+  (fuzz on messages), T081 and T083 (secret scan) guard it.
+- Target overrides are stored unsealed: only `overridable` fields (never
+  credentials, secrets, URLs, TLS switch, headers) may be overridden —
+  T079, T080 and T082 guard it.
+- The credential-redirect fix is owned by the deployer hotfix; T080 is
+  033's regression guard — do not re-implement it.
+- US8 never deletes or recreates a profile and never deletes or overwrites
+  a certificate during deployment — T106/T107 assert zero such calls.
 - Commit after each task or logical group; stop at any checkpoint to
   validate the story on its own.
-- Task count: 113 (Setup 6, Foundational 24, US1 23, US2 13, US3 6, US4 6,
-  US5 13, US6 6, US7 5, Polish 11).
+- Task count: 120 (Setup 6, Foundational 24, US1 23, US2 13, US3 6, US4 6, US5 16, US6 6, US7 5, US8 4, Polish 11).

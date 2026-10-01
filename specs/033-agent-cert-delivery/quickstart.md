@@ -40,7 +40,15 @@
   (`FuzzInventoryAgentConfig`), UI unit tests for the form and host
   picker, the schema-driven drawer (`provider-form.spec.ts`,
   `provider-schema.spec.ts` over the shared Go/TS vectors), descriptor
-  validator unit + fuzz tests (`FuzzValidateInput`), `make vuln`.
+  validator unit + fuzz tests (`FuzzValidateInput`), target-override
+  validation (attach 422 `config_overrides.<key>`, `required_by_targets`
+  on configuration update, job-start "must be provided by the target"),
+  target-form vitest (`target-overrides.spec.ts`), BIG-IP `ssl_profile`
+  and FortiGate `default_ssl_profile` against fake iControl/FortiOS
+  servers (`bigip_profile_test.go`, `fortigate_profile_test.go`, ported
+  v3 naming vectors), regression tests that `endpoint`/`api_base` and
+  auth headers stay refused (fixed by hotfix
+  `fix/provider-endpoint-exfil`), `make vuln`.
 - **lcm** (`go-tangra-lcm-v4`): policy test that `svc/inventory` may call
   only `Certificates/Download`.
 
@@ -122,6 +130,31 @@ systemd) running agent 4.7.0 enrolled to the stack (dev: `insecure: true`
     FortiGate, Webhook, Dummy, Inventory agent) without reading docs.
     `GET /configurations/{id}` and `docker compose -p freya-stack logs
     deployer` contain none of the entered secrets.
+12. **US5 — target-supplied fields (Q7)** — New Cloudflare configuration
+    with the API token and **Zone ID left empty** → saved with the warning
+    "To be provided by each target"; list badge "Needs target values: Zone
+    ID"; "Deploy" disabled for it; `curl` a direct deploy of it → job
+    fails "configuration incomplete: Zone ID must be provided by the
+    target" (no Cloudflare request in the fake/network log). Targets → New
+    → attach it: the form shows Zone ID required for this configuration;
+    save without it → highlighted, and `curl` attach without it → 422
+    `{"detail":{"configuration_id":"…","fields":{"config_overrides.zone_id":"required"}}}`;
+    `curl` attach with `{"api_token": "x"}` or (webhook) `{"url": "…"}` as
+    override → 422 `not_overridable`. Save with a zone id → attach
+    succeeds. Edit a complete configuration that targets rely on and
+    clear its zone id → 422 `required_by_targets` naming the target.
+13. **US8 — profile options** (lab BIG-IP/FortiGate, or the fake
+    appliances from the provider tests run as a stub server): BIG-IP
+    configuration with SSL profile `www_clientssl_prod` (pre-created) →
+    deploy → the profile's certificate/key are the new objects, no
+    `<name>_clientssl` exists; a non-existent profile name → Test
+    connection shows "not found" on the field and a deploy fails without
+    uploading. FortiGate with Default SSL profile `inbound-www`
+    (replace mode, listing a certificate of another domain) → deploy a
+    renewal → new certificate `<base>_<yyyymmdd>` imported, the profile
+    lists it instead of the old one and still lists the other domain;
+    old certificate not deleted; a profile in another mode → job "MANUAL
+    REVIEW REQUIRED" with the reason in the job details and no retries.
 
 ## Production rollout (user-confirmed steps)
 
