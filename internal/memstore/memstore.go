@@ -34,6 +34,7 @@ type Mem struct {
 	Now      func() time.Time
 	upg      *upgradeState    // feature 023 (lazily created)
 	aes      *autoEnrollState // feature 029 (lazily created)
+	cert     *certState       // feature 033 (lazily created)
 }
 
 // New builds an empty store.

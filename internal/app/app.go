@@ -286,7 +286,8 @@ func (a *App) serveIngest(ctx context.Context, s *ingest.Server, tlsCert *ingest
 	}
 }
 
-// maintenance marks hosts stale and purges snapshots beyond the retention window.
+// maintenance marks hosts stale and purges snapshots and terminal certificate
+// delivery items beyond the retention window.
 func (a *App) maintenance(ctx context.Context) {
 	t := time.NewTicker(a.Cfg.PurgeInterval())
 	defer t.Stop()
@@ -300,6 +301,12 @@ func (a *App) maintenance(ctx context.Context) {
 				a.Log.Warn("purge snapshots", "err", err)
 			} else if n > 0 {
 				a.Log.Info("purged old snapshots", "count", n)
+			}
+			// Terminal certificate delivery items (feature 033) share the window.
+			if n, err := a.Repo.PurgeCertItems(ctx, now.Add(-a.Cfg.RetentionWindow())); err != nil {
+				a.Log.Warn("purge certificate delivery items", "err", err)
+			} else if n > 0 {
+				a.Log.Info("purged old certificate delivery items", "count", n)
 			}
 		}
 	}

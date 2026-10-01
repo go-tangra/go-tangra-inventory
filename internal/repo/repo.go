@@ -109,6 +109,7 @@ type Store interface {
 	ReleaseStore
 	UpgradeStore
 	AutoEnrollStore
+	CertDeliveryStore
 }
 
 // ArtifactOpener opens the content of one artifact of a release being
@@ -204,4 +205,78 @@ type AutoEnrollStore interface {
 	// when the nonce was used, ErrConflict when the key is no longer usable
 	// or the tenant switch is off.
 	EnrollWithAutoKey(ctx context.Context, e store.AutoEnrollment) error
+}
+
+// NewCertDelivery is a delivery with its items and audit rows, created in
+// one transaction by CreateCertDelivery (feature 033).
+type NewCertDelivery struct {
+	Delivery store.CertDelivery
+	Items    []store.CertDeliveryItem
+	Audit    []store.AuditRow
+	// SupersedeAudit builds the audit row of an older active item of the
+	// same host and name that a new active item replaces (nil: none).
+	SupersedeAudit func(old store.CertDeliveryItem, newItemID string) store.AuditRow
+}
+
+// CertItemChange is what an UpdateCertItem callback stores next to the
+// item: its audit rows and, when set, the host certificate to upsert.
+type CertItemChange struct {
+	Audit    []store.AuditRow
+	HostCert *store.HostCertificate
+}
+
+// CertItemFilter constrains ListCertItemsPage (contracts/inventory-http.md);
+// empty fields match all.
+type CertItemFilter struct {
+	HostID        string
+	State         string
+	Name          string
+	CertificateID string
+	DeliveryID    string
+}
+
+// CertCancelScope selects the active items CancelCertItems cancels: those
+// of a host, of an agent or of an lcm certificate (exactly one is set).
+type CertCancelScope struct {
+	HostID        string
+	AgentID       string
+	CertificateID string
+}
+
+// CertDeliveryStore persists certificate deliveries, their per-host items
+// and the per-host certificate state (feature 033). No method stores
+// certificate or key material. Every state change appends its audit rows in
+// the same transaction.
+type CertDeliveryStore interface {
+	// CreateCertDelivery inserts the delivery and its items with the audit
+	// rows atomically. Every active item of the same tenant, host and name
+	// that a new active item replaces is set to superseded first (with
+	// SupersedeAudit's row); those items are returned. ErrConflict when the
+	// (tenant, source, idempotency key) exists or an id is reused.
+	CreateCertDelivery(ctx context.Context, n NewCertDelivery) (superseded []store.CertDeliveryItem, err error)
+	// GetCertDelivery returns a delivery with its items (oldest first).
+	GetCertDelivery(ctx context.Context, tenantID, id string) (store.CertDelivery, []store.CertDeliveryItem, error)
+	// GetCertDeliveryByKey finds a delivery by its idempotency key.
+	GetCertDeliveryByKey(ctx context.Context, tenantID, source, key string) (store.CertDelivery, error)
+	GetCertItem(ctx context.Context, tenantID, id string) (store.CertDeliveryItem, error)
+	// UpdateCertItem locks the item, applies fn and stores the result with
+	// fn's audit rows and host certificate; an error of fn changes nothing.
+	// ErrNotFound for another tenant's or a missing id; ErrConflict when
+	// the result would make a second active item for the host and name.
+	UpdateCertItem(ctx context.Context, tenantID, id string, fn func(*store.CertDeliveryItem) (CertItemChange, error)) (store.CertDeliveryItem, error)
+	// ListActiveCertItemsForAgent lists an agent's pending, delivered and
+	// fetched items, oldest first, at most limit (<= 0: no limit).
+	ListActiveCertItemsForAgent(ctx context.Context, tenantID, agentID string, limit int) ([]store.CertDeliveryItem, error)
+	// ListCertItemsPage pages a tenant's items (store.CertItemList order).
+	ListCertItemsPage(ctx context.Context, tenantID string, f CertItemFilter, req listquery.Request) ([]store.CertDeliveryItem, int, listquery.Request, error)
+	// CancelCertItems cancels the scope's active items with reason, each with
+	// the audit row of row, in one transaction, and returns them.
+	CancelCertItems(ctx context.Context, tenantID string, scope CertCancelScope, reason string, row func(store.CertDeliveryItem) store.AuditRow) ([]store.CertDeliveryItem, error)
+	// GetHostCertificate returns the current certificate of a host under name.
+	GetHostCertificate(ctx context.Context, tenantID, hostID, name string) (store.HostCertificate, error)
+	// ListHostCertificates lists a host's certificates by name.
+	ListHostCertificates(ctx context.Context, tenantID, hostID string) ([]store.HostCertificate, error)
+	// PurgeCertItems deletes (system scope) terminal items last updated
+	// before olderThan and the deliveries left without items.
+	PurgeCertItems(ctx context.Context, olderThan time.Time) (int64, error)
 }

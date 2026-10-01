@@ -10,7 +10,7 @@ import (
 func TestListSpecsValid(t *testing.T) {
 	for name, s := range map[string]listquery.Spec{
 		"hosts": HostList, "snapshots": SnapshotList, "changes": ChangeList,
-		"fleet": FleetList, "auto-enroll keys": AutoEnrollKeyList,
+		"fleet": FleetList, "auto-enroll keys": AutoEnrollKeyList, "certificate items": CertItemList,
 	} {
 		if err := s.Validate(); err != nil {
 			t.Errorf("%s: %v", name, err)
@@ -37,7 +37,7 @@ func TestListRequestDefaults(t *testing.T) {
 // The SQL-backed sorts are over NOT NULL columns, so ORDER BY carries no
 // NULLS LAST and the (tenant_id, <expr>, id) indexes serve both directions.
 func TestListOrderByIndexFriendly(t *testing.T) {
-	for name, s := range map[string]listquery.Spec{"hosts": HostList, "snapshots": SnapshotList, "changes": ChangeList} {
+	for name, s := range map[string]listquery.Spec{"hosts": HostList, "snapshots": SnapshotList, "changes": ChangeList, "certificate items": CertItemList} {
 		for field := range s.Fields {
 			for _, dir := range []listquery.Dir{listquery.Asc, listquery.Desc} {
 				ob := listquery.Request{Sort: field, Order: dir}.OrderBy(s)
