@@ -3,6 +3,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createRouter, createMemoryHistory } from 'vue-router'
 import Detail from '@/views/hosts/detail.vue'
+import Hosts from '@/views/hosts/index.vue'
 
 class FakeSource { onopen = null; onerror = null; addEventListener() {} close() {} }
 const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: { template: '<div/>' } }, { path: '/inventory', name: 'inventory-hosts', component: { template: '<div/>' } }, { path: '/inventory/host/:id', name: 'inventory-host', component: { template: '<div/>' } }] })
@@ -201,6 +202,118 @@ describe('host detail: disks and filesystems (feature 023)', () => {
     const w = await openTab(0, { disks: [{ partitions: [{ mount: '/', fs: 'ext4', size_bytes: 1024, free_bytes: 512 }] }] })
     expect(w.find('[data-test=disks-card]').exists()).toBe(false)
     expect(w.text()).toContain('Partitions')
+    w.unmount()
+  })
+})
+
+// --- list contract (go-tangra specs/032-server-side-tables) ---
+
+function recordFetch(handler: (url: string) => unknown) {
+  const calls: string[] = []
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    calls.push(url)
+    return new Response(JSON.stringify(handler(url)), { status: 200, headers: { 'Content-Type': 'application/json' } })
+  }))
+  return calls
+}
+const params = (url: string) => new URL(url, 'https://x').searchParams
+// A list server of `total` rows that echoes the request and clamps the page.
+const paged = (total: number, row: (page: number) => Record<string, unknown>) => (url: string) => {
+  const q = params(url)
+  const size = Number(q.get('page_size'))
+  const page = Math.min(Number(q.get('page')), Math.max(1, Math.ceil(total / size)))
+  return { items: [row(page)], total, page, page_size: size, sort: q.get('sort'), order: q.get('order') }
+}
+const header = (w: ReturnType<typeof mount>, label: string) => w.findAll('th button').find((b) => b.text().startsWith(label))
+
+describe('hosts: server paging, sorting and filters', () => {
+  beforeEach(async () => {
+    setActivePinia(createPinia())
+    vi.stubGlobal('EventSource', FakeSource)
+    ;(globalThis as unknown as { __vw: number }).__vw = 1280
+    await router.push('/inventory')
+  })
+
+  it('filters send os_name and last_seen_from, return to page 1 and keep the sort; whole-list sort', async () => {
+    const hostRows = paged(90, (p) => ({ ...host, id: 'h' + p, hostname: 'srv-' + p }))
+    const calls = recordFetch((url) => (url.includes('/hosts?') ? hostRows(url) : { items: [], total: 0 }))
+    const w = mount(Hosts, { global, attachTo: document.body })
+    await flushPromises()
+    const lists = () => calls.filter((c) => c.includes('/hosts?'))
+    const last = () => params(lists().at(-1)!)
+    expect(lists()[0]).toBe('/api/inventory/v1/hosts?page=1&page_size=25&sort=hostname&order=asc')
+    expect(w.text()).toContain('Showing 1–25 of 90')
+    for (const label of ['Hostname', 'OS', 'Manufacturer', 'Status', 'Last seen']) expect(header(w, label), label).toBeTruthy()
+    await header(w, 'Last seen')!.trigger('click')
+    await flushPromises()
+    expect([last().get('sort'), last().get('order'), last().get('page')]).toEqual(['last_seen', 'desc', '1'])
+    await w.find('[aria-label="Page 3"]').trigger('click')
+    await flushPromises()
+    expect(last().get('page')).toBe('3')
+
+    await w.find('input[data-field=os_name]').setValue('Windows')
+    await w.find('form').trigger('submit')
+    await flushPromises()
+    expect([last().get('os_name'), last().get('os'), last().get('page'), last().get('sort'), last().get('order')]).toEqual(['Windows', null, '1', 'last_seen', 'desc'])
+
+    const before = Date.now()
+    await w.find('select[data-field=last_seen]').setValue('24h')
+    await flushPromises()
+    const from = Date.parse(last().get('last_seen_from')!)
+    expect(from).toBeGreaterThan(before - 864e5 - 5000)
+    expect(from).toBeLessThanOrEqual(Date.now() - 864e5)
+    expect(last().get('os_name')).toBe('Windows')
+    w.unmount()
+  })
+
+  it('a page beyond the end is replaced by the page the server returned', async () => {
+    await router.push('/inventory?hosts.page=9&hosts.size=10&hosts.sort=os_name&hosts.order=desc')
+    const calls = recordFetch((url) => (url.includes('/hosts?') ? paged(31, (p) => ({ ...host, id: 'h' + p }))(url) : { items: [], total: 0 }))
+    const w = mount(Hosts, { global })
+    await flushPromises()
+    const first = params(calls.find((c) => c.includes('/hosts?'))!)
+    expect([first.get('page'), first.get('page_size'), first.get('sort'), first.get('order')]).toEqual(['9', '10', 'os_name', 'desc'])
+    expect(router.currentRoute.value.query['hosts.page']).toBe('4')
+    w.unmount()
+  })
+})
+
+describe('host detail: snapshot and change history pages', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.stubGlobal('EventSource', FakeSource)
+    ;(globalThis as unknown as { __vw: number }).__vw = 1280
+  })
+
+  it('snapshots and changes are paged and sorted on the server, independently', async () => {
+    await router.push('/inventory/host/h1')
+    const snapRows = paged(60, (p) => ({ id: 'snap-p' + p, host_id: 'h1', collected_at: '2026-01-02T00:00:00Z', received_at: '2026-01-02T00:00:01Z', source: 'agent' }))
+    const changeRows = paged(130, (p) => ({ id: 'c' + p, host_id: 'h1', detected_at: '2026-01-02T00:00:00Z', category: 'software', change_type: 'added', component_key: 'pkg-' + p }))
+    const calls = recordFetch((url) => (url.endsWith('/hosts/h1') ? host : url.endsWith('/latest') ? { id: 'snap1', host_id: 'h1', payload: base } : url.includes('/snapshots?') ? snapRows(url) : url.includes('/changes?') ? changeRows(url) : { items: [], total: 0 }))
+    const w = mount(Detail, { global, attachTo: document.body })
+    await flushPromises()
+    await w.findAll('[role=tab]')[3]!.trigger('click')
+    await flushPromises()
+    const last = (part: string) => params(calls.filter((c) => c.includes(part)).at(-1)!)
+    expect(calls.find((c) => c.includes('/snapshots?'))).toBe('/api/inventory/v1/hosts/h1/snapshots?page=1&page_size=25&sort=collected_at&order=desc')
+    expect(calls.find((c) => c.includes('/changes?'))).toBe('/api/inventory/v1/hosts/h1/changes?page=1&page_size=25&sort=detected_at&order=desc')
+    const snaps = w.find('[data-test=snapshots-table]')
+    const changes = w.find('[data-test=changes-table]')
+    expect(snaps.text()).toContain('of 60')
+    expect(changes.text()).toContain('of 130')
+    await changes.find('[aria-label="Page 5"]').trigger('click')
+    await flushPromises()
+    expect(last('/changes?').get('page')).toBe('5')
+    expect(w.find('[data-test=changes-table]').text()).toContain('pkg-5')
+    expect(last('/snapshots?').get('page')).toBe('1')
+    // Sorting by the change type uses the server field "kind".
+    await w.find('[data-test=changes-table]').findAll('th button').find((b) => b.text().startsWith('Change'))!.trigger('click')
+    await flushPromises()
+    expect([last('/changes?').get('sort'), last('/changes?').get('order'), last('/changes?').get('page')]).toEqual(['kind', 'asc', '1'])
+    await snaps.find('[aria-label="Page 2"]').trigger('click')
+    await flushPromises()
+    expect(last('/snapshots?').get('page')).toBe('2')
+    expect(w.find('[data-test=snapshots-table]').text()).toContain('snap-p2')
     w.unmount()
   })
 })

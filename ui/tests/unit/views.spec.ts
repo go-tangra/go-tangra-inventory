@@ -40,6 +40,8 @@ describe('inventory views on the kit', () => {
     expect(hostFilterSchema.safeParse({ tag: 'site=hq' }).success).toBe(true)
     expect(hostFilterSchema.safeParse({ tag: 'a=b=c' }).success).toBe(false)
     expect(hostFilterSchema.safeParse({ status: 'gone' }).success).toBe(false)
+    // An empty form (no tag) is a valid filter.
+    expect(hostFilterSchema.safeParse({ hostname: '', os_name: '', manufacturer: '', tag: '' }).success).toBe(true)
   })
 
   it('hosts list: rows with status/agent chips, filter submits validated query, no inline styles', async () => {

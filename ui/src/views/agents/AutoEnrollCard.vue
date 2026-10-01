@@ -3,10 +3,10 @@
 // proving possession of a tenant key, only from the key's networks. The
 // secret is shown once, at creation or rotation; afterwards only the public
 // key id is visible. Managed with agents:manage like tokens.
-import { computed, onMounted, ref } from 'vue'
-import { UiAlert, UiButton, UiCard, UiCopyButton, UiDataTable, UiDateInput, UiDrawer, UiForm, UiInput, UiNumberInput, UiSecretField, UiStatusChip, UiSwitch, UiTextarea, useConfirm, type Column } from '@go-tangra/ui'
+import { computed, onMounted, ref, watch } from 'vue'
+import { UiAlert, UiButton, UiCard, UiCopyButton, UiDataTable, UiDateInput, UiDrawer, UiForm, UiInput, UiNumberInput, UiSecretField, UiStatusChip, UiSwitch, UiTextarea, useConfirm, useListQuery, type Column } from '@go-tangra/ui'
 import { useZodForm } from '@go-tangra/ui/forms'
-import { useAgents } from '@/stores/agents'
+import { AUTO_KEY_LIST, useAgents } from '@/stores/agents'
 import { ApiError, describe } from '@/api/client'
 import { autoEnrollKeySchema, parseNetworks } from '@/schemas'
 import type { AutoEnrollKey, AutoEnrollKeySecret } from '@/api/types'
@@ -23,13 +23,18 @@ const issued = ref<AutoEnrollKeySecret | null>(null)
 
 const settings = computed(() => agents.autoEnroll)
 
-onMounted(async () => {
+// --- server paging and sorting of the keys (?autokeys.page=…) ---
+const lq = useListQuery('autokeys', AUTO_KEY_LIST)
+async function load(): Promise<void> {
   try {
-    await agents.loadAutoEnroll()
+    const res = await agents.loadAutoEnroll(lq.query.value)
+    if (res?.page) lq.clampTo(res.page) // a page beyond the end answers the last page
   } catch (e) {
     error.value = describe(e)
   }
-})
+}
+onMounted(load)
+watch(lq.query, () => void load())
 
 async function toggle(on: boolean): Promise<void> {
   switching.value = true
@@ -130,6 +135,7 @@ async function remove(k: AutoEnrollKey): Promise<void> {
 
 const stateColors = { active: 'success', disabled: 'neutral', expired: 'warning', exhausted: 'warning' } as const
 const fmt = (ts: string | null): string => (ts ? new Date(ts).toLocaleString() : '')
+// Sortable columns are the server's sort fields (AUTO_KEY_LIST).
 const columns: Column<AutoEnrollKey>[] = [
   { key: 'name', label: 'Name', sortable: true },
   { key: 'key_id', label: 'Key ID', hideOnStack: true },
@@ -138,6 +144,7 @@ const columns: Column<AutoEnrollKey>[] = [
   { key: 'enrollments', label: 'Enrolled', width: 'sm', format: (k) => (k.max_enrollments ? `${k.enrollments} / ${k.max_enrollments}` : String(k.enrollments)) },
   { key: 'expires_at', label: 'Expires', hideOnStack: true, format: (k) => fmt(k.expires_at) || 'never' },
   { key: 'last_used_at', label: 'Last used', hideOnStack: true, format: (k) => (k.last_used_at ? `${fmt(k.last_used_at)} (${k.last_used_ip})` : '') },
+  { key: 'created_at', label: 'Created', hideOnStack: true, sortable: true, defaultDir: 'desc', format: (k) => fmt(k.created_at) },
 ]
 
 const keyFile = '/etc/inventory-agent/auto-enroll.key'
@@ -160,8 +167,8 @@ const cliSnippet = computed(() => (issued.value ? `inventory-agent -daemon -inge
         <UiSwitch id="auto-enroll-enabled" :model-value="settings.enabled" label="Allow agents to enroll with a key" :disabled="switching" data-test="auto-enroll-enabled" @update:model-value="toggle" />
         <UiButton icon="mdi-key-plus" data-test="auto-enroll-new" @click="openCreate">New key</UiButton>
       </div>
-      <UiAlert v-if="!settings.enabled && settings.keys.length" kind="info" class="mb-3" data-test="auto-enroll-off">Automatic enrollment is off: no key can be used until it is switched on.</UiAlert>
-      <UiDataTable :items="settings.keys" :columns="columns" row-key="id" caption="Enrollment keys" empty-title="No enrollment keys" :row-attrs="(k) => ({ 'data-test': 'auto-key-' + k.key_id })" data-test="auto-enroll-keys">
+      <UiAlert v-if="!settings.enabled && (settings.total ?? settings.keys.length)" kind="info" class="mb-3" data-test="auto-enroll-off">Automatic enrollment is off: no key can be used until it is switched on.</UiAlert>
+      <UiDataTable :items="settings.keys" :columns="columns" row-key="id" :total="settings.total ?? settings.keys.length" :page="lq.page.value" :page-size="lq.pageSize.value" :sort="lq.sort.value" caption="Enrollment keys" empty-title="No enrollment keys" :row-attrs="(k) => ({ 'data-test': 'auto-key-' + k.key_id })" data-test="auto-enroll-keys" @update:page="lq.setPage" @update:page-size="lq.setPageSize" @update:sort="lq.setSort">
         <template #cell-key_id="{ row }"><code class="text-xs">{{ row.key_id }}</code></template>
         <template #cell-state="{ row }"><UiStatusChip :status="row.state" :colors="stateColors" /></template>
         <template #actions="{ row }">

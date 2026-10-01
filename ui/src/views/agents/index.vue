@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useAbility } from '@casl/vue'
-import { UiPage, UiAlert, UiCard, UiButton, UiDataTable, UiStatusChip, UiLiveIndicator, UiForm, UiInput, UiSecretField, UiCopyButton, UiDrawer, UiSelect, useConfirm, type Column } from '@go-tangra/ui'
+import { UiPage, UiAlert, UiCard, UiButton, UiDataTable, UiStatusChip, UiLiveIndicator, UiForm, UiInput, UiSecretField, UiCopyButton, UiDrawer, UiSelect, useConfirm, useListQuery, type Column } from '@go-tangra/ui'
 import { useZodForm } from '@go-tangra/ui/forms'
-import { useAgents } from '@/stores/agents'
+import { FLEET_LIST, useAgents, type FleetFilter } from '@/stores/agents'
 import { useLive } from '@/stores/live'
 import { describe } from '@/api/client'
 import { enrollTokenSchema } from '@/schemas'
@@ -28,8 +28,32 @@ const busyUpgrade = ref(false)
 const selected = ref<string[]>([])
 const stateFilter = ref<FleetState | ''>('')
 
-function reload(): Promise<void> {
-  return agents.listFleet(stateFilter.value ? { upgrade_state: stateFilter.value } : {})
+// --- server paging and sorting (page / size / sort in the URL: ?agents.page=…) ---
+const lq = useListQuery('agents', FLEET_LIST)
+// Fleet-wide figures (the table shows one page): agents that need a manual
+// install, and outdated agents (gates "Upgrade all outdated").
+const manualCount = ref(0)
+const outdatedCount = ref(0)
+
+const fleetFilter = (): FleetFilter => (stateFilter.value ? { upgrade_state: stateFilter.value } : {})
+async function load(): Promise<void> {
+  const res = await agents.listFleet(fleetFilter(), lq.query.value)
+  if (res?.page) lq.clampTo(res.page) // a page beyond the end answers the last page
+}
+async function counts(): Promise<void> {
+  const [manual, outdated] = await Promise.all([agents.countFleet({ upgrade_state: 'manual_upgrade_required' }), agents.countFleet({ outdated: true })])
+  manualCount.value = manual
+  outdatedCount.value = outdated
+}
+/** Reloads the current page and the fleet-wide figures. */
+async function reload(): Promise<void> {
+  await Promise.all([load(), counts()])
+}
+watch(lq.query, () => void load())
+/** A new state filter returns to page 1 (which reloads). */
+function onStateFilter(): void {
+  if (lq.page.value !== 1) lq.resetPage()
+  else void load()
 }
 
 let release: (() => void) | null = null
@@ -123,22 +147,23 @@ async function cancel(a: AgentFleetEntry): Promise<void> {
 }
 
 const canUpgrade = (a: AgentFleetEntry): boolean => !!a.upgrade_state && UPGRADABLE.has(a.upgrade_state)
-const manualCount = computed(() => agents.fleet.filter((a) => a.upgrade_state === 'manual_upgrade_required').length)
-const outdatedCount = computed(() => agents.fleet.filter(canUpgrade).length)
 
 const stateColors = { up_to_date: 'success', available: 'info', pending: 'neutral', in_progress: 'primary', failed: 'error', rolled_back: 'warning', manual_upgrade_required: 'warning', unsupported: 'neutral' } as const
 const stateOptions = [{ title: 'All states', value: '' }, ...(Object.keys(stateColors) as FleetState[]).map((s) => ({ title: fleetStateLabel(s), value: s }))]
 
 const fmt = (ts?: string): string => (ts ? new Date(ts).toLocaleString() : '')
+// Sortable columns are the server's sort fields (FLEET_LIST; "state" is the
+// upgrade state): sorting orders the whole fleet, not the visible page.
 const columns: Column<AgentFleetEntry>[] = [
   { key: 'status', label: 'Status', width: 'sm' },
   { key: 'hostname', label: 'Hostname', sortable: true },
   { key: 'agent_id', label: 'Agent ID', format: (a) => a.agent_id.slice(0, 12), hideOnStack: true },
   { key: 'version', label: 'Version', sortable: true },
   { key: 'target_version', label: 'Target', hideOnStack: true },
-  { key: 'upgrade_state', label: 'Upgrade' },
+  { key: 'state', label: 'Upgrade', sortable: true },
   { key: 'enrolled_via', label: 'Enrolled with', hideOnStack: true, format: (a) => (a.enrolled_via === 'auto' ? 'key ' + (a.auto_enroll_key_id ?? '') : 'token') },
-  { key: 'state_changed_at', label: 'Last change', format: (a) => fmt(a.state_changed_at || a.last_seen || a.connected_at), hideOnStack: true },
+  { key: 'last_seen', label: 'Last seen', sortable: true, defaultDir: 'desc', format: (a) => fmt(a.last_seen || a.connected_at), hideOnStack: true },
+  { key: 'state_changed_at', label: 'Last change', format: (a) => fmt(a.state_changed_at), hideOnStack: true },
 ]
 </script>
 
@@ -159,12 +184,12 @@ const columns: Column<AgentFleetEntry>[] = [
       {{ manualCount }} agent{{ manualCount === 1 ? ' is' : 's are' }} older than 4.4.0 and cannot upgrade themselves. Install the current agent package on {{ manualCount === 1 ? 'that host' : 'those hosts' }} once by hand; later versions upgrade from here.
     </UiAlert>
     <div class="mb-3 max-w-xs">
-      <UiSelect id="fleet-state" v-model="stateFilter" label="Upgrade state" size="sm" :options="stateOptions" data-test="fleet-state-filter" @update:model-value="reload()" />
+      <UiSelect id="fleet-state" v-model="stateFilter" label="Upgrade state" size="sm" :options="stateOptions" data-test="fleet-state-filter" @update:model-value="onStateFilter" />
     </div>
     <UiCard :padded="false">
-      <UiDataTable v-model:selected="selected" :items="agents.fleet" :columns="columns" row-key="agent_id" :loading="agents.loading" :selectable="canManage" :row-selectable="canUpgrade" caption="Agents" empty-title="No agents enrolled" :row-attrs="(a) => ({ 'data-test': 'agent-row-' + a.agent_id })" data-test="agents-table">
+      <UiDataTable v-model:selected="selected" :items="agents.fleet" :columns="columns" row-key="agent_id" :loading="agents.loading" :total="agents.total" :page="lq.page.value" :page-size="lq.pageSize.value" :sort="lq.sort.value" :selectable="canManage" :row-selectable="canUpgrade" caption="Agents" empty-title="No agents enrolled" :row-attrs="(a) => ({ 'data-test': 'agent-row-' + a.agent_id })" data-test="agents-table" @update:page="lq.setPage" @update:page-size="lq.setPageSize" @update:sort="lq.setSort">
         <template #cell-status="{ row }"><UiStatusChip :status="row.online === false ? 'offline' : 'online'" /></template>
-        <template #cell-upgrade_state="{ row }">
+        <template #cell-state="{ row }">
           <span v-if="row.upgrade_state" class="inline-flex flex-col gap-0.5">
             <UiStatusChip :status="row.upgrade_state" :label="fleetStateLabel(row.upgrade_state)" :colors="stateColors" :data-test="'agent-state-' + row.agent_id" />
             <span v-if="row.upgrade_reason" class="text-xs text-base-content/70" :data-test="'agent-reason-' + row.agent_id">{{ reasonText(row.upgrade_reason) }}</span>
