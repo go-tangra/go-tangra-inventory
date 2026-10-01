@@ -6,27 +6,38 @@ Repository: go-tangra-deployer-v4. Package
 
 ## 1. Capabilities (as returned by `GET /api/deployer/v1/providers`)
 
+Field descriptors follow [deployer-config-ui.md](deployer-config-ui.md) §2
+(the generic schema-driven drawer, US5); the same descriptors drive
+save-time validation.
+
 ```json
 {
   "type": "inventory-agent",
   "display_name": "Inventory agent",
+  "description": "Delivers the certificate to inventory hosts through their agents (certbot layout).",
   "supports_verify": true,
   "supports_rollback": false,
   "delivers_by_reference": true,
+  "test_connection": false,
+  "schema_version": 1,
   "config_fields": [
-    {"key": "host_ids", "label": "Hosts", "type": "host_selector", "help": "Inventory hosts that receive the certificate"},
-    {"key": "host_tags", "label": "Host tags", "type": "string_list", "max": 16, "help": "key or key=value; a host must match all"},
-    {"key": "cert_name", "label": "Certificate name", "type": "string", "help": "Directory name under live/ on the host; default from the common name"},
-    {"key": "key_policy", "label": "Private key", "type": "enum", "options": ["require", "certificate_only"], "default": "require"},
-    {"key": "require_all_success", "label": "Require all hosts", "type": "bool", "default": false},
-    {"key": "wait_seconds", "label": "Wait for hosts (s)", "type": "int", "min": 0, "max": 240, "default": 60}
+    {"key": "host_ids", "label": "Hosts", "type": "host_selector", "group": "connection", "max_items": 1000, "help": "Inventory hosts that receive the certificate"},
+    {"key": "host_tags", "label": "Host tags", "type": "string_list", "group": "connection", "max_items": 16, "pattern": "^[A-Za-z0-9_.:/-]{1,63}(=[^\\u0000-\\u001f]{0,255})?$", "placeholder": "role=web", "help": "key or key=value; a host must match all"},
+    {"key": "cert_name", "label": "Certificate name", "type": "string", "group": "options", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$", "placeholder": "www", "help": "Directory name under live/ on the host; default from the common name"},
+    {"key": "key_policy", "label": "Private key", "type": "enum", "group": "options", "options": [{"value": "require", "label": "Required"}, {"value": "certificate_only", "label": "Certificate only (keep the host's key)"}], "default": "require"},
+    {"key": "require_all_success", "label": "Require all hosts", "type": "bool", "group": "options", "default": false},
+    {"key": "wait_seconds", "label": "Wait for hosts (s)", "type": "int", "group": "options", "min": 0, "max": 240, "default": 60}
   ],
-  "credential_fields": []
+  "credential_fields": [],
+  "one_of_required": [["host_ids", "host_tags"]]
 }
 ```
 
-`required_config` (legacy hint list) stays empty: the "at least one of
-`host_ids`/`host_tags`" rule is enforced by `ValidateConfig`.
+The "at least one of `host_ids`/`host_tags`" rule is expressed by
+`one_of_required` and enforced by the generic validator; the provider's
+`ValidateConfig` adds the rules a descriptor cannot express (UUID format of
+`host_ids`, `cert_name` without `..`). The UI labels the validate action
+"Preview hosts".
 
 ## 2. Config JSON schema (`TargetConfiguration.config`, target overrides)
 
@@ -102,10 +113,11 @@ error)`); other providers return `{"valid": true}` as today.
   (Rollback keeps `true` for other providers).
 - `provider.WithJob(ctx, JobMeta{TenantID, JobID, ConfigurationID,
   TargetID (from the parent job), Trigger})` around `Deploy`/`Verify`.
-- `configs.Create/Update`: `if v, ok := p.(provider.ConfigValidator); ok
+- `configs.Create/Update`: the generic descriptor validator
+  `provider.ValidateInput` (US5, deployer-config-ui.md §3) runs for every
+  provider, then `if v, ok := p.(provider.ConfigValidator); ok
   { v.ValidateConfig(in.Config) }`; targets: validate the merged effective
-  config for every configuration override touching an inventory-agent
-  configuration.
+  config for every configuration override (all providers, US5).
 - Events consumer: `certificate.revoked` → if the tenant has an active
   `inventory-agent` configuration, `MarkCertificateRevoked` (best effort,
   logged, audited `certificate_revocation_forwarded`).
@@ -121,18 +133,21 @@ discovery:
 
 ## 5. Deployer UI (`ui/`)
 
-- `src/views/configurations/index.vue`: when `provider_type ===
-  'inventory-agent'`, render `<InventoryAgentConfig v-model="config">`
-  instead of the JSON textarea; the credentials textarea is hidden
-  (no credential fields).
-- `src/components/InventoryAgentConfig.vue`: fields from §1; host picker
-  `src/components/HostPicker.vue`: server-paged table (032 conventions)
-  over `GET /api/inventory/v1/hosts?page=&pageSize=&search=&tag=` with the
-  user's session (columns: hostname, OS, tags, agent online, certificate
-  capability); selected hosts as chips; 401/403/404 → notice "Host list
-  unavailable — enter host ids manually" and a textarea for ids.
-- Validate shows `matched_hosts` in a table with capability badges.
+Built on the generic schema-driven drawer (US5,
+[deployer-config-ui.md](deployer-config-ui.md) §6); this provider adds only
+what the generic form cannot render:
+
+- `src/components/ProviderConfigForm.vue` renders the provider's fields;
+  the `host_selector` field type is rendered through the slot
+  `field-host_ids` with `src/components/HostPicker.vue`: server-paged
+  table (032 conventions) over `GET /api/inventory/v1/hosts?page=&pageSize=&search=&tag=`
+  with the user's session (columns: hostname, OS, tags, agent online,
+  certificate capability); selected hosts as chips; 401/403/404 → notice
+  "Host list unavailable — enter host ids manually" and a textarea for ids.
+  The Credentials section is hidden (no credential fields).
+- "Preview hosts" (the validate action) shows `details.matched_hosts` in a
+  table with capability badges.
 - `src/views/jobs/index.vue`: job drawer renders `result.details.hosts`
   and `counts` for provider `inventory-agent` (states as badges).
-- `src/schemas/configuration.ts`: zod schema for the provider config
-  mirroring §2.
+- The zod schema comes from `fieldsToZod` over the descriptors (no
+  provider-specific schema file); a unit test checks it against §2.

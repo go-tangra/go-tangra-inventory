@@ -69,6 +69,73 @@ prefix are in go-tangra-inventory-v4; others are prefixed with the repo.
   gateway inbound); docker config `go-tangra-docker/configs/deployer.yaml`
   discovers `lcm` only.
 
+### Configuration drawer — v3 (go-tangra-deployer `e4f6d0f`) and v4 (US5)
+
+- v3 drawer `frontend/src/views/configuration/configuration-drawer.vue`:
+  provider select (display name + description) on create; then a
+  Credentials and a Config section. **Required** keys come from the
+  backend `ProviderInfo.required_config_fields/required_credential_fields`
+  (`protos/deployer/service/v1/target_configuration.proto:39-47`, plain
+  string lists) and are marked with `rules: [{required: true}]`;
+  **optional** keys are hard-coded in the UI (`optionalConfigFields`,
+  `optionalCredentialFields`, `:145-166`); secret masking by a hard-coded
+  name list (`password, secret, token, api_key, …`, `:176-183`); labels and
+  placeholders from i18n `deployer.providers.<type>.fields.<key>[_placeholder]`
+  (`frontend/src/locales/en-US.json:209-290`). Every input is a plain text
+  input (no numbers, switches or selects; `skip_tls_verify` typed as
+  "true or false"). On edit the credentials map starts empty and is sent
+  only when re-entered ("leave blank to keep" for the *whole* map — a
+  single re-entered field replaced all stored credentials). No
+  test-connection button in the drawer. Backend
+  `pkg/deploy/registry/effective_config.go:38-60` checks required config
+  keys on the **merged** configuration + target override (an empty
+  string counts as missing).
+- v3 required fields: aws_acm `region` / `access_key_id`,
+  `secret_access_key`; bigip `partition` / `host`, `username`, `password`;
+  cloudflare `zone_id` / `api_token`; fortigate `vdom` / `host`,
+  `api_token`; webhook `url`; tangra-client none (at least one of
+  `client_ids`/`labels` enforced by `ValidateCredentials`); dummy none.
+  v3 optional (UI list): bigip `ssl_profile`; fortigate
+  `default_ssl_profile`; webhook `verify_url`, `rollback_url`,
+  `skip_tls_verify`, `timeout_seconds` / `authorization`, `api_key`,
+  `secret`, `token`; tangra-client `client_ids`, `labels`, `cert_name`,
+  `require_all_success`.
+- v4 drawer `go-tangra-deployer-v4/ui/src/views/configurations/index.vue:96-97`:
+  name, description, provider select, then **two raw JSON text areas**
+  (config, credentials) validated only as JSON objects
+  (`ui/src/schemas/configuration.ts`). Hints read
+  `provider.required_config/required_credentials` (`ui/src/api/types.ts:11-18`),
+  which the backend never sends — it sends `config_fields` /
+  `credential_fields` (`internal/provider/provider.go:50-66`) — so no hint
+  is ever shown (F8). "Validate" posts both maps; any provider error is
+  reduced to "credentials rejected by the provider"
+  (`internal/configs/configs.go` `Validate`).
+- v4 `provider.Field{Key, Label, Secret, Required}` only. Declarations:
+  aws_acm `region` R, `certificate_arn` / `access_key_id` R,
+  `secret_access_key` R S, `session_token` S; bigip `partition` R / `host`
+  R, `username` R, `password` R S; cloudflare `zone_id` R / `api_token` R S;
+  dummy none; fortigate `vdom` R / `host` R, `api_token` R S; webhook
+  `url` R, `verify_url`, `rollback_url` / `token` S, `secret` S.
+  Read but **not declared** (F9): webhook `timeout_seconds`,
+  `skip_tls_verify`, `headers`, `metadata`, `authorization`, `api_key`;
+  fortigate `import_scope`; dummy `fail`; test overrides aws_acm
+  `endpoint`, cloudflare `api_base` (F10).
+- v4 save path: `configs.Create/Update` check only name and provider
+  existence — no required-field check at all; `Update` replaces the whole
+  sealed credentials blob when any credential is sent; reads return only
+  `has_credentials`. `failSvc` (`internal/httpapi/deps.go:38-43`) writes a
+  bare `validation_failed` and drops `ValidationError.Field` (F11), while
+  the kit's `useZodForm.setServerError` already maps
+  `detail.fields` to inline errors (`go-tangra/ui/kit/src/forms/useZodForm.ts:127-145`).
+  `GET /providers` requires `configurations:read`.
+- Kit (`go-tangra/ui/kit` 4.3.1): `UiForm`/`useZodForm`, `zodToFields` +
+  `UiFieldRenderer` (types text, number, date, select, textarea,
+  checkbox, secret, tags), `UiInput`, `UiTextarea`, `UiSelect`,
+  `UiCombobox`, `UiNumberInput` (min/max), `UiSwitch`, `UiSecretField`
+  (masked, reveal, autocomplete off, password-manager ignore),
+  `UiTagEditor` (key=value map), `UiSection`, `UiDrawer`. No
+  list-of-strings chip input.
+
 ### lcm (go-tangra-lcm-v4)
 
 - `Certificates/Download` (`internal/grpcapi/servers.go:246-252` →
@@ -157,6 +224,26 @@ prefix are in go-tangra-inventory-v4; others are prefixed with the repo.
 - **F6** Provider registration happens in `init()`; the new provider needs
   an injected inventory client. → register it during app wiring when the
   inventory peer is configured (D3).
+- **F8** (US5) The v4 drawer is two raw JSON text areas and its hints never
+  render (UI reads `required_config`, API sends `config_fields`); the
+  v4 server enforces no required field at save time — a configuration
+  without a Cloudflare zone id saves and fails only at deploy. → generic
+  descriptors served by the backend + save-time validation (D21).
+- **F9** (US5) Six settings the providers read are undeclared, so a
+  schema-driven form generated from today's declarations would *lose*
+  v3 webhook options (authorization header, API key, timeout, TLS switch).
+  → declare every read key; a test asserts declarations cover reads (D21).
+- **F10** (US5, security) `aws_acm.endpoint` and `cloudflare.api_base`
+  are test hooks read from the *stored* configuration: anyone with
+  `configurations:manage` can point a configuration holding someone
+  else's sealed AWS/Cloudflare credentials at an arbitrary host and
+  receive the signed request / bearer token on the next deployment
+  (credentials are not re-entered on edit). → not declared, refused at
+  save, moved to unexported test options (D24).
+- **F11** (US5) The 422 response carries no field, so the UI cannot
+  highlight anything; webhook custom `headers` are stored unsealed in
+  config and may carry auth headers. → `detail.fields`; refuse auth
+  header names in `headers` (D24).
 - **F7** The deployer consumer starts at the stream tail: events while the
   deployer is down are lost (existing behaviour, affects renewal
   delivery). Out of scope; noted as risk with the manual "deploy" as
@@ -241,9 +328,12 @@ broader policy).
 3. Optional interface `provider.ConfigValidator{ValidateConfig(map[string]any)
    error}` called by `configs.Create/Update` and when a target override
    changes the effective config (FR-003).
-4. `provider.Field` gains `Type` (`string|text|int|bool|enum|string_list|
-   host_selector`), `Help`, `Options`, `Default`, `Min`, `Max` — JSON
-   additive; existing providers keep `Type` empty (= `string`).
+4. `provider.Field` becomes the full field descriptor of D21 (`Type`,
+   `Help`, `Placeholder`, `Group`, `Options`, `Default`, `Min`, `Max`,
+   `MaxLength`, `Pattern`, `MaxItems`) and `Capabilities` gains
+   `Description`, `TestConnection`, `SchemaVersion`, `OneOfRequired` — JSON
+   additive (`omitempty`); declarations of the existing providers are
+   completed in US5.
 
 **Alternatives**: put tenant/job into `CertificateData` (it is "material",
 and every provider would see job internals); a separate provider
@@ -418,8 +508,8 @@ semantics, environment leakage); systemd-run per hook (unnecessary).
 **Decision**: provider config (JSON, validated by `ValidateConfig`):
 `host_ids[] (uuid, ≤1000)`, `host_tags[] (≤16, ^[A-Za-z0-9_.:/-]{1,63}(=[^\x00-\x1f]{0,255})?$)`,
 `cert_name`, `key_policy`, `require_all_success`, `wait_seconds (0–240,
-default 60)`. UI: a dedicated component for `provider_type ===
-'inventory-agent'` with a host picker that calls the **inventory** API
+default 60)`. UI: the generic schema-driven form (D21/D22) renders the
+provider's fields; its `host_selector` slot holds a host picker that calls the **inventory** API
 through the gateway with the user's own session
 (`GET /api/inventory/v1/hosts?search=&tag=&page=`) — so users see only
 hosts they may read; on 401/403/404 the picker shows "enter host ids and
@@ -429,6 +519,114 @@ response gains `details.matched_hosts` from `PreviewCertificateTargets`.
 **Alternative rejected**: deployer proxies inventory host lists — the
 deployer acts as a service and would disclose all tenant hosts to users
 without inventory read.
+
+### D21 — Provider schema served by the backend (US5)
+
+**Decision**: each provider declares complete field descriptors in
+`Capabilities()` (contracts/deployer-config-ui.md §2); `GET /providers`
+serves them; one pure Go validator `provider.ValidateInput` applies them
+on create, update, validate and target overrides; the UI generates its
+form and zod schema from the same JSON. Shared test vectors
+(`api/testdata/provider-field-vectors.json`: descriptor + input →
+accepted / field errors) are run by the Go validator test and by the UI
+`fieldsToZod` test, so client and server cannot drift. Every key a
+provider reads is declared (test), undeclared keys are refused.
+
+**Rationale**: v3 split the truth (required keys from the backend,
+optional keys, secret names, labels and placeholders in the UI); adding a
+provider meant editing two repos and the UI was silently stale (F8, F9).
+Backend-served descriptors make a new provider (inventory-agent) appear
+in the drawer with no UI change except custom widgets.
+
+**Alternatives rejected**: (a) hard-coded per-provider forms/zod schemas
+in the UI (v3 style) — drift, two places to change, no server-side
+enforcement of optional-field rules; (b) JSON Schema documents per
+provider plus a JSON-Schema form library — a new dependency (VI), weak
+mapping to kit components and to "secret / group / help"; the descriptor
+list is a small, typed subset and the inventory-agent JSON Schema in
+deployer-provider.md §2 stays the documentation of the same rules;
+(c) gRPC `GetProviderSchema` per provider — the HTTP catalogue already
+exists and is read once per drawer open (≤ 10 providers).
+
+### D22 — Mapping descriptors to kit components (US5)
+
+**Decision**: a deployer-local `ProviderConfigForm.vue` renders sections
+with `UiSection` and fields with kit inputs (`UiInput`, `UiTextarea`,
+`UiNumberInput`, `UiSwitch`, `UiSelect`/`UiCombobox`, `UiSecretField`,
+`UiTagEditor`); a deployer-local `StringListInput.vue` covers
+`string_list`; `host_selector` is a named slot (US6 fills it with
+`HostPicker`). `fieldsToZod(caps)` builds the zod object for
+`config` and `credentials` (nested), used by `useZodForm`, so the kit's
+error focus and `setServerError` (`detail.fields` with
+`config.<key>` paths) work unchanged.
+
+**Rationale**: kit `zodToFields`/`UiRecordForm` derive fields from a zod
+schema but have no group, help-from-schema, URL, switch or slot per
+field, and cannot express "secret stored, leave blank"; a local renderer
+over the kit inputs keeps the kit unchanged (no kit release on the
+critical path) while using the same components and a11y wiring.
+
+**Alternatives rejected**: extend kit `FieldDef`/`UiFieldRenderer` first
+(new kit release and pin in every remote before the deployer can ship;
+can be upstreamed later); keep JSON editors with a schema hint (does not
+meet the request).
+
+### D23 — Secrets on edit (US5)
+
+**Decision**: credentials stay one sealed blob (AD = configuration id);
+reads return `credentials_set` (key names) and, to managers only,
+`credentials_public` (values of non-secret credential fields such as
+host, username, access key id); updates merge per field — empty keeps,
+value replaces, `clear_credentials` removes optional keys — and the
+merged result is validated before resealing. Validate accepts
+`configuration_id` to merge stored secrets so "Test connection" works on
+edit without re-entering them.
+
+**Rationale**: v3 and current v4 replace the whole blob when any
+credential is sent, so changing the BIG-IP password silently drops the
+host and username unless all are re-entered; per-field merge is what the
+"leave blank to keep" hint promises.
+
+**Alternatives rejected**: separate sealed column per secret (migration,
+more envelopes, no benefit); return secrets masked (`****`) and treat
+the mask as "keep" (masks leak length/existence semantics and risk
+storing the mask); move host/username out of credentials into config
+(changes the provider contract and existing rows).
+
+### D24 — Strict keys, legacy rows and credential-redirect hardening (US5)
+
+**Decision**: undeclared keys → 422 `unknown_field` on create/update;
+rows stored before the feature are not rewritten — they deploy as before
+and the drawer shows undeclared keys as "removed when you save". The
+`endpoint`/`api_base` overrides move to unexported provider options used
+only by tests; a stored config value is ignored. Webhook `headers`
+refuse `Authorization`, `Proxy-Authorization`, `Cookie`, `X-API-Key`,
+`X-Webhook-Secret`. A deployment whose effective config misses a
+required field fails before the provider runs ("configuration
+incomplete: <label>").
+
+**Rationale**: F10 is a credential-exfiltration path; strict keys make
+the descriptor list authoritative. Not rewriting legacy rows avoids a
+data migration of opaque JSON.
+
+**Alternatives rejected**: silently drop unknown keys on save (hides
+mistakes); data migration that strips unknown keys (risky, needs a
+backup, gains nothing for rows nobody edits).
+
+### D25 — Where "required" is enforced (US5)
+
+**Decision**: required fields are enforced on the **configuration**
+(create/update, client and server), and the merged effective config is
+re-validated on target save (types/rules; credentials stay non-overridable
+as today) and at job start (required). This matches the v3 drawer (which
+required every required field on the configuration form); it does not
+reproduce v3's backend allowance of a configuration whose required
+config field is supplied only by a target override.
+
+**Alternatives rejected**: v3 backend semantics (required only on the
+merged config) — the configuration form could not tell the operator what
+is missing, and every target would need its own validation UI. Recorded
+as Q7 in case shared credential-only configurations are needed.
 
 ### D14 — Revocation
 
@@ -541,6 +739,9 @@ delivery id and counts; new `certificate_revocation_forwarded`.
 | **D**enial of service | Mass deployments flood agents/lcm | Bounds D17, one fetch per agent, global fetch cap, 50 commands per connect, lcm timeout. |
 | **D** | Hook hangs | Timeout + process-group kill; one hook at a time. |
 | **E**levation of privilege | Hook replaced by an unprivileged user | Root ownership and permission checks of the file and its directory before each run. |
+| **I** (US5) | Secret echoed by the configuration drawer or API | Write-only secrets (`credentials_set` names only), `credentials_public` only for non-secret fields and only to managers, error codes built from descriptors only (fuzz test), SC-008 scan of responses/logs/audit for submitted test secrets. |
+| **I** (US5) | Stored config redirects sealed credentials to an attacker host (`endpoint`, `api_base`, auth headers in `headers`) | Undeclared keys refused at save, test overrides not read from stored config, auth header names refused in `headers` (D24). |
+| **T** (US5) | Client-side validation bypassed by a direct API call | Same descriptors enforced server-side on create/update/validate/target override (D21); API tests per required field (SC-007). |
 | **E** | Deployer user gains host access | Deployer users can place a certificate into the dedicated directory only; executing anything requires a locally configured hook. |
 
 ## Resolved questions (user, 2026-10-02)
@@ -553,3 +754,18 @@ delivery id and counts; new `certificate_revocation_forwarded`.
 - **Q3** **Linux first**; Windows agents report `unsupported` (D15).
 - **Q4** Directory-symlink layout (`live/<name>` → `archive/<name>/<gen>`,
   atomic switch) **accepted**.
+
+## Open questions (US5 amendment, defaults chosen)
+
+- **Q5** v3 fields missing in v4: BIG-IP `ssl_profile` (bind into an
+  existing client-SSL profile) and FortiGate `default_ssl_profile` (also
+  update the production ssl-ssh-profile in place). They need provider
+  behaviour, not only a form field. **Default**: out of scope for 033;
+  follow-up deployer feature; the drawer declares only what v4 providers
+  implement.
+- **Q6** Should non-secret credential values (host, username, AWS access
+  key id) be shown to managers on edit? **Default**: yes (D23,
+  SR-011) — needed to pre-fill; readers without manage see only key names.
+- **Q7** Allow a configuration to leave a required config field empty when
+  every target supplies it by override (v3 backend semantics)?
+  **Default**: no (D25).

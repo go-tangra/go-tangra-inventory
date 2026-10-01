@@ -313,21 +313,49 @@ At least one of `host_ids`/`host_tags` is required. Unknown keys rejected.
 
 ### 2.2 Provider package types (`internal/provider/provider.go`, additive)
 
+Field descriptor per [contracts/deployer-config-ui.md](contracts/deployer-config-ui.md) §2 (US5).
+
 ```go
+type FieldOption struct { Value, Label string }
 type Field struct {
-    Key, Label string; Secret, Required bool
-    Type    string   `json:"type,omitempty"`    // string|text|int|bool|enum|string_list|host_selector
-    Help    string   `json:"help,omitempty"`
-    Options []string `json:"options,omitempty"` // enum
-    Default any      `json:"default,omitempty"`
-    Min, Max *int    `json:"min,omitempty"`     // int / list length
+    Key       string        `json:"key"`
+    Label     string        `json:"label"`
+    Secret    bool          `json:"secret"`
+    Required  bool          `json:"required"`
+    Type      string        `json:"type,omitempty"`  // string|text|url|int|bool|enum|string_list|key_value|host_selector ("" = string)
+    Group     string        `json:"group,omitempty"` // connection|credentials|options
+    Help      string        `json:"help,omitempty"`
+    Placeholder string      `json:"placeholder,omitempty"`
+    Options   []FieldOption `json:"options,omitempty"` // enum
+    Default   any           `json:"default,omitempty"`
+    Min, Max  *int          `json:"min,omitempty"`     // int bounds
+    MaxLength int           `json:"max_length,omitempty"`
+    Pattern   string        `json:"pattern,omitempty"` // RE2, anchored
+    MaxItems  int           `json:"max_items,omitempty"`
 }
-type Capabilities struct { /* existing */ DeliversByReference bool `json:"delivers_by_reference"` }
+type Capabilities struct {
+    /* existing */
+    Description         string     `json:"description,omitempty"`
+    DeliversByReference bool       `json:"delivers_by_reference"`
+    TestConnection      bool       `json:"test_connection"`
+    SchemaVersion       int        `json:"schema_version"`
+    OneOfRequired       [][]string `json:"one_of_required,omitempty"`
+}
+type FieldErrors map[string]string // "config.<key>"|"credentials.<key>" → code (never a value)
+func CheckCapabilities(c Capabilities) error
+func ValidateInput(c Capabilities, config, creds map[string]any) FieldErrors
+func MissingRequired(c Capabilities, effective map[string]any) []string // labels
 type JobMeta struct { TenantID, JobID, ConfigurationID, TargetID, Trigger string }
 func WithJob(ctx context.Context, m JobMeta) context.Context
 func JobFrom(ctx context.Context) (JobMeta, bool)
 type ConfigValidator interface { ValidateConfig(config map[string]any) error }
 ```
+
+Configuration view/input additions (US5, `internal/configs`):
+`View.CredentialsSet []string`, `View.CredentialsPublic map[string]any`
+(manage only), `Input.ClearCredentials []string`; credentials remain one
+sealed blob (`CredentialsSealed`, AD = configuration id), merged per field
+on update. No migration.
 
 ### 2.3 Job result details (`DeploymentJob.Result`)
 

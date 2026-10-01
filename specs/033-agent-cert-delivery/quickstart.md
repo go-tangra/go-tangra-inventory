@@ -38,7 +38,9 @@
   configs reject invalid provider config; consumer forwards
   `certificate.revoked`), `make cover`, `make fuzz`
   (`FuzzInventoryAgentConfig`), UI unit tests for the form and host
-  picker, `make vuln`.
+  picker, the schema-driven drawer (`provider-form.spec.ts`,
+  `provider-schema.spec.ts` over the shared Go/TS vectors), descriptor
+  validator unit + fuzz tests (`FuzzValidateInput`), `make vuln`.
 - **lcm** (`go-tangra-lcm-v4`): policy test that `svc/inventory` may call
   only `Certificates/Download`.
 
@@ -93,7 +95,7 @@ systemd) running agent 4.7.0 enrolled to the stack (dev: `insecure: true`
    fingerprint, expiry, state, last delivered, hook exit, link to the
    deployer configuration; no PEM anywhere in the page or the API responses
    (DevTools network). Cancel a queued item (host B stopped) as operator.
-8. **US6** — Revoke the certificate in lcm → within a minute host A's row
+8. **US7** — Revoke the certificate in lcm → within a minute host A's row
    shows "revoked"; files untouched; queued deliveries of it cancelled.
 9. **Negative** — Configuration with `cert_name: "../x"` → 422. A forged
    `FetchCertificate` with host B's item id using host A's credential
@@ -103,6 +105,23 @@ systemd) running agent 4.7.0 enrolled to the stack (dev: `insecure: true`
     exec timescaledb pg_dump -U postgres inventory | grep -c "PRIVATE
     KEY"` → 0; `valkey-cli --scan` + `XRANGE platform:events:<tenant>`
     contain no material.
+11. **US5 — configuration drawer** — Deployer → Configurations → New: no
+    provider fields until a provider is chosen. Choose "F5 BIG-IP":
+    Connection (host, partition pre-filled `Common`), Credentials
+    (username, masked password), each with help and placeholder. Save with
+    the password empty → password highlighted "required", no request in
+    DevTools. `curl` the same POST without `password` → 422
+    `{"reason":"validation_failed","detail":{"fields":{"credentials.password":"required"}}}`.
+    Fill it, Test connection → "valid" (or "credentials rejected" with a
+    wrong password, the password not shown anywhere). Save, reopen: host,
+    partition, username pre-filled, password empty "Stored — leave blank
+    to keep"; change the partition, save, Test connection still succeeds
+    (stored password kept). Switch provider on a new configuration with
+    values entered → confirm dialog. Webhook: add header `Authorization` →
+    refused. Repeat a create for every provider (AWS ACM, Cloudflare,
+    FortiGate, Webhook, Dummy, Inventory agent) without reading docs.
+    `GET /configurations/{id}` and `docker compose -p freya-stack logs
+    deployer` contain none of the entered secrets.
 
 ## Production rollout (user-confirmed steps)
 

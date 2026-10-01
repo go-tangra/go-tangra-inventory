@@ -36,3 +36,13 @@
   parity, not implementation choices.
 - Out of scope: Windows agents (D15), removal of certificates from hosts,
   notifications on delivery failure, rollback through the deployer.
+- Amendment 2026-10-02 (user): schema-driven deployer configuration drawer
+  for all providers with per-provider required fields like v3 → US5
+  (P2), FR-023–FR-031, SR-011–SR-014, SC-007–SC-008; host picker story
+  renumbered US6, revocation US7. Re-validated against every item above:
+  requirements testable (per-field client + 422 server refusal), success
+  criteria measurable (SC-007 per required field, SC-008 secret scan),
+  edge cases added (legacy rows, override-supplied required values,
+  secrets in custom headers, removed provider). Open questions Q5–Q7 in
+  research.md carry chosen defaults; out of scope: v3 BIG-IP
+  `ssl_profile` and FortiGate `default_ssl_profile` behaviour (Q5).
