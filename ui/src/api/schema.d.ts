@@ -515,10 +515,123 @@ export interface components {
             /** Format: date-time */
             state_changed_at?: string;
         };
+        /** @description a list contract page (legacy cursor/limit requests: items, current_version and total only) */
         AgentFleet: {
             items?: components["schemas"]["AgentFleetEntry"][];
             /** @description the tenant target: policy pin or platform current agent version */
             current_version?: string;
+            total?: number;
+            /** @description the page returned (a page beyond the end answers the last page) */
+            page?: number;
+            page_size?: number;
+            /** @enum {string} */
+            sort?: "hostname" | "version" | "state" | "last_seen";
+            /** @enum {string} */
+            order?: "asc" | "desc";
+        };
+        Host: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            tenant_id?: string;
+            hostname?: string;
+            machine_id?: string;
+            hardware_uuid?: string;
+            system_serial?: string;
+            manufacturer?: string;
+            model?: string;
+            os_name?: string;
+            os_version?: string;
+            os_arch?: string;
+            agent_version?: string;
+            assigned_user?: string;
+            /** @enum {string} */
+            status?: "active" | "stale" | "retired";
+            tags?: {
+                [key: string]: string;
+            };
+            /** Format: date-time */
+            first_seen?: string;
+            /** Format: date-time */
+            last_seen?: string;
+            last_snapshot_id?: string;
+            /** Format: date-time */
+            created_at?: string;
+            /** Format: date-time */
+            updated_at?: string;
+        };
+        /** @description a list contract page (legacy cursor/limit requests: items and total only) */
+        HostPage: {
+            items: components["schemas"]["Host"][];
+            total: number;
+            /** @description the page returned (a page beyond the end answers the last page) */
+            page?: number;
+            page_size?: number;
+            /** @enum {string} */
+            sort?: "hostname" | "os_name" | "manufacturer" | "status" | "last_seen" | "created_at";
+            /** @enum {string} */
+            order?: "asc" | "desc";
+        };
+        SnapshotSummary: {
+            id?: string;
+            /** Format: uuid */
+            tenant_id?: string;
+            host_id?: string;
+            /** Format: date-time */
+            collected_at?: string;
+            /** Format: date-time */
+            received_at?: string;
+            agent_version?: string;
+            source?: string;
+            os_name?: string;
+            os_version?: string;
+            manufacturer?: string;
+            model?: string;
+        };
+        /** @description a list contract page of payload-free summaries (legacy cursor/limit requests: items and total only) */
+        SnapshotPage: {
+            items: components["schemas"]["SnapshotSummary"][];
+            total: number;
+            /** @description the page returned (a page beyond the end answers the last page) */
+            page?: number;
+            page_size?: number;
+            /** @enum {string} */
+            sort?: "collected_at";
+            /** @enum {string} */
+            order?: "asc" | "desc";
+        };
+        Change: {
+            id?: string;
+            /** Format: uuid */
+            tenant_id?: string;
+            host_id?: string;
+            snapshot_id?: string;
+            prev_snapshot_id?: string;
+            /** Format: date-time */
+            detected_at?: string;
+            category?: string;
+            /** @enum {string} */
+            change_type?: "added" | "removed" | "modified";
+            component_key?: string;
+            /** @description JSON */
+            before?: string;
+            /** @description JSON */
+            after?: string;
+        };
+        /** @description a list contract page (legacy limit requests: items and total only) */
+        ChangePage: {
+            items: components["schemas"]["Change"][];
+            total: number;
+            /** @description the page returned (a page beyond the end answers the last page) */
+            page?: number;
+            page_size?: number;
+            /**
+             * @description kind is the change type
+             * @enum {string}
+             */
+            sort?: "detected_at" | "kind";
+            /** @enum {string} */
+            order?: "asc" | "desc";
         };
         AgentUpgrade: {
             /** Format: uuid */
@@ -592,7 +705,17 @@ export interface components {
             updated_at?: string | null;
             /** @description accepted clock skew of a proof timestamp */
             window_seconds?: number;
+            /** @description one list contract page of the keys */
             keys?: components["schemas"]["AutoEnrollKey"][];
+            /** @description number of keys */
+            total?: number;
+            /** @description the page of keys returned (a page beyond the end answers the last page) */
+            page?: number;
+            page_size?: number;
+            /** @enum {string} */
+            sort?: "name" | "created_at";
+            /** @enum {string} */
+            order?: "asc" | "desc";
         };
         AutoEnrollKey: {
             /** Format: uuid */
@@ -672,7 +795,12 @@ export interface components {
         /** @example 018f3a2b-0000-7000-8000-000000000002 */
         other: string;
         cursor: string;
+        /** @description legacy (kept one release): use page / page_size; mixing both styles is validation_failed (param cursor) */
         limit: number;
+        page: number;
+        pageSize: number;
+        /** @description sort direction; defaults to the chosen field's default direction */
+        order: "asc" | "desc";
         upgradeState: "up_to_date" | "available" | "pending" | "in_progress" | "failed" | "rolled_back" | "manual_upgrade_required" | "unsupported";
         requestState: "pending" | "delivered" | "downloading" | "installing" | "succeeded" | "failed" | "rolled_back" | "expired" | "cancelled";
         outdated: boolean;
@@ -687,7 +815,26 @@ export interface operations {
     listHosts: {
         parameters: {
             query?: {
+                page?: components["parameters"]["page"];
+                page_size?: components["parameters"]["pageSize"];
+                /** @description default hostname (asc) */
+                sort?: "hostname" | "os_name" | "manufacturer" | "status" | "last_seen" | "created_at";
+                /** @description sort direction; defaults to the chosen field's default direction */
+                order?: components["parameters"]["order"];
+                /** @description substring, case-insensitive */
+                hostname?: string;
+                /** @description exact OS name */
+                os_name?: string;
+                manufacturer?: string;
+                status?: "active" | "stale" | "retired";
+                /** @description key or key=value */
+                tag?: string;
+                /** @description hosts seen at or after this instant */
+                last_seen_from?: string;
+                /** @description hosts seen at or before this instant */
+                last_seen_to?: string;
                 cursor?: components["parameters"]["cursor"];
+                /** @description legacy (kept one release): use page / page_size; mixing both styles is validation_failed (param cursor) */
                 limit?: components["parameters"]["limit"];
             };
             header?: never;
@@ -696,8 +843,17 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description list */
+            /** @description page of hosts (hostname order by default) */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostPage"];
+                };
+            };
+            /** @description validation_failed (detail.param names the parameter) */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -833,7 +989,14 @@ export interface operations {
     listHostSnapshots: {
         parameters: {
             query?: {
+                page?: components["parameters"]["page"];
+                page_size?: components["parameters"]["pageSize"];
+                /** @description default collected_at (desc) */
+                sort?: "collected_at";
+                /** @description sort direction; defaults to the chosen field's default direction */
+                order?: components["parameters"]["order"];
                 cursor?: components["parameters"]["cursor"];
+                /** @description legacy (kept one release): use page / page_size; mixing both styles is validation_failed (param cursor) */
                 limit?: components["parameters"]["limit"];
             };
             header?: never;
@@ -845,8 +1008,17 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description history */
+            /** @description page of snapshot summaries (newest first by default) */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SnapshotPage"];
+                };
+            };
+            /** @description validation_failed (detail.param names the parameter) */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -857,6 +1029,13 @@ export interface operations {
     listHostChanges: {
         parameters: {
             query?: {
+                page?: components["parameters"]["page"];
+                page_size?: components["parameters"]["pageSize"];
+                /** @description default detected_at (desc); kind is the change type */
+                sort?: "detected_at" | "kind";
+                /** @description sort direction; defaults to the chosen field's default direction */
+                order?: components["parameters"]["order"];
+                /** @description legacy (kept one release): use page / page_size; mixing both styles is validation_failed (param cursor) */
                 limit?: components["parameters"]["limit"];
             };
             header?: never;
@@ -868,8 +1047,17 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description changes */
+            /** @description page of detected changes (newest first by default) */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangePage"];
+                };
+            };
+            /** @description validation_failed (detail.param names the parameter) */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -954,9 +1142,18 @@ export interface operations {
     listAgents: {
         parameters: {
             query?: {
+                page?: components["parameters"]["page"];
+                page_size?: components["parameters"]["pageSize"];
+                /** @description default hostname (asc); state is the upgrade state */
+                sort?: "hostname" | "version" | "state" | "last_seen";
+                /** @description sort direction; defaults to the chosen field's default direction */
+                order?: components["parameters"]["order"];
                 state?: components["parameters"]["upgradeState"];
                 outdated?: components["parameters"]["outdated"];
+                /** @description only connected (true) or disconnected (false) agents */
+                online?: boolean;
                 cursor?: components["parameters"]["cursor"];
+                /** @description legacy (kept one release): use page / page_size; mixing both styles is validation_failed (param cursor) */
                 limit?: components["parameters"]["limit"];
             };
             header?: never;
@@ -965,7 +1162,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description agent fleet */
+            /** @description agent fleet page */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -973,6 +1170,13 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["AgentFleet"];
                 };
+            };
+            /** @description validation_failed (detail.param names the parameter) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -982,6 +1186,7 @@ export interface operations {
                 state?: components["parameters"]["requestState"];
                 agent_id?: components["parameters"]["agentIdQuery"];
                 cursor?: components["parameters"]["cursor"];
+                /** @description legacy (kept one release): use page / page_size; mixing both styles is validation_failed (param cursor) */
                 limit?: components["parameters"]["limit"];
             };
             header?: never;
@@ -1178,14 +1383,21 @@ export interface operations {
     };
     getAutoEnroll: {
         parameters: {
-            query?: never;
+            query?: {
+                page?: components["parameters"]["page"];
+                page_size?: components["parameters"]["pageSize"];
+                /** @description key order; default name (asc) */
+                sort?: "name" | "created_at";
+                /** @description sort direction; defaults to the chosen field's default direction */
+                order?: components["parameters"]["order"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description settings and keys */
+            /** @description settings and one page of keys */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1193,6 +1405,13 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["AutoEnroll"];
                 };
+            };
+            /** @description validation_failed (detail.param names the parameter) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

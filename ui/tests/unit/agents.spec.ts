@@ -44,7 +44,16 @@ const handler = (url: string, init: RequestInit): unknown => {
   if (url.includes('/auto-enroll')) return autoEnroll
   if (init.method === 'POST' && url.endsWith('/agents/upgrades')) return { target_version: '4.5.0', created: [{ id: 'u-9', agent_id: 'a-available', state: 'pending' }], skipped: [{ agent_id: 'a-legacy', reason: 'manual_upgrade_required' }] }
   if (init.method === 'POST' && url.includes('/cancel')) return { id: 'u-3', state: 'cancelled' }
-  return fleet
+  return fleetPage(url)
+}
+// A list contract server for GET /agents: state / outdated filters, the total.
+function fleetPage(url: string): unknown {
+  const q = new URL(url, 'https://x').searchParams
+  let items = fleet.items
+  if (q.get('state')) items = items.filter((a) => a.upgrade_state === q.get('state'))
+  if (q.get('outdated') === 'true') items = items.filter((a) => a.version !== fleet.current_version)
+  if (q.get('online') === 'true') items = items.filter((a) => a.online)
+  return { ...fleet, items, total: items.length, page: 1, page_size: Number(q.get('page_size') ?? 25), sort: q.get('sort') ?? 'hostname', order: q.get('order') ?? 'asc' }
 }
 
 describe('agent fleet view', () => {
@@ -150,26 +159,89 @@ describe('agent fleet view', () => {
     const before = calls.length
     useLive()._emit('inventory.agent.upgrade', '{"agent_id":"a-available","state":"installing"}')
     await flushPromises()
-    expect(calls.length).toBe(before + 1)
+    // The page and the two fleet-wide counts (manual installs, outdated).
+    expect(calls.length).toBe(before + 3)
     await useAgents().listFleet({ upgrade_state: 'failed', outdated: true })
     expect(calls.at(-1)!.url).toContain('state=failed')
     expect(calls.at(-1)!.url).toContain('outdated=true')
     w.unmount()
   })
 
-  it('store: legacy listing counts as connected; live patches keep offline agents in the fleet', () => {
+  it('store: every connected agent is read page by page; live patches keep offline agents on the fleet page', async () => {
+    // 450 connected agents: three pages of 200.
+    const calls = fetchMock((url) => {
+      const q = new URL(url, 'https://x').searchParams
+      const page = Number(q.get('page'))
+      const size = Number(q.get('page_size'))
+      const n = Math.max(0, Math.min(size, 450 - (page - 1) * size))
+      return { items: Array.from({ length: n }, (_, i) => ({ agent_id: 'c' + ((page - 1) * size + i), online: true })), total: 450, page, page_size: size }
+    })
     const s = useAgents()
+    await s.listConnected()
+    expect(calls.map((c) => new URL(c.url, 'https://x').searchParams.get('page'))).toEqual(['1', '2', '3'])
+    expect(calls.every((c) => c.url.includes('online=true') && c.url.includes('page_size=200'))).toBe(true)
+    expect(s.connected.length).toBe(450)
+
+    s.connected = [{ agent_id: 'x', host_id: 'h', online: true }]
     s.fleet = [{ agent_id: 'x', host_id: 'h' }, { agent_id: 'y', online: false }]
-    expect(s.connected.map((a) => a.agent_id)).toEqual(['x'])
     s.patchOffline('x')
     expect(s.connected.length).toBe(0)
     expect(s.fleet.length).toBe(2)
+    expect(s.fleet[0]!.online).toBe(false)
     s.patchOnline({ agent_id: 'y', hostname: 'back' })
     expect(s.connected.map((a) => a.hostname)).toEqual(['back'])
+    expect(s.fleet[1]!.online).toBe(true)
+    // An agent not on the (server-ordered) page is not inserted into it.
     s.patchOnline({ agent_id: 'z' })
-    expect(s.fleet.length).toBe(3)
+    expect(s.fleet.length).toBe(2)
+    expect(s.connected.length).toBe(2)
     s.patchOffline('missing')
-    expect(s.fleet.length).toBe(3)
+    expect(s.fleet.length).toBe(2)
+  })
+
+  it('server paging and sorting: pager with the total, whole-fleet sort, state filter back to page 1, fleet-wide counts', async () => {
+    const calls = fetchMock((url, init) => {
+      if (!url.includes('/agents?')) return handler(url, init)
+      const q = new URL(url, 'https://x').searchParams
+      if (q.get('page_size') === '1') return { items: [], total: q.get('outdated') ? 40 : q.get('state') ? 7 : 60, page: 1, page_size: 1 }
+      const size = Number(q.get('page_size'))
+      const page = Math.min(Number(q.get('page')), Math.ceil(60 / size))
+      return { ...fleet, total: 60, page, page_size: size, sort: q.get('sort'), order: q.get('order') }
+    })
+    const w = mountAs(manager)
+    await flushPromises()
+    const lists = () => calls.filter((c) => c.url.includes('/agents?') && !c.url.includes('page_size=1&') && !c.url.endsWith('page_size=1'))
+    const last = () => new URL(lists().at(-1)!.url, 'https://x').searchParams
+    expect([last().get('page'), last().get('page_size'), last().get('sort'), last().get('order')]).toEqual(['1', '25', 'hostname', 'asc'])
+    expect(w.text()).toContain('Showing 1–25 of 60')
+    // Fleet-wide figures, not the visible page.
+    expect(w.find('[data-test="manual-upgrade-note"]').text()).toContain('7 agents are older than 4.4.0')
+    expect(w.find('[data-test="upgrade-all"]').attributes('disabled')).toBeUndefined()
+    await w.find('[aria-label="Page 3"]').trigger('click')
+    await flushPromises()
+    expect(last().get('page')).toBe('3')
+    const header = (label: string) => w.findAll('th button').find((b) => b.text().startsWith(label))
+    for (const label of ['Hostname', 'Version', 'Upgrade', 'Last seen']) expect(header(label), label).toBeTruthy()
+    await header('Upgrade')!.trigger('click')
+    await flushPromises()
+    expect([last().get('sort'), last().get('order'), last().get('page')]).toEqual(['state', 'asc', '1'])
+    await header('Last seen')!.trigger('click')
+    await flushPromises()
+    expect([last().get('sort'), last().get('order')]).toEqual(['last_seen', 'desc'])
+    await w.find('[aria-label="Page 2"]').trigger('click')
+    await flushPromises()
+    await w.find('[data-test="fleet-state-filter"] select').setValue('failed')
+    await flushPromises()
+    expect([last().get('state'), last().get('page'), last().get('sort')]).toEqual(['failed', '1', 'last_seen'])
+    // The auto-enrollment keys are a server page too, sortable by creation.
+    const keys = () => calls.filter((c) => c.url.includes('/agents/auto-enroll?'))
+    expect(keys()[0]!.url).toBe('/api/inventory/v1/agents/auto-enroll?page=1&page_size=25&sort=name&order=asc')
+    const card = w.find('[data-test=auto-enroll-keys]')
+    await card.findAll('th button').find((b) => b.text().startsWith('Created'))!.trigger('click')
+    await flushPromises()
+    const k = new URL(keys().at(-1)!.url, 'https://x').searchParams
+    expect([k.get('sort'), k.get('order'), k.get('page')]).toEqual(['created_at', 'desc', '1'])
+    w.unmount()
   })
 
   it('policy card: read-only without {manage, InventoryAgentUpgradePolicy}; operators see no resume', async () => {

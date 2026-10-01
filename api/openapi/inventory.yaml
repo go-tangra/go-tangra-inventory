@@ -45,7 +45,25 @@ components:
       name: limit
       in: query
       required: false
+      description: 'legacy (kept one release): use page / page_size; mixing both styles is validation_failed (param cursor)'
       schema: { type: integer, minimum: 1, maximum: 500 }
+    # List contract (go-tangra specs/032-server-side-tables, contracts/http-list.md).
+    page:
+      name: page
+      in: query
+      required: false
+      schema: { type: integer, minimum: 1, maximum: 2147483647 }
+    pageSize:
+      name: page_size
+      in: query
+      required: false
+      schema: { type: integer, minimum: 1, maximum: 200 }
+    order:
+      name: order
+      in: query
+      required: false
+      description: 'sort direction; defaults to the chosen field''s default direction'
+      schema: { type: string, enum: [asc, desc] }
     upgradeState:
       name: state
       in: query
@@ -100,9 +118,99 @@ components:
         state_changed_at: { type: string, format: date-time }
     AgentFleet:
       type: object
+      description: 'a list contract page (legacy cursor/limit requests: items, current_version and total only)'
       properties:
         items: { type: array, items: { $ref: '#/components/schemas/AgentFleetEntry' } }
         current_version: { type: string, description: 'the tenant target: policy pin or platform current agent version' }
+        total: { type: integer }
+        page: { type: integer, description: 'the page returned (a page beyond the end answers the last page)' }
+        page_size: { type: integer }
+        sort: { type: string, enum: [hostname, version, state, last_seen] }
+        order: { type: string, enum: [asc, desc] }
+    Host:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid }
+        hostname: { type: string }
+        machine_id: { type: string }
+        hardware_uuid: { type: string }
+        system_serial: { type: string }
+        manufacturer: { type: string }
+        model: { type: string }
+        os_name: { type: string }
+        os_version: { type: string }
+        os_arch: { type: string }
+        agent_version: { type: string }
+        assigned_user: { type: string }
+        status: { type: string, enum: [active, stale, retired] }
+        tags: { type: object, additionalProperties: { type: string } }
+        first_seen: { type: string, format: date-time }
+        last_seen: { type: string, format: date-time }
+        last_snapshot_id: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    HostPage:
+      type: object
+      description: 'a list contract page (legacy cursor/limit requests: items and total only)'
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Host' } }
+        total: { type: integer }
+        page: { type: integer, description: 'the page returned (a page beyond the end answers the last page)' }
+        page_size: { type: integer }
+        sort: { type: string, enum: [hostname, os_name, manufacturer, status, last_seen, created_at] }
+        order: { type: string, enum: [asc, desc] }
+    SnapshotSummary:
+      type: object
+      properties:
+        id: { type: string }
+        tenant_id: { type: string, format: uuid }
+        host_id: { type: string }
+        collected_at: { type: string, format: date-time }
+        received_at: { type: string, format: date-time }
+        agent_version: { type: string }
+        source: { type: string }
+        os_name: { type: string }
+        os_version: { type: string }
+        manufacturer: { type: string }
+        model: { type: string }
+    SnapshotPage:
+      type: object
+      description: 'a list contract page of payload-free summaries (legacy cursor/limit requests: items and total only)'
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/SnapshotSummary' } }
+        total: { type: integer }
+        page: { type: integer, description: 'the page returned (a page beyond the end answers the last page)' }
+        page_size: { type: integer }
+        sort: { type: string, enum: [collected_at] }
+        order: { type: string, enum: [asc, desc] }
+    Change:
+      type: object
+      properties:
+        id: { type: string }
+        tenant_id: { type: string, format: uuid }
+        host_id: { type: string }
+        snapshot_id: { type: string }
+        prev_snapshot_id: { type: string }
+        detected_at: { type: string, format: date-time }
+        category: { type: string }
+        change_type: { type: string, enum: [added, removed, modified] }
+        component_key: { type: string }
+        before: { type: string, description: JSON }
+        after: { type: string, description: JSON }
+    ChangePage:
+      type: object
+      description: 'a list contract page (legacy limit requests: items and total only)'
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Change' } }
+        total: { type: integer }
+        page: { type: integer, description: 'the page returned (a page beyond the end answers the last page)' }
+        page_size: { type: integer }
+        sort: { type: string, enum: [detected_at, kind], description: 'kind is the change type' }
+        order: { type: string, enum: [asc, desc] }
     AgentUpgrade:
       type: object
       properties:
@@ -181,7 +289,12 @@ components:
         updated_by: { type: string }
         updated_at: { type: [string, 'null'], format: date-time }
         window_seconds: { type: integer, description: 'accepted clock skew of a proof timestamp' }
-        keys: { type: array, items: { $ref: '#/components/schemas/AutoEnrollKey' } }
+        keys: { type: array, items: { $ref: '#/components/schemas/AutoEnrollKey' }, description: 'one list contract page of the keys' }
+        total: { type: integer, description: 'number of keys' }
+        page: { type: integer, description: 'the page of keys returned (a page beyond the end answers the last page)' }
+        page_size: { type: integer }
+        sort: { type: string, enum: [name, created_at] }
+        order: { type: string, enum: [asc, desc] }
     AutoEnrollKey:
       type: object
       properties:
@@ -246,7 +359,26 @@ components:
         items: { type: array, items: { $ref: '#/components/schemas/AgentReleaseInfo' } }
 paths:
   /api/inventory/v1/hosts:
-    get: { operationId: listHosts, x-freya-permission: 'inventory:read', parameters: [{ $ref: '#/components/parameters/cursor' }, { $ref: '#/components/parameters/limit' }], responses: { '200': { description: list } } }
+    get:
+      operationId: listHosts
+      x-freya-permission: 'inventory:read'
+      parameters:
+        - { $ref: '#/components/parameters/page' }
+        - { $ref: '#/components/parameters/pageSize' }
+        - { name: sort, in: query, description: 'default hostname (asc)', schema: { type: string, enum: [hostname, os_name, manufacturer, status, last_seen, created_at] } }
+        - { $ref: '#/components/parameters/order' }
+        - { name: hostname, in: query, description: 'substring, case-insensitive', schema: { type: string, maxLength: 255 } }
+        - { name: os_name, in: query, description: 'exact OS name', schema: { type: string, maxLength: 255 } }
+        - { name: manufacturer, in: query, schema: { type: string, maxLength: 255 } }
+        - { name: status, in: query, schema: { type: string, enum: [active, stale, retired] } }
+        - { name: tag, in: query, description: 'key or key=value', schema: { type: string, maxLength: 512 } }
+        - { name: last_seen_from, in: query, description: 'hosts seen at or after this instant', schema: { type: string, format: date-time } }
+        - { name: last_seen_to, in: query, description: 'hosts seen at or before this instant', schema: { type: string, format: date-time } }
+        - { $ref: '#/components/parameters/cursor' }
+        - { $ref: '#/components/parameters/limit' }
+      responses:
+        '200': { description: 'page of hosts (hostname order by default)', content: { application/json: { schema: { $ref: '#/components/schemas/HostPage' } } } }
+        '422': { description: 'validation_failed (detail.param names the parameter)' }
   /api/inventory/v1/hosts/{id}:
     get: { operationId: getHost, x-freya-permission: 'inventory:read', parameters: [{ $ref: '#/components/parameters/id' }], responses: { '200': { description: host }, '404': { description: not_found } } }
     delete: { operationId: deleteHost, x-freya-permission: 'hosts:manage', parameters: [{ $ref: '#/components/parameters/csrf' }, { $ref: '#/components/parameters/id' }], responses: { '204': { description: deleted } } }
@@ -257,9 +389,34 @@ paths:
   /api/inventory/v1/hosts/{id}/retire:
     post: { operationId: retireHost, x-freya-permission: 'hosts:manage', parameters: [{ $ref: '#/components/parameters/csrf' }, { $ref: '#/components/parameters/id' }], responses: { '200': { description: retired } } }
   /api/inventory/v1/hosts/{id}/snapshots:
-    get: { operationId: listHostSnapshots, x-freya-permission: 'snapshots:read', parameters: [{ $ref: '#/components/parameters/id' }, { $ref: '#/components/parameters/cursor' }, { $ref: '#/components/parameters/limit' }], responses: { '200': { description: history } } }
+    get:
+      operationId: listHostSnapshots
+      x-freya-permission: 'snapshots:read'
+      parameters:
+        - { $ref: '#/components/parameters/id' }
+        - { $ref: '#/components/parameters/page' }
+        - { $ref: '#/components/parameters/pageSize' }
+        - { name: sort, in: query, description: 'default collected_at (desc)', schema: { type: string, enum: [collected_at] } }
+        - { $ref: '#/components/parameters/order' }
+        - { $ref: '#/components/parameters/cursor' }
+        - { $ref: '#/components/parameters/limit' }
+      responses:
+        '200': { description: 'page of snapshot summaries (newest first by default)', content: { application/json: { schema: { $ref: '#/components/schemas/SnapshotPage' } } } }
+        '422': { description: 'validation_failed (detail.param names the parameter)' }
   /api/inventory/v1/hosts/{id}/changes:
-    get: { operationId: listHostChanges, x-freya-permission: 'snapshots:read', parameters: [{ $ref: '#/components/parameters/id' }, { $ref: '#/components/parameters/limit' }], responses: { '200': { description: changes } } }
+    get:
+      operationId: listHostChanges
+      x-freya-permission: 'snapshots:read'
+      parameters:
+        - { $ref: '#/components/parameters/id' }
+        - { $ref: '#/components/parameters/page' }
+        - { $ref: '#/components/parameters/pageSize' }
+        - { name: sort, in: query, description: 'default detected_at (desc); kind is the change type', schema: { type: string, enum: [detected_at, kind] } }
+        - { $ref: '#/components/parameters/order' }
+        - { $ref: '#/components/parameters/limit' }
+      responses:
+        '200': { description: 'page of detected changes (newest first by default)', content: { application/json: { schema: { $ref: '#/components/schemas/ChangePage' } } } }
+        '422': { description: 'validation_failed (detail.param names the parameter)' }
   /api/inventory/v1/snapshots/{id}:
     get: { operationId: getSnapshot, x-freya-permission: 'snapshots:read', parameters: [{ $ref: '#/components/parameters/id' }], responses: { '200': { description: snapshot }, '404': { description: not_found } } }
     delete: { operationId: deleteSnapshot, x-freya-permission: 'snapshots:manage', parameters: [{ $ref: '#/components/parameters/csrf' }, { $ref: '#/components/parameters/id' }], responses: { '204': { description: deleted } } }
@@ -270,8 +427,19 @@ paths:
       operationId: listAgents
       summary: Every enrolled agent (online and offline) with its version and upgrade state
       x-freya-permission: 'agents:manage'
-      parameters: [{ $ref: '#/components/parameters/upgradeState' }, { $ref: '#/components/parameters/outdated' }, { $ref: '#/components/parameters/cursor' }, { $ref: '#/components/parameters/limit' }]
-      responses: { '200': { description: 'agent fleet', content: { application/json: { schema: { $ref: '#/components/schemas/AgentFleet' } } } } }
+      parameters:
+        - { $ref: '#/components/parameters/page' }
+        - { $ref: '#/components/parameters/pageSize' }
+        - { name: sort, in: query, description: 'default hostname (asc); state is the upgrade state', schema: { type: string, enum: [hostname, version, state, last_seen] } }
+        - { $ref: '#/components/parameters/order' }
+        - { $ref: '#/components/parameters/upgradeState' }
+        - { $ref: '#/components/parameters/outdated' }
+        - { name: online, in: query, description: 'only connected (true) or disconnected (false) agents', schema: { type: boolean } }
+        - { $ref: '#/components/parameters/cursor' }
+        - { $ref: '#/components/parameters/limit' }
+      responses:
+        '200': { description: 'agent fleet page', content: { application/json: { schema: { $ref: '#/components/schemas/AgentFleet' } } } }
+        '422': { description: 'validation_failed (detail.param names the parameter)' }
   /api/inventory/v1/agents/upgrades:
     get:
       operationId: listAgentUpgrades
@@ -331,7 +499,14 @@ paths:
       operationId: getAutoEnroll
       summary: The tenant's automatic enrollment switch and keys (secrets are never returned)
       x-freya-permission: 'agents:manage'
-      responses: { '200': { description: settings and keys, content: { application/json: { schema: { $ref: '#/components/schemas/AutoEnroll' } } } } }
+      parameters:
+        - { $ref: '#/components/parameters/page' }
+        - { $ref: '#/components/parameters/pageSize' }
+        - { name: sort, in: query, description: 'key order; default name (asc)', schema: { type: string, enum: [name, created_at] } }
+        - { $ref: '#/components/parameters/order' }
+      responses:
+        '200': { description: settings and one page of keys, content: { application/json: { schema: { $ref: '#/components/schemas/AutoEnroll' } } } }
+        '422': { description: 'validation_failed (detail.param names the parameter)' }
     put:
       operationId: setAutoEnroll
       summary: Turn automatic enrollment on or off for the tenant

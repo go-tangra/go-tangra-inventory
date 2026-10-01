@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { UiPage, UiAlert, UiCard, UiButton, UiBadge, UiStatusChip, UiLiveIndicator, UiKeyValueTable, UiDataTable, UiTabs, UiSelect, UiEmptyState, useConfirm, type Column, type KeyValue, type TabItem } from '@go-tangra/ui'
+import { UiPage, UiAlert, UiCard, UiButton, UiBadge, UiStatusChip, UiLiveIndicator, UiKeyValueTable, UiDataTable, UiTabs, UiSelect, UiEmptyState, useConfirm, useListQuery, type Column, type KeyValue, type TabItem } from '@go-tangra/ui'
 import { useHosts } from '@/stores/hosts'
 import { useAgents } from '@/stores/agents'
-import { useSnapshots } from '@/stores/snapshots'
+import { CHANGE_LIST, SNAPSHOT_LIST, useSnapshots } from '@/stores/snapshots'
 import { useLive } from '@/stores/live'
 import { describe } from '@/api/client'
 import type { Change, Host, IfAddress, Snapshot, SnapshotDiff } from '@/api/types'
@@ -21,6 +21,7 @@ const id = computed(() => String(route.params.id))
 const host = ref<Host | null>(null)
 const latest = ref<Snapshot | null>(null)
 const changes = ref<Change[]>([])
+const changesTotal = ref(0)
 const error = ref('')
 const tab = ref('hardware')
 const busy = ref(false)
@@ -50,13 +51,34 @@ async function load(): Promise<void> {
   } catch {
     latest.value = null
   }
-  void snapshots.listForHost(id.value)
+  void loadSnapshots()
+  void loadChanges()
+}
+
+// --- server paging and sorting of the history tables (?snapshots.page=…, ?changes.page=…) ---
+const snapLq = useListQuery('snapshots', SNAPSHOT_LIST)
+const changeLq = useListQuery('changes', CHANGE_LIST)
+async function loadSnapshots(): Promise<void> {
+  const res = await snapshots.listForHost(id.value, snapLq.query.value)
+  if (res?.page) snapLq.clampTo(res.page) // a page beyond the end answers the last page
+}
+let changeSeq = 0
+async function loadChanges(): Promise<void> {
+  const mine = ++changeSeq
   try {
-    changes.value = await snapshots.changes(id.value)
+    const res = await snapshots.changes(id.value, changeLq.query.value)
+    if (mine !== changeSeq) return
+    changes.value = res.items
+    changesTotal.value = res.total
+    if (res.page) changeLq.clampTo(res.page)
   } catch {
+    if (mine !== changeSeq) return
     changes.value = []
+    changesTotal.value = 0
   }
 }
+watch(snapLq.query, () => void loadSnapshots())
+watch(changeLq.query, () => void loadChanges())
 
 const online = computed(() => agents.connected.some((a) => a.host_id === id.value))
 const inv = computed(() => latest.value?.payload ?? null)
@@ -220,16 +242,35 @@ const truncatedText = computed(() => {
   return parts.filter(([n]) => (n ?? 0) > 0).map(([n, what]) => String(n) + ' ' + what).join(', ')
 })
 const snapshotColumns: Column<Snapshot>[] = [
-  { key: 'collected_at', label: 'Collected', format: (s) => fmt(s.collected_at) }, { key: 'received_at', label: 'Received', format: (s) => fmt(s.received_at), hideOnStack: true },
+  { key: 'collected_at', label: 'Collected', format: (s) => fmt(s.collected_at), sortable: true, defaultDir: 'desc' }, { key: 'received_at', label: 'Received', format: (s) => fmt(s.received_at), hideOnStack: true },
   { key: 'source', label: 'Source', width: 'sm' }, { key: 'agent_version', label: 'Agent', hideOnStack: true }, { key: 'short', label: 'ID', format: (s) => s.id.slice(0, 8) },
 ]
 const changeColumns: Column<Row<Change>>[] = [
-  { key: 'detected_at', label: 'Detected', format: (c) => fmt(c.detected_at) }, { key: 'category', label: 'Category' }, { key: 'change_type', label: 'Change', width: 'sm' }, { key: 'component_key', label: 'Component' },
+  // kind is the server's sort field for the change type.
+  { key: 'detected_at', label: 'Detected', format: (c) => fmt(c.detected_at), sortable: true, defaultDir: 'desc' }, { key: 'category', label: 'Category' }, { key: 'kind', label: 'Change', width: 'sm', sortable: true }, { key: 'component_key', label: 'Component' },
 ]
 const diffColumns: Column<Row<Change>>[] = [{ key: 'category', label: 'Category' }, { key: 'component_key', label: 'Component' }, { key: 'before', label: 'Before' }, { key: 'after', label: 'After' }]
 const patchRows = computed(() => rows((inv.value?.patches ?? []).map((p) => ({ patch_id: p.id, installed_on: p.installed_on }))))
 
-const snapshotOptions = computed(() => snapshots.items.map((s) => ({ title: fmt(s.collected_at) + ' · ' + s.id.slice(0, 8), value: s.id })))
+// The compare pickers offer the visible snapshot page; a snapshot picked on
+// another page stays selectable after paging away.
+const snapTitle = (sn: Snapshot): string => fmt(sn.collected_at) + ' · ' + sn.id.slice(0, 8)
+const pickedTitles = ref<Record<string, string>>({})
+watch([diffA, diffB], ([a, b]) => {
+  const next: Record<string, string> = {}
+  for (const sid of [a, b]) {
+    if (!sid) continue
+    const sn = snapshots.items.find((x) => x.id === sid)
+    const title = sn ? snapTitle(sn) : pickedTitles.value[sid]
+    if (title) next[sid] = title
+  }
+  pickedTitles.value = next
+})
+const snapshotOptions = computed(() => {
+  const opts = snapshots.items.map((sn) => ({ title: snapTitle(sn), value: sn.id }))
+  for (const [value, title] of Object.entries(pickedTitles.value)) if (!opts.some((o) => o.value === value)) opts.push({ title, value })
+  return opts
+})
 async function compare(): Promise<void> {
   diffError.value = ''
   diff.value = null
@@ -390,10 +431,10 @@ const changeColors = { added: 'success', removed: 'error', modified: 'warning' }
           </div>
         </div>
       </UiCard>
-      <UiCard title="Snapshots" :padded="false"><UiDataTable :items="snapshots.items" :columns="snapshotColumns" caption="Snapshots" empty-title="No snapshots" data-test="snapshots-table" /></UiCard>
+      <UiCard title="Snapshots" :padded="false"><UiDataTable :items="snapshots.items" :columns="snapshotColumns" :loading="snapshots.loading" :total="snapshots.total" :page="snapLq.page.value" :page-size="snapLq.pageSize.value" :sort="snapLq.sort.value" caption="Snapshots" empty-title="No snapshots" data-test="snapshots-table" @update:page="snapLq.setPage" @update:page-size="snapLq.setPageSize" @update:sort="snapLq.setSort" /></UiCard>
       <UiCard title="Change history" :padded="false">
-        <UiDataTable :items="rows(changes)" :columns="changeColumns" caption="Change history" empty-title="No changes recorded">
-          <template #cell-change_type="{ row }"><UiStatusChip :status="String(row.change_type)" :colors="changeColors" /></template>
+        <UiDataTable :items="rows(changes)" :columns="changeColumns" :total="changesTotal" :page="changeLq.page.value" :page-size="changeLq.pageSize.value" :sort="changeLq.sort.value" caption="Change history" empty-title="No changes recorded" data-test="changes-table" @update:page="changeLq.setPage" @update:page-size="changeLq.setPageSize" @update:sort="changeLq.setSort">
+          <template #cell-kind="{ row }"><UiStatusChip :status="String(row.change_type)" :colors="changeColors" /></template>
         </UiDataTable>
       </UiCard>
     </div>

@@ -8,6 +8,8 @@ import (
 	"io"
 	"time"
 
+	"github.com/go-tangra/go-tangra/v4/listquery"
+
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/store"
 )
 
@@ -62,6 +64,17 @@ type Store interface {
 	InsertChanges(ctx context.Context, changes []store.Change) error
 	ListChangesForHost(ctx context.Context, tenantID, hostID string, limit int) ([]store.Change, error)
 	ListChangesForSnapshot(ctx context.Context, tenantID, snapshotID string) ([]store.Change, error)
+
+	// Paged lists (list contract, go-tangra specs/032-server-side-tables).
+	// Each counts the rows matching the filter, clamps req to that total and
+	// returns one page ordered by the req field of its Spec (store.HostList,
+	// store.SnapshotList, store.ChangeList) with the id as tie-breaker,
+	// together with the total and the request actually applied. The cursor
+	// variants above keep serving gRPC, backup and internal callers.
+	// ListSnapshotsPage returns payload-free summaries.
+	ListHostsPage(ctx context.Context, tenantID string, f store.HostFilter, req listquery.Request) ([]store.Host, int, listquery.Request, error)
+	ListSnapshotsPage(ctx context.Context, tenantID, hostID string, req listquery.Request) ([]store.Snapshot, int, listquery.Request, error)
+	ListChangesPage(ctx context.Context, tenantID, hostID string, req listquery.Request) ([]store.Change, int, listquery.Request, error)
 
 	// Agents
 	CreateAgent(ctx context.Context, a store.Agent) error

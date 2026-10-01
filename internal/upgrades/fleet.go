@@ -2,8 +2,13 @@ package upgrades
 
 import (
 	"context"
+	"fmt"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
+
+	"github.com/go-tangra/go-tangra/v4/listquery"
 
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/agentrelease"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/repo"
@@ -55,7 +60,8 @@ type FleetFilter struct {
 	State    string
 	Outdated bool
 	Cursor   string
-	Limit    int // <= 0: all
+	Limit    int   // <= 0: all
+	Online   *bool // nil: any; otherwise only agents with that connection state
 }
 
 // Fleet lists every enrolled, non-revoked agent of the tenant (online or
@@ -100,6 +106,9 @@ func (s *Service) Fleet(ctx context.Context, tenantID string, f FleetFilter) ([]
 		if at, ok := online[a.ID]; ok {
 			e.Online, e.ConnectedAt = true, &at
 		}
+		if f.Online != nil && e.Online != *f.Online {
+			continue
+		}
 		if f.State != "" && e.UpgradeState != f.State {
 			continue
 		}
@@ -114,6 +123,74 @@ func (s *Service) Fleet(ctx context.Context, tenantID string, f FleetFilter) ([]
 		}
 	}
 	return out, target, nil
+}
+
+// FleetPage returns one page of the fleet view (list contract,
+// store.FleetList order with the agent id as tie-breaker; the legacy Cursor
+// and Limit of f are ignored), the total of matching agents and the tenant
+// target version.
+func (s *Service) FleetPage(ctx context.Context, tenantID string, f FleetFilter, req listquery.Request) (listquery.Page[FleetEntry], string, error) {
+	f.Cursor, f.Limit = "", 0
+	all, target, err := s.Fleet(ctx, tenantID, f)
+	if err != nil {
+		return listquery.Page[FleetEntry]{}, "", err
+	}
+	req = store.ListRequest(req, store.FleetList)
+	listquery.SortSlice(all, req, fleetKey, func(e FleetEntry) string { return e.AgentID })
+	page, total, applied := listquery.Window(all, req)
+	return listquery.NewPage(page, total, applied), target, nil
+}
+
+// fleetKey is the value of a store.FleetList sort field. Versions sort by
+// semantic version precedence (VersionSortKey); an agent without a hostname
+// sorts last.
+func fleetKey(e FleetEntry, field string) any {
+	switch field {
+	case "version":
+		return VersionSortKey(e.Version)
+	case "state":
+		return e.UpgradeState
+	case "last_seen":
+		return e.LastSeen
+	default:
+		if e.Hostname == "" {
+			return nil
+		}
+		return e.Hostname
+	}
+}
+
+// VersionSortKey maps an agent version to a string whose byte order is the
+// semantic version order of MAJOR.MINOR.PATCH, a release after its
+// pre-releases (pre-release identifiers compare as text). A value that is not
+// a version keeps its text after every version.
+func VersionSortKey(v string) string {
+	s := strings.TrimPrefix(v, "v")
+	if i := strings.IndexByte(s, '+'); i >= 0 {
+		s = s[:i]
+	}
+	core, pre, hasPre := strings.Cut(s, "-")
+	if i := strings.IndexByte(core, '~'); i >= 0 {
+		core, pre, hasPre = s[:i], s[i+1:], true
+	}
+	parts := strings.Split(core, ".")
+	if len(parts) != 3 {
+		return "~" + v
+	}
+	var b strings.Builder
+	for _, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil || n < 0 || len(p) > 9 {
+			return "~" + v
+		}
+		fmt.Fprintf(&b, "%09d.", n)
+	}
+	if hasPre {
+		b.WriteString("0" + pre)
+	} else {
+		b.WriteString("1")
+	}
+	return b.String()
 }
 
 // entry derives the fleet state of one agent (first matching rule wins).

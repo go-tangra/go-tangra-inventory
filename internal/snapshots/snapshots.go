@@ -11,6 +11,8 @@ import (
 	"errors"
 	"time"
 
+	"github.com/go-tangra/go-tangra/v4/listquery"
+
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/authz"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/diff"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/events"
@@ -113,6 +115,23 @@ func (s *Service) ListForHost(ctx context.Context, subj authz.Subjects, hostID s
 	return out, nil
 }
 
+// ListPageForHost returns one page of a host's snapshots as payload-free
+// summaries (list contract: store.SnapshotList order).
+func (s *Service) ListPageForHost(ctx context.Context, subj authz.Subjects, hostID string, req listquery.Request) (listquery.Page[View], error) {
+	if err := authz.RequireTenant(subj, subj.TenantID); err != nil {
+		return listquery.Page[View]{}, err
+	}
+	rows, total, applied, err := s.st.ListSnapshotsPage(ctx, subj.TenantID, hostID, req)
+	if err != nil {
+		return listquery.Page[View]{}, err
+	}
+	out := make([]View, 0, len(rows))
+	for _, snap := range rows {
+		out = append(out, summaryView(snap))
+	}
+	return listquery.NewPage(out, total, applied), nil
+}
+
 // Delete removes a snapshot.
 func (s *Service) Delete(ctx context.Context, subj authz.Subjects, id string) error {
 	if err := authz.RequireTenant(subj, subj.TenantID); err != nil {
@@ -143,6 +162,19 @@ func (s *Service) ListChanges(ctx context.Context, subj authz.Subjects, hostID s
 		return nil, err
 	}
 	return s.st.ListChangesForHost(ctx, subj.TenantID, hostID, 0)
+}
+
+// ChangesPage returns one page of a host's change history (list contract:
+// store.ChangeList order).
+func (s *Service) ChangesPage(ctx context.Context, subj authz.Subjects, hostID string, req listquery.Request) (listquery.Page[store.Change], error) {
+	if err := authz.RequireTenant(subj, subj.TenantID); err != nil {
+		return listquery.Page[store.Change]{}, err
+	}
+	rows, total, applied, err := s.st.ListChangesPage(ctx, subj.TenantID, hostID, req)
+	if err != nil {
+		return listquery.Page[store.Change]{}, err
+	}
+	return listquery.NewPage(rows, total, applied), nil
 }
 
 func mapNF(err error) error {

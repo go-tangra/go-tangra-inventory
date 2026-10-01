@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-tangra/go-tangra/v4/listquery"
+
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/repo"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/sealed"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/store"
@@ -125,6 +127,15 @@ func (f *fakeStore) GetHostByIdentity(context.Context, string, store.Identity) (
 }
 func (f *fakeStore) ListHosts(context.Context, string, store.HostFilter) ([]store.Host, error) {
 	return nil, nil
+}
+func (f *fakeStore) ListHostsPage(_ context.Context, _ string, _ store.HostFilter, r listquery.Request) ([]store.Host, int, listquery.Request, error) {
+	return nil, 0, r, nil
+}
+func (f *fakeStore) ListSnapshotsPage(_ context.Context, _, _ string, r listquery.Request) ([]store.Snapshot, int, listquery.Request, error) {
+	return nil, 0, r, nil
+}
+func (f *fakeStore) ListChangesPage(_ context.Context, _, _ string, r listquery.Request) ([]store.Change, int, listquery.Request, error) {
+	return nil, 0, r, nil
 }
 func (f *fakeStore) SetHostTags(context.Context, string, string, map[string]string) error { return nil }
 func (f *fakeStore) RetireHost(context.Context, string, string) error                     { return nil }

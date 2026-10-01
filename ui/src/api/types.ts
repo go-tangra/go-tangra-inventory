@@ -8,6 +8,31 @@ export type HostStatus = 'active' | 'stale' | 'retired'
 export type SnapshotSource = 'agent' | 'manual' | 'import'
 export type ChangeType = 'added' | 'removed' | 'modified'
 
+// --- list contract (go-tangra specs/032-server-side-tables) ---
+
+/** The list contract fields of a page. */
+export interface PageInfo {
+  total: number
+  /** The page returned: a page beyond the end answers the last page. */
+  page?: number
+  page_size?: number
+  sort?: string
+  order?: 'asc' | 'desc'
+}
+
+/** Page, size and order of a list request. */
+export interface ListParams {
+  page: number
+  page_size: number
+  sort: string
+  order: 'asc' | 'desc'
+}
+
+/** One page of a list endpoint. */
+export interface Page<T> extends PageInfo {
+  items: T[]
+}
+
 // --- host ---
 
 export interface Host {
@@ -414,7 +439,7 @@ export interface AgentFleetEntry extends ConnectedAgent {
   auto_enroll_key_id?: string
 }
 
-export interface AgentFleet {
+export interface AgentFleet extends PageInfo {
   items: AgentFleetEntry[]
   current_version?: string
 }
@@ -530,7 +555,13 @@ export interface AutoEnroll {
   updated_by?: string
   updated_at?: string | null
   window_seconds: number
+  /** One page of the keys (list contract fields alongside). */
   keys: AutoEnrollKey[]
+  total?: number
+  page?: number
+  page_size?: number
+  sort?: string
+  order?: 'asc' | 'desc'
 }
 
 // AutoEnrollKeySecret is returned by create and rotate: the only time the secret is shown.

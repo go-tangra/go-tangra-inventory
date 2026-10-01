@@ -6,13 +6,14 @@ import { useAgents } from '@/stores/agents'
 import { useStats } from '@/stores/stats'
 
 // The dashboard prefers the /statistics/tenant snapshot; when it is unavailable
-// it derives figures from the loaded host list and connected-agent registry.
+// it derives figures from the connected-agent registry, the host total and
+// the first (largest) page of hosts.
 const hosts = useHosts()
 const agents = useAgents()
 const stats = useStats()
 
 onMounted(() => {
-  void hosts.list()
+  void hosts.list({}, { page: 1, page_size: 200, sort: 'hostname', order: 'asc' })
   void agents.listConnected()
   void stats.load()
 })
@@ -35,7 +36,7 @@ function tally(pick: (h: (typeof hosts.items)[number]) => string | undefined): R
 const bars = (m: Record<string, number>, color?: (k: string) => NonNullable<BarItem['color']>): BarItem[] =>
   Object.entries(m).sort((a, b) => b[1] - a[1]).map(([label, value]) => (color ? { label, value, color: color(label) } : { label, value }))
 
-const hostsTotal = computed(() => snap.value?.hosts_total ?? hosts.items.length)
+const hostsTotal = computed(() => snap.value?.hosts_total ?? hosts.total)
 const agentsOnline = computed(() => snap.value?.agents_online ?? agents.connected.length)
 const agentsOffline = computed(() => snap.value?.agents_offline ?? Math.max(0, hostsTotal.value - agentsOnline.value))
 const staleHosts = computed(() => snap.value?.stale_hosts ?? hosts.items.filter((h) => h.status === 'stale').length)

@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/go-tangra/go-tangra/v4/listquery"
+
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/autoenroll"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/store"
 )
@@ -51,6 +53,14 @@ func viewAutoKey(k store.AutoEnrollKey, now time.Time) autoKeyView {
 		CreatedBy: k.CreatedBy, CreatedAt: k.CreatedAt, UpdatedAt: k.UpdatedAt}
 }
 
+// autoKeyKey is the value of a store.AutoEnrollKeyList sort field.
+func autoKeyKey(k autoKeyView, field string) any {
+	if field == "created_at" {
+		return k.CreatedAt
+	}
+	return k.Name
+}
+
 // failAuto maps autoenroll errors; anything else goes to failSvc.
 func failAuto(w http.ResponseWriter, err error) {
 	var ie *autoenroll.InvalidError
@@ -80,6 +90,10 @@ func (s *Server) registerAutoEnroll(svc *autoenroll.Service, p string) {
 			failSvc(w, err)
 			return
 		}
+		req, ok := parseList(w, r, store.AutoEnrollKeyList)
+		if !ok {
+			return
+		}
 		st, err := svc.Settings(r.Context(), tenant)
 		if err != nil {
 			failSvc(w, err)
@@ -95,12 +109,16 @@ func (s *Server) registerAutoEnroll(svc *autoenroll.Service, p string) {
 		for _, k := range keys {
 			views = append(views, viewAutoKey(k, now))
 		}
+		// The keys are a list contract page (store.AutoEnrollKeyList).
+		listquery.SortSlice(views, req, autoKeyKey, func(k autoKeyView) string { return k.ID })
+		page, total, applied := listquery.Window(views, req)
 		var updated *time.Time
 		if !st.UpdatedAt.IsZero() {
 			updated = &st.UpdatedAt
 		}
 		WriteJSON(w, http.StatusOK, map[string]any{"enabled": st.Enabled, "updated_by": st.UpdatedBy, "updated_at": updated,
-			"window_seconds": int(svc.Window().Seconds()), "keys": views})
+			"window_seconds": int(svc.Window().Seconds()), "keys": page,
+			"total": total, "page": applied.Page, "page_size": applied.PageSize, "sort": applied.Sort, "order": applied.Order})
 	})
 	s.MustHandle("PUT", p+"/agents/auto-enroll", func(w http.ResponseWriter, r *http.Request) {
 		a, tenant, err := actor(r)
