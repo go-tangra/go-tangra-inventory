@@ -17,6 +17,9 @@ const (
 	AgentOnline      = "inventory.agent.online"
 	AgentOffline     = "inventory.agent.offline"
 	HostChanged      = "inventory.host.changed"
+	// CertificateDelivery follows every committed certificate delivery item
+	// transition (feature 033); the payload carries ids and the state only.
+	CertificateDelivery = "inventory.certificate.delivery"
 )
 
 // Publisher emits a realtime event to all of a tenant's subscribers.
@@ -63,4 +66,10 @@ func agentPayload(agentID, hostID, hostname string) map[string]any {
 // HostChangedPayload reports that a snapshot produced changeCount changes.
 func HostChangedPayload(hostID string, changeCount int) map[string]any {
 	return map[string]any{"host_id": hostID, "change_count": changeCount}
+}
+
+// CertificateDeliveryPayload reports a delivery item's new state (no
+// certificate data).
+func CertificateDeliveryPayload(hostID, itemID, state string) map[string]any {
+	return map[string]any{"host_id": hostID, "item_id": itemID, "state": state}
 }

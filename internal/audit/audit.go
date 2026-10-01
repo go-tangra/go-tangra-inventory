@@ -61,7 +61,34 @@ const (
 	AutoEnrollKeyDeleted      EventType = "auto_enroll_key_deleted"
 	AgentAutoEnrolled         EventType = "agent_auto_enrolled"
 	AutoEnrollRefused         EventType = "auto_enroll_refused"
+	// Feature 033: certificate delivery (contracts/audit-events.md). Item
+	// transitions are written through the repo in the transaction of the
+	// state change (Row). Details carry identity only (ids, serial,
+	// fingerprint, state, reason), never material.
+	CertDeliveryRequested   EventType = "cert_delivery_requested"
+	CertDeliveryRearmed     EventType = "cert_delivery_rearmed"
+	CertDeliveryDelivered   EventType = "cert_delivery_delivered"
+	CertDeliveryFetched     EventType = "cert_delivery_fetched"
+	CertDeliveryInstalled   EventType = "cert_delivery_installed"
+	CertDeliveryUnchanged   EventType = "cert_delivery_unchanged"
+	CertDeliveryFailed      EventType = "cert_delivery_failed"
+	CertDeliveryHookFailed  EventType = "cert_delivery_hook_failed"
+	CertDeliveryUnsupported EventType = "cert_delivery_unsupported"
+	CertDeliverySuperseded  EventType = "cert_delivery_superseded"
+	CertDeliveryExpired     EventType = "cert_delivery_expired"
+	CertDeliveryCancelled   EventType = "cert_delivery_cancelled"
+	CertDeliveryRefused     EventType = "cert_delivery_refused"
+	HostCertificateRevoked  EventType = "host_certificate_revoked"
 )
+
+// certEvents are the certificate delivery event types (feature 033): their
+// detail values are refused, not truncated, above maxDetailValue.
+var certEvents = map[EventType]bool{
+	CertDeliveryRequested: true, CertDeliveryRearmed: true, CertDeliveryDelivered: true, CertDeliveryFetched: true,
+	CertDeliveryInstalled: true, CertDeliveryUnchanged: true, CertDeliveryFailed: true, CertDeliveryHookFailed: true,
+	CertDeliveryUnsupported: true, CertDeliverySuperseded: true, CertDeliveryExpired: true, CertDeliveryCancelled: true,
+	CertDeliveryRefused: true, HostCertificateRevoked: true,
+}
 
 // PlatformTenant is the tenant id of platform-scope events (agent release
 // imports: releases are global, not tenant data).
@@ -80,6 +107,9 @@ const (
 	SubjectRelease       = "release"
 	// Feature 029.
 	SubjectAutoEnrollKey = "auto_enroll_key"
+	// Feature 033: a certificate delivery item (or, for request-level rows,
+	// the delivery).
+	SubjectCertDelivery = "cert_delivery"
 )
 
 // Outcomes (closed set).
@@ -112,6 +142,9 @@ func init() {
 		UpgradePolicyUpdated, UpgradePolicyPaused, UpgradePolicyResumed, AgentReleaseImported,
 		AutoEnrollSettingsUpdated, AutoEnrollKeyCreated, AutoEnrollKeyUpdated, AutoEnrollKeyRotated, AutoEnrollKeyDeleted,
 		AgentAutoEnrolled, AutoEnrollRefused,
+		CertDeliveryRequested, CertDeliveryRearmed, CertDeliveryDelivered, CertDeliveryFetched, CertDeliveryInstalled,
+		CertDeliveryUnchanged, CertDeliveryFailed, CertDeliveryHookFailed, CertDeliveryUnsupported, CertDeliverySuperseded,
+		CertDeliveryExpired, CertDeliveryCancelled, CertDeliveryRefused, HostCertificateRevoked,
 	} {
 		known[t] = struct{}{}
 	}
@@ -156,7 +189,8 @@ func Validate(e Event) error {
 		return fmt.Errorf("audit: actor_kind %q", e.ActorKind)
 	}
 	switch e.SubjectKind {
-	case SubjectHost, SubjectSnapshot, SubjectAgent, SubjectToken, SubjectBackup, SubjectSystem, SubjectUpgradePolicy, SubjectRelease, SubjectAutoEnrollKey:
+	case SubjectHost, SubjectSnapshot, SubjectAgent, SubjectToken, SubjectBackup, SubjectSystem, SubjectUpgradePolicy, SubjectRelease, SubjectAutoEnrollKey,
+		SubjectCertDelivery:
 	default:
 		return fmt.Errorf("audit: subject_kind %q", e.SubjectKind)
 	}
@@ -165,6 +199,41 @@ func Validate(e Event) error {
 	default:
 		return fmt.Errorf("audit: outcome %q", e.Outcome)
 	}
+	return checkDetail(e.Details, certEvents[e.EventType])
+}
+
+// maxDetailValue is the cap of a detail string (truncated, or refused for
+// certificate delivery events).
+const maxDetailValue = 256
+
+// pemMarker starts every PEM block: no detail value may carry one (SC-003,
+// defence in depth against certificate or key material in the audit log).
+const pemMarker = "-----BEGIN"
+
+// checkDetail refuses detail values carrying PEM (any event) and, when
+// strict, string values longer than maxDetailValue, at any depth.
+func checkDetail(v any, strict bool) error {
+	switch x := v.(type) {
+	case string:
+		if strings.Contains(x, pemMarker) {
+			return errors.New("audit: detail value carries PEM material")
+		}
+		if strict && len(x) > maxDetailValue {
+			return fmt.Errorf("audit: detail value longer than %d bytes", maxDetailValue)
+		}
+	case map[string]any:
+		for _, vv := range x {
+			if err := checkDetail(vv, strict); err != nil {
+				return err
+			}
+		}
+	case []any:
+		for _, vv := range x {
+			if err := checkDetail(vv, strict); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 
@@ -172,8 +241,11 @@ func Validate(e Event) error {
 // secrets and hardware serial numbers never belong in an audit detail.
 var forbidden = []string{"secret", "credential", "token", "serial"}
 
-func forbiddenKey(k string) bool {
+func forbiddenKey(k string, certSubject bool) bool {
 	lk := strings.ToLower(k)
+	if certSubject && lk == "serial" {
+		return false // a certificate serial is public identity (feature 033)
+	}
 	for _, f := range forbidden {
 		if strings.Contains(lk, f) {
 			return true
@@ -182,19 +254,19 @@ func forbiddenKey(k string) bool {
 	return false
 }
 
-func guardValue(v any) any {
+func guardValue(v any, certSubject bool) any {
 	switch x := v.(type) {
 	case string:
-		if len(x) > 256 {
-			return x[:256]
+		if len(x) > maxDetailValue {
+			return x[:maxDetailValue]
 		}
 		return x
 	case map[string]any:
-		return guardMap(x)
+		return guardMap(x, certSubject)
 	case []any:
 		out := make([]any, len(x))
 		for i, vv := range x {
-			out[i] = guardValue(vv)
+			out[i] = guardValue(vv, certSubject)
 		}
 		return out
 	default:
@@ -204,16 +276,22 @@ func guardValue(v any) any {
 
 // guardMap returns a copy of m with any key whose lowercased name carries
 // secret|credential|token|serial (at any depth) dropped and string values
-// truncated to 256 characters.
-func guardMap(m map[string]any) map[string]any {
+// truncated to 256 characters. For the cert_delivery subject the exact key
+// "serial" (the certificate serial) is kept.
+func guardMap(m map[string]any, certSubject bool) map[string]any {
 	out := make(map[string]any, len(m))
 	for k, v := range m {
-		if forbiddenKey(k) {
+		if forbiddenKey(k, certSubject) {
 			continue
 		}
-		out[k] = guardValue(v)
+		out[k] = guardValue(v, certSubject)
 	}
 	return out
+}
+
+// guard applies guardMap with the event's subject rules.
+func guard(e Event) map[string]any {
+	return guardMap(e.Details, e.SubjectKind == SubjectCertDelivery)
 }
 
 // Row validates e and returns the audit row to write at now, with the detail
@@ -226,7 +304,7 @@ func Row(e Event, now time.Time) (store.AuditRow, error) {
 	return store.AuditRow{
 		ID: store.NewID(), TenantID: e.TenantID, At: now, ActorKind: e.ActorKind, ActorID: e.ActorID,
 		Action: string(e.EventType), SubjectKind: e.SubjectKind, SubjectID: e.SubjectID, Outcome: e.Outcome,
-		Reason: e.Reason, Detail: guardMap(e.Details),
+		Reason: e.Reason, Detail: guard(e),
 	}, nil
 }
 
@@ -281,7 +359,7 @@ func (w *Writer) Record(_ context.Context, e Event) error {
 		SubjectID:   e.SubjectID,
 		Outcome:     e.Outcome,
 		Reason:      e.Reason,
-		Detail:      guardMap(e.Details),
+		Detail:      guard(e),
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()

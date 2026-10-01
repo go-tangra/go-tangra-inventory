@@ -68,3 +68,15 @@ func assertNoSecrets(t *testing.T, p map[string]any) {
 		}
 	}
 }
+
+// TestCertificateDeliveryPayload (feature 033): the realtime event is
+// content-free: exactly host_id, item_id and state.
+func TestCertificateDeliveryPayload(t *testing.T) {
+	p := CertificateDeliveryPayload("h1", "i1", "installed")
+	if len(p) != 3 || p["host_id"] != "h1" || p["item_id"] != "i1" || p["state"] != "installed" {
+		t.Fatalf("payload = %v", p)
+	}
+	if CertificateDelivery != "inventory.certificate.delivery" {
+		t.Fatal("event type")
+	}
+}
