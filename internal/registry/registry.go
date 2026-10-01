@@ -25,14 +25,27 @@ const deliverBuffer = 16
 const (
 	CommandRefresh = "refresh"
 	CommandUpgrade = "upgrade" // feature 023
+	// CommandCertificate asks the agent to fetch and install the
+	// certificate of a delivery item (feature 033).
+	CommandCertificate = "certificate"
 )
 
 // Command is a control message pushed to a connected agent. It travels as
-// JSON through the Valkey registry, so the upgrade payload is kept there.
+// JSON through the Valkey registry, so its payloads carry identifiers only.
 type Command struct {
-	ID      string          `json:"id"`
-	Type    string          `json:"type"` // refresh | upgrade
-	Upgrade *UpgradePayload `json:"upgrade,omitempty"`
+	ID          string              `json:"id"`
+	Type        string              `json:"type"` // refresh | upgrade | certificate
+	Upgrade     *UpgradePayload     `json:"upgrade,omitempty"`
+	Certificate *CertificatePayload `json:"certificate,omitempty"`
+}
+
+// CertificatePayload asks an agent to install the certificate of delivery
+// item ItemID under Name (feature 033). It carries ids only, never
+// material: the agent pulls the bundle with FetchCertificate over its own
+// authenticated ingest connection.
+type CertificatePayload struct {
+	ItemID string `json:"item_id"`
+	Name   string `json:"name"`
 }
 
 // UpgradePayload asks an agent to upgrade (feature 023). It carries no
