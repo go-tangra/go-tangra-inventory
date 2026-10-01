@@ -5,9 +5,12 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/go-tangra/go-tangra/v4/listquery"
+
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/backup"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/registry"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/store"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/upgrades"
 )
 
 // Register mounts the inventory HTTP routes declared in the OpenAPI document.
@@ -26,20 +29,38 @@ func (s *Server) Register(d Deps) {
 			return
 		}
 		q := r.URL.Query()
-		items, err := d.Hosts.List(r.Context(), subj, store.HostFilter{
-			Hostname:     q.Get("hostname"),
-			OSName:       q.Get("os_name"),
-			Manufacturer: q.Get("manufacturer"),
-			Status:       q.Get("status"),
-			Tag:          q.Get("tag"),
-			Limit:        atoiDefault(q.Get("limit"), 0),
-			CursorID:     q.Get("cursor"),
-		})
+		f, bad := hostFilter(q)
+		if bad != "" {
+			writeParamError(w, bad)
+			return
+		}
+		if listquery.Legacy(q) {
+			// Legacy cursor/limit (kept one release): the id-DESC keyset page
+			// in its previous shape, plus the total.
+			f.Limit, f.CursorID = atoiDefault(q.Get("limit"), 0), q.Get("cursor")
+			items, err := d.Hosts.List(r.Context(), subj, f)
+			if err != nil {
+				failSvc(w, err)
+				return
+			}
+			count, err := d.Hosts.ListPage(r.Context(), subj, f, listquery.Request{PageSize: 1})
+			if err != nil {
+				failSvc(w, err)
+				return
+			}
+			WriteJSON(w, http.StatusOK, map[string]any{"items": items, "total": count.Total})
+			return
+		}
+		req, ok := parseList(w, r, store.HostList)
+		if !ok {
+			return
+		}
+		page, err := d.Hosts.ListPage(r.Context(), subj, f, req)
 		if err != nil {
 			failSvc(w, err)
 			return
 		}
-		WriteJSON(w, http.StatusOK, map[string]any{"items": items})
+		WriteJSON(w, http.StatusOK, page)
 	})
 	s.MustHandle("GET", p+"/hosts/{id}", func(w http.ResponseWriter, r *http.Request) {
 		subj, err := subjects(r)
@@ -119,12 +140,32 @@ func (s *Server) Register(d Deps) {
 			return
 		}
 		q := r.URL.Query()
-		items, err := d.Snapshots.ListForHost(r.Context(), subj, r.PathValue("id"), atoiDefault(q.Get("limit"), 0), q.Get("cursor"))
+		hostID := r.PathValue("id")
+		if listquery.Legacy(q) {
+			// Legacy cursor/limit (kept one release), plus the total.
+			items, err := d.Snapshots.ListForHost(r.Context(), subj, hostID, atoiDefault(q.Get("limit"), 0), q.Get("cursor"))
+			if err != nil {
+				failSvc(w, err)
+				return
+			}
+			count, err := d.Snapshots.ListPageForHost(r.Context(), subj, hostID, listquery.Request{PageSize: 1})
+			if err != nil {
+				failSvc(w, err)
+				return
+			}
+			WriteJSON(w, http.StatusOK, map[string]any{"items": items, "total": count.Total})
+			return
+		}
+		req, ok := parseList(w, r, store.SnapshotList)
+		if !ok {
+			return
+		}
+		page, err := d.Snapshots.ListPageForHost(r.Context(), subj, hostID, req)
 		if err != nil {
 			failSvc(w, err)
 			return
 		}
-		WriteJSON(w, http.StatusOK, map[string]any{"items": items})
+		WriteJSON(w, http.StatusOK, page)
 	})
 	s.MustHandle("GET", p+"/hosts/{id}/changes", func(w http.ResponseWriter, r *http.Request) {
 		subj, err := subjects(r)
@@ -132,12 +173,28 @@ func (s *Server) Register(d Deps) {
 			failSvc(w, err)
 			return
 		}
-		items, err := d.Snapshots.ListChanges(r.Context(), subj, r.PathValue("id"))
+		q := r.URL.Query()
+		if listquery.Legacy(q) {
+			// Legacy limit (kept one release): the newest changes, now
+			// honouring the limit, in the previous shape plus the total.
+			page, err := d.Snapshots.ChangesPage(r.Context(), subj, r.PathValue("id"), listquery.Request{PageSize: legacyLimit(q)})
+			if err != nil {
+				failSvc(w, err)
+				return
+			}
+			WriteJSON(w, http.StatusOK, map[string]any{"items": page.Items, "total": page.Total})
+			return
+		}
+		req, ok := parseList(w, r, store.ChangeList)
+		if !ok {
+			return
+		}
+		page, err := d.Snapshots.ChangesPage(r.Context(), subj, r.PathValue("id"), req)
 		if err != nil {
 			failSvc(w, err)
 			return
 		}
-		WriteJSON(w, http.StatusOK, map[string]any{"items": items})
+		WriteJSON(w, http.StatusOK, page)
 	})
 
 	// ---- Snapshots
@@ -369,6 +426,14 @@ func (s *Server) listConnected(d Deps) func(http.ResponseWriter, *http.Request) 
 			failSvc(w, err)
 			return
 		}
+		q := r.URL.Query()
+		var req listquery.Request
+		if !listquery.Legacy(q) {
+			var ok bool
+			if req, ok = parseList(w, r, store.FleetList); !ok {
+				return
+			}
+		}
 		agents, err := d.Registry.ListConnected(r.Context(), subj.TenantID)
 		if err != nil {
 			failSvc(w, err)
@@ -377,6 +442,24 @@ func (s *Server) listConnected(d Deps) func(http.ResponseWriter, *http.Request) 
 		if agents == nil {
 			agents = []registry.ConnectedAgent{}
 		}
-		WriteJSON(w, http.StatusOK, map[string]any{"items": agents})
+		if listquery.Legacy(q) {
+			WriteJSON(w, http.StatusOK, map[string]any{"items": agents, "total": len(agents)})
+			return
+		}
+		// Live connections carry no hostname or upgrade state: those sorts
+		// fall back to the agent id.
+		key := func(a registry.ConnectedAgent, field string) any {
+			switch field {
+			case "version":
+				return upgrades.VersionSortKey(a.Version)
+			case "last_seen":
+				return a.ConnectedAt
+			default:
+				return a.AgentID
+			}
+		}
+		listquery.SortSlice(agents, req, key, func(a registry.ConnectedAgent) string { return a.AgentID })
+		page, total, applied := listquery.Window(agents, req)
+		WriteJSON(w, http.StatusOK, listquery.NewPage(page, total, applied))
 	}
 }

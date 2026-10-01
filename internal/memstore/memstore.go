@@ -229,6 +229,28 @@ func (m *Mem) ListHosts(_ context.Context, tenantID string, f store.HostFilter) 
 	if err := m.fail("ListHosts"); err != nil {
 		return nil, err
 	}
+	out := m.filterHosts(tenantID, f)
+	// Newest first via id-desc keyset (uuid v7 ids are time-ordered); cursorID is
+	// the last id returned by the previous page.
+	sort.Slice(out, func(i, j int) bool { return out[i].ID > out[j].ID })
+	if f.CursorID != "" {
+		filtered := out[:0]
+		for _, h := range out {
+			if h.ID < f.CursorID {
+				filtered = append(filtered, h)
+			}
+		}
+		out = filtered
+	}
+	if f.Limit > 0 && len(out) > f.Limit {
+		out = out[:f.Limit]
+	}
+	return out, nil
+}
+
+// filterHosts returns the tenant's hosts matching f (unordered; the legacy
+// cursor and limit are ignored). The caller holds m.mu.
+func (m *Mem) filterHosts(tenantID string, f store.HostFilter) []store.Host {
 	tagKey, tagVal, tagHasVal := parseTag(f.Tag)
 	var out []store.Host
 	for _, h := range m.hosts {
@@ -264,22 +286,7 @@ func (m *Mem) ListHosts(_ context.Context, tenantID string, f store.HostFilter) 
 		}
 		out = append(out, h)
 	}
-	// Newest first via id-desc keyset (uuid v7 ids are time-ordered); cursorID is
-	// the last id returned by the previous page.
-	sort.Slice(out, func(i, j int) bool { return out[i].ID > out[j].ID })
-	if f.CursorID != "" {
-		filtered := out[:0]
-		for _, h := range out {
-			if h.ID < f.CursorID {
-				filtered = append(filtered, h)
-			}
-		}
-		out = filtered
-	}
-	if f.Limit > 0 && len(out) > f.Limit {
-		out = out[:f.Limit]
-	}
-	return out, nil
+	return out
 }
 
 func parseTag(tag string) (key, val string, hasVal bool) {
@@ -447,9 +454,17 @@ func (m *Mem) ListSnapshotsForHost(_ context.Context, tenantID, hostID string, l
 		return out[i].ID > out[j].ID
 	})
 	if cursorID != "" {
+		// Continue strictly after the cursor snapshot in (collected_at, id)
+		// order; an unknown cursor falls back to the lower ids.
+		cur, known := m.snaps[cursorID]
+		known = known && cur.TenantID == tenantID
 		filtered := out[:0]
 		for _, s := range out {
-			if s.ID < cursorID {
+			after := s.ID < cursorID
+			if known {
+				after = s.CollectedAt.Before(cur.CollectedAt) || (s.CollectedAt.Equal(cur.CollectedAt) && s.ID < cur.ID)
+			}
+			if after {
 				filtered = append(filtered, s)
 			}
 		}

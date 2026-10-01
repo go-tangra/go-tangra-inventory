@@ -16,6 +16,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/go-tangra/go-tangra/v4/listquery"
+
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/repo"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/store"
 )
@@ -235,62 +237,99 @@ func (d *DB) GetHostByIdentity(ctx context.Context, tenantID string, id store.Id
 	return
 }
 
+// hostWhere is the WHERE clause (and its arguments, $1 = tenant) of a host
+// listing for f, without the legacy cursor.
+func hostWhere(tenantID string, f store.HostFilter) (string, []any) {
+	var b strings.Builder
+	b.WriteString("tenant_id=$1")
+	args := []any{tenantID}
+	add := func(cond string, val any) {
+		args = append(args, val)
+		fmt.Fprintf(&b, cond, len(args))
+	}
+	if f.Hostname != "" {
+		add(" AND hostname ILIKE $%d", "%"+f.Hostname+"%")
+	}
+	if f.OSName != "" {
+		add(" AND os_name = $%d", f.OSName)
+	}
+	if f.Manufacturer != "" {
+		add(" AND manufacturer = $%d", f.Manufacturer)
+	}
+	if f.Status != "" {
+		add(" AND status = $%d", f.Status)
+	}
+	if f.Tag != "" {
+		if i := strings.IndexByte(f.Tag, '='); i >= 0 {
+			add(" AND tags @> $%d::jsonb", mustJSON(map[string]string{f.Tag[:i]: f.Tag[i+1:]}))
+		} else {
+			add(" AND (tags ->> $%d) IS NOT NULL", f.Tag)
+		}
+	}
+	if f.LastSeenFrom != nil {
+		add(" AND last_seen >= $%d", *f.LastSeenFrom)
+	}
+	if f.LastSeenTo != nil {
+		add(" AND last_seen <= $%d", *f.LastSeenTo)
+	}
+	return b.String(), args
+}
+
+// ListHosts is the id-DESC keyset listing (gRPC ListHosts, backup, internal
+// callers): hosts with an id below f.CursorID, at most f.Limit (<= 0: all).
 func (d *DB) ListHosts(ctx context.Context, tenantID string, f store.HostFilter) (out []store.Host, err error) {
 	err = d.tenant(ctx, tenantID, func(tx pgx.Tx) error {
-		var b strings.Builder
-		b.WriteString("SELECT " + hostCols + " FROM inventory_hosts WHERE tenant_id=$1")
-		args := []any{tenantID}
-		add := func(cond string, val any) {
-			args = append(args, val)
-			b.WriteString(fmt.Sprintf(cond, len(args)))
-		}
-		if f.Hostname != "" {
-			add(" AND hostname ILIKE $%d", "%"+f.Hostname+"%")
-		}
-		if f.OSName != "" {
-			add(" AND os_name = $%d", f.OSName)
-		}
-		if f.Manufacturer != "" {
-			add(" AND manufacturer = $%d", f.Manufacturer)
-		}
-		if f.Status != "" {
-			add(" AND status = $%d", f.Status)
-		}
-		if f.Tag != "" {
-			if i := strings.IndexByte(f.Tag, '='); i >= 0 {
-				add(" AND tags @> $%d::jsonb", mustJSON(map[string]string{f.Tag[:i]: f.Tag[i+1:]}))
-			} else {
-				add(" AND (tags ->> $%d) IS NOT NULL", f.Tag)
-			}
-		}
-		if f.LastSeenFrom != nil {
-			add(" AND last_seen >= $%d", *f.LastSeenFrom)
-		}
-		if f.LastSeenTo != nil {
-			add(" AND last_seen <= $%d", *f.LastSeenTo)
-		}
+		where, args := hostWhere(tenantID, f)
+		q := "SELECT " + hostCols + " FROM inventory_hosts WHERE " + where
 		if f.CursorID != "" {
-			add(" AND id < $%d", f.CursorID)
+			args = append(args, f.CursorID)
+			q += fmt.Sprintf(" AND id < $%d", len(args))
 		}
-		b.WriteString(" ORDER BY id DESC")
+		q += " ORDER BY id DESC"
 		if f.Limit > 0 {
-			add(" LIMIT $%d", f.Limit)
+			args = append(args, f.Limit)
+			q += fmt.Sprintf(" LIMIT $%d", len(args))
 		}
-		rows, e := tx.Query(ctx, b.String(), args...)
-		if e != nil {
-			return e
-		}
-		defer rows.Close()
-		for rows.Next() {
-			h, e := scanHost(rows)
-			if e != nil {
-				return e
-			}
-			out = append(out, h)
-		}
-		return rows.Err()
+		var e error
+		out, e = queryHosts(ctx, tx, q, args...)
+		return e
 	})
 	return
+}
+
+// ListHostsPage implements repo.Store (store.HostList order; the legacy
+// Limit / CursorID of f are ignored).
+func (d *DB) ListHostsPage(ctx context.Context, tenantID string, f store.HostFilter, req listquery.Request) (out []store.Host, total int, applied listquery.Request, err error) {
+	applied = store.ListRequest(req, store.HostList)
+	err = d.tenant(ctx, tenantID, func(tx pgx.Tx) error {
+		where, args := hostWhere(tenantID, f)
+		if e := tx.QueryRow(ctx, "SELECT count(*) FROM inventory_hosts WHERE "+where, args...).Scan(&total); e != nil {
+			return e
+		}
+		applied = applied.Clamp(total)
+		var e error
+		out, e = queryHosts(ctx, tx, fmt.Sprintf("SELECT %s FROM inventory_hosts WHERE %s ORDER BY %s LIMIT %d OFFSET %d",
+			hostCols, where, applied.OrderBy(store.HostList), applied.Limit(), applied.Offset()), args...)
+		return e
+	})
+	return
+}
+
+func queryHosts(ctx context.Context, tx pgx.Tx, q string, args ...any) ([]store.Host, error) {
+	rows, err := tx.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []store.Host
+	for rows.Next() {
+		h, err := scanHost(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, h)
+	}
+	return out, rows.Err()
 }
 
 func (d *DB) SetHostTags(ctx context.Context, tenantID, id string, tags map[string]string) error {
@@ -508,34 +547,70 @@ func (d *DB) GetSnapshot(ctx context.Context, tenantID, id string) (out store.Sn
 	return
 }
 
+// snapSummaryCols selects a snapshot without its payload (list summaries).
+const snapSummaryCols = `id, tenant_id, host_id, collected_at, received_at, agent_version, source,
+	os_name, os_version, manufacturer, model, NULL::jsonb`
+
+// ListSnapshotsForHost is the keyset listing (gRPC ListSnapshots, backup,
+// legacy HTTP cursor): newest first by (collected_at, id); the cursor is the
+// last snapshot id of the previous page and continues strictly after that
+// snapshot's position in this order (an unknown cursor id falls back to the
+// rows with a lower id).
 func (d *DB) ListSnapshotsForHost(ctx context.Context, tenantID, hostID string, limit int, cursorID string) (out []store.Snapshot, err error) {
 	err = d.tenant(ctx, tenantID, func(tx pgx.Tx) error {
 		q := "SELECT " + snapCols + " FROM inventory_snapshots WHERE tenant_id=$1 AND host_id=$2"
 		args := []any{tenantID, hostID}
 		if cursorID != "" {
 			args = append(args, cursorID)
-			q += fmt.Sprintf(" AND id < $%d", len(args))
+			n := len(args)
+			q += fmt.Sprintf(` AND ((collected_at, id) < (SELECT c.collected_at, c.id FROM inventory_snapshots c WHERE c.tenant_id=$1 AND c.id=$%d)
+				OR (NOT EXISTS (SELECT 1 FROM inventory_snapshots c WHERE c.tenant_id=$1 AND c.id=$%d) AND id < $%d))`, n, n, n)
 		}
 		q += " ORDER BY collected_at DESC, id DESC"
 		if limit > 0 {
 			args = append(args, limit)
 			q += fmt.Sprintf(" LIMIT $%d", len(args))
 		}
-		rows, e := tx.Query(ctx, q, args...)
-		if e != nil {
-			return e
-		}
-		defer rows.Close()
-		for rows.Next() {
-			s, e := scanSnapshot(rows)
-			if e != nil {
-				return e
-			}
-			out = append(out, s)
-		}
-		return rows.Err()
+		var e error
+		out, e = querySnapshots(ctx, tx, q, args...)
+		return e
 	})
 	return
+}
+
+// ListSnapshotsPage implements repo.Store (store.SnapshotList order,
+// payload-free).
+func (d *DB) ListSnapshotsPage(ctx context.Context, tenantID, hostID string, req listquery.Request) (out []store.Snapshot, total int, applied listquery.Request, err error) {
+	applied = store.ListRequest(req, store.SnapshotList)
+	err = d.tenant(ctx, tenantID, func(tx pgx.Tx) error {
+		const where = "tenant_id=$1 AND host_id=$2"
+		if e := tx.QueryRow(ctx, "SELECT count(*) FROM inventory_snapshots WHERE "+where, tenantID, hostID).Scan(&total); e != nil {
+			return e
+		}
+		applied = applied.Clamp(total)
+		var e error
+		out, e = querySnapshots(ctx, tx, fmt.Sprintf("SELECT %s FROM inventory_snapshots WHERE %s ORDER BY %s LIMIT %d OFFSET %d",
+			snapSummaryCols, where, applied.OrderBy(store.SnapshotList), applied.Limit(), applied.Offset()), tenantID, hostID)
+		return e
+	})
+	return
+}
+
+func querySnapshots(ctx context.Context, tx pgx.Tx, q string, args ...any) ([]store.Snapshot, error) {
+	rows, err := tx.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []store.Snapshot
+	for rows.Next() {
+		s, err := scanSnapshot(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
 }
 
 func (d *DB) GetLatestForHost(ctx context.Context, tenantID, hostID string) (out store.Snapshot, err error) {
@@ -673,21 +748,45 @@ func (d *DB) ListChangesForHost(ctx context.Context, tenantID, hostID string, li
 			args = append(args, limit)
 			q += fmt.Sprintf(" LIMIT $%d", len(args))
 		}
-		rows, e := tx.Query(ctx, q, args...)
-		if e != nil {
-			return e
-		}
-		defer rows.Close()
-		for rows.Next() {
-			c, e := scanChange(rows)
-			if e != nil {
-				return e
-			}
-			out = append(out, c)
-		}
-		return rows.Err()
+		var e error
+		out, e = queryChanges(ctx, tx, q, args...)
+		return e
 	})
 	return
+}
+
+// ListChangesPage implements repo.Store (store.ChangeList order).
+func (d *DB) ListChangesPage(ctx context.Context, tenantID, hostID string, req listquery.Request) (out []store.Change, total int, applied listquery.Request, err error) {
+	applied = store.ListRequest(req, store.ChangeList)
+	err = d.tenant(ctx, tenantID, func(tx pgx.Tx) error {
+		const where = "tenant_id=$1 AND host_id=$2"
+		if e := tx.QueryRow(ctx, "SELECT count(*) FROM inventory_changes WHERE "+where, tenantID, hostID).Scan(&total); e != nil {
+			return e
+		}
+		applied = applied.Clamp(total)
+		var e error
+		out, e = queryChanges(ctx, tx, fmt.Sprintf("SELECT %s FROM inventory_changes WHERE %s ORDER BY %s LIMIT %d OFFSET %d",
+			changeCols, where, applied.OrderBy(store.ChangeList), applied.Limit(), applied.Offset()), tenantID, hostID)
+		return e
+	})
+	return
+}
+
+func queryChanges(ctx context.Context, tx pgx.Tx, q string, args ...any) ([]store.Change, error) {
+	rows, err := tx.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []store.Change
+	for rows.Next() {
+		c, err := scanChange(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
 }
 
 func (d *DB) ListChangesForSnapshot(ctx context.Context, tenantID, snapshotID string) (out []store.Change, err error) {

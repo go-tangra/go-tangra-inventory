@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/go-tangra/go-tangra/v4/listquery"
+
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/repo"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/store"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/upgrades"
@@ -246,14 +248,46 @@ func (s *Server) listFleet(u *upgrades.Service) func(http.ResponseWriter, *http.
 			return
 		}
 		q := r.URL.Query()
-		items, current, err := u.Fleet(r.Context(), tenant, upgrades.FleetFilter{State: q.Get("state"), Outdated: q.Get("outdated") == "true",
-			Cursor: q.Get("cursor"), Limit: atoiDefault(q.Get("limit"), 0)})
+		f := upgrades.FleetFilter{State: q.Get("state"), Outdated: q.Get("outdated") == "true"}
+		if v := q.Get("online"); v != "" {
+			b := v == "true"
+			f.Online = &b
+		}
+		if listquery.Legacy(q) {
+			// Legacy cursor/limit (kept one release): the id-ordered page in
+			// its previous shape, plus the total.
+			count, _, err := u.FleetPage(r.Context(), tenant, f, listquery.Request{PageSize: 1})
+			if err != nil {
+				failUpgrade(w, err)
+				return
+			}
+			f.Cursor, f.Limit = q.Get("cursor"), atoiDefault(q.Get("limit"), 0)
+			items, current, err := u.Fleet(r.Context(), tenant, f)
+			if err != nil {
+				failUpgrade(w, err)
+				return
+			}
+			WriteJSON(w, http.StatusOK, map[string]any{"items": items, "current_version": current, "total": count.Total})
+			return
+		}
+		req, ok := parseList(w, r, store.FleetList)
+		if !ok {
+			return
+		}
+		page, current, err := u.FleetPage(r.Context(), tenant, f, req)
 		if err != nil {
 			failUpgrade(w, err)
 			return
 		}
-		WriteJSON(w, http.StatusOK, map[string]any{"items": items, "current_version": current})
+		WriteJSON(w, http.StatusOK, fleetPage{Page: page, CurrentVersion: current})
 	}
+}
+
+// fleetPage is the GET /agents response: a list contract page plus the
+// tenant target version.
+type fleetPage struct {
+	listquery.Page[upgrades.FleetEntry]
+	CurrentVersion string `json:"current_version"`
 }
 
 func uniqueCount(ids []string) int {

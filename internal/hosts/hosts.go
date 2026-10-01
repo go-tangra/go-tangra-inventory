@@ -10,6 +10,8 @@ import (
 	"errors"
 	"time"
 
+	"github.com/go-tangra/go-tangra/v4/listquery"
+
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/authz"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/repo"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/store"
@@ -94,6 +96,23 @@ func (s *Service) List(ctx context.Context, subj authz.Subjects, f store.HostFil
 		out = append(out, view(h))
 	}
 	return out, nil
+}
+
+// ListPage returns one page of the caller's hosts matching f (list
+// contract: store.HostList order, the total and the page actually returned).
+func (s *Service) ListPage(ctx context.Context, subj authz.Subjects, f store.HostFilter, req listquery.Request) (listquery.Page[View], error) {
+	if err := authz.RequireTenant(subj, subj.TenantID); err != nil {
+		return listquery.Page[View]{}, err
+	}
+	rows, total, applied, err := s.st.ListHostsPage(ctx, subj.TenantID, f, req)
+	if err != nil {
+		return listquery.Page[View]{}, err
+	}
+	out := make([]View, 0, len(rows))
+	for _, h := range rows {
+		out = append(out, view(h))
+	}
+	return listquery.NewPage(out, total, applied), nil
 }
 
 // SetTags replaces a host's tag set and returns the updated host.
