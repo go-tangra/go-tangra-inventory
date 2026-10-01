@@ -377,6 +377,55 @@ when deploying this version. Without it IPAM's host sync reports `degraded` and
 writes nothing. Deploy the server before rolling out new agents: an older server
 drops the new report fields.
 
+## Certificate delivery (deployer, feature 033)
+
+The deployer's `inventory-agent` provider delivers lcm certificates to agents
+through `inventory.v1.CertificateDeliveryService` (mesh only, references
+only). Inventory persists one delivery item per host, pushes a `CERTIFICATE`
+command carrying the item id and, when the agent pulls the item over the
+ingest edge, downloads the certificate (and retained key) from lcm, validates
+and relays it, and keeps nothing. Server switch (off by default):
+
+```yaml
+cert_delivery:
+  enabled: true
+  sources: ["deployer"]          # mesh services allowed to create deliveries (on top of the policy)
+  lcm_service: lcm               # discovery name of lcm (discovery.static.lcm)
+  pending_ttl_hours: 168         # 1-720
+  report_timeout_minutes: 15     # 5-120
+  max_concurrent_fetches: 50     # 1-500 per replica
+  lcm_timeout_seconds: 10        # 2-60
+  allow_plaintext_ingest: false  # dev stack with ingest.insecure only; refused in production
+```
+
+Two mesh rules are needed. `deploy/policy.yaml` here carries the inventory
+side; lcm's `deploy/policy.yaml` carries `inventory-download`:
+
+```yaml
+  - id: deployer-cert-delivery           # policies/inventory.yaml
+    from: ["spiffe://example.org/svc/deployer"]
+    to: ["inventory"]
+    operations: ["/inventory.v1.CertificateDeliveryService/CreateCertificateDelivery",
+                 "/inventory.v1.CertificateDeliveryService/GetCertificateDelivery",
+                 "/inventory.v1.CertificateDeliveryService/PreviewCertificateTargets",
+                 "/inventory.v1.CertificateDeliveryService/VerifyHostCertificates",
+                 "/inventory.v1.CertificateDeliveryService/MarkCertificateRevoked",
+                 "/grpc.health.v1.Health/Check"]
+    effect: allow
+  - id: inventory-download               # policies/lcm.yaml
+    from: ["spiffe://example.org/svc/inventory"]
+    to: ["lcm"]
+    operations: ["/lcm.v1.Certificates/Download"]
+    effect: allow
+```
+
+Production stacks copy both into go-tangra-docker `policies/inventory.yaml`
+and `policies/lcm.yaml`, add the `cert_delivery` section to
+`configs/inventory.yaml` and, for the deployer, `discovery.static.inventory:
+["inventory:9975"]` and `inventory: { service: inventory }` to
+`configs/deployer.yaml` (go-tangra-docker branch `033-agent-cert-delivery`
+prepares all of it).
+
 ## On-demand refresh & live status
 
 `POST /api/inventory/v1/agents/{host_id}/refresh` delivers a refresh command to
