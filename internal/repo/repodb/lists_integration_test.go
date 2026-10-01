@@ -93,6 +93,16 @@ func TestListHostsPage(t *testing.T) {
 			t.Fatalf("last_seen_from leaked %s %v", h.Hostname, h.LastSeen)
 		}
 	}
+	// The hostname filter is a literal substring: LIKE wildcards match only
+	// themselves (no host name contains % or _).
+	for _, q := range []string{"%", "_", "host_0", `\`} {
+		if _, total, _, err = db.ListHostsPage(ctx, tenantA, store.HostFilter{Hostname: q}, listquery.Request{}); err != nil || total != 0 {
+			t.Fatalf("hostname %q total %d %v", q, total, err)
+		}
+	}
+	if _, total, _, err = db.ListHostsPage(ctx, tenantA, store.HostFilter{Hostname: "ST-0"}, listquery.Request{}); err != nil || total != 10 {
+		t.Fatalf("hostname ST-0 total %d %v", total, err) // host-00..09, any case
+	}
 	// Tenant isolation.
 	if _, total, _, err = db.ListHostsPage(ctx, tenantB, store.HostFilter{}, listquery.Request{}); err != nil || total != 2 {
 		t.Fatalf("tenant B total %d %v", total, err)

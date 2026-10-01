@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -129,15 +130,16 @@ func TestHostsListNegativesAndLegacy(t *testing.T) {
 	f := newAPI(t)
 	hostsFixture(t, f, 3)
 	for q, param := range map[string]string{
-		"sort=payload":            "sort",
-		"order=sideways":          "order",
-		"page=0":                  "page",
-		"page=x":                  "page",
-		"page_size=0":             "page_size",
-		"page_size=201":           "page_size",
-		"page=1&cursor=abc":       "cursor",
-		"limit=5&sort=hostname":   "cursor",
-		"last_seen_from=nonsense": "last_seen_from",
+		"sort=payload":                         "sort",
+		"order=sideways":                       "order",
+		"page=0":                               "page",
+		"page=x":                               "page",
+		"page_size=0":                          "page_size",
+		"page_size=201":                        "page_size",
+		"page=1&cursor=abc":                    "cursor",
+		"limit=5&sort=hostname":                "cursor",
+		"last_seen_from=nonsense":              "last_seen_from",
+		"hostname=" + strings.Repeat("h", 201): "hostname",
 	} {
 		w := f.req(t, "GET", p+"/hosts?"+q, "admin", "")
 		if w.Code != 422 {

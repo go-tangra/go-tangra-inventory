@@ -8,21 +8,23 @@ import "github.com/go-tangra/go-tangra/v4/listquery"
 // auto-enrollment keys) sort the same public names in Go.
 var (
 	// HostList pages inventory_hosts (GET /hosts): hostname order by default.
+	// Every sort column is NOT NULL (text ones DEFAULT ''), so NotNull lets
+	// the (tenant_id, <expr>, id) indexes serve both directions.
 	HostList = listquery.Spec{
 		Fields: map[string]listquery.Field{
-			"hostname":     {Expr: "hostname", Text: true},
-			"os_name":      {Expr: "os_name", Text: true},
-			"manufacturer": {Expr: "manufacturer", Text: true},
-			"status":       {Expr: "status"},
-			"last_seen":    {Expr: "last_seen", DefaultDir: listquery.Desc},
-			"created_at":   {Expr: "created_at", DefaultDir: listquery.Desc},
+			"hostname":     {Expr: "hostname", Text: true, NotNull: true},
+			"os_name":      {Expr: "os_name", Text: true, NotNull: true},
+			"manufacturer": {Expr: "manufacturer", Text: true, NotNull: true},
+			"status":       {Expr: "status", NotNull: true},
+			"last_seen":    {Expr: "last_seen", DefaultDir: listquery.Desc, NotNull: true},
+			"created_at":   {Expr: "created_at", DefaultDir: listquery.Desc, NotNull: true},
 		},
 		Default: "hostname", TieBreak: "id",
 	}
 	// SnapshotList pages a host's inventory_snapshots: newest first.
 	SnapshotList = listquery.Spec{
 		Fields: map[string]listquery.Field{
-			"collected_at": {Expr: "collected_at", DefaultDir: listquery.Desc},
+			"collected_at": {Expr: "collected_at", DefaultDir: listquery.Desc, NotNull: true},
 		},
 		Default: "collected_at", TieBreak: "id",
 	}
@@ -30,8 +32,8 @@ var (
 	// change type (added / removed / modified).
 	ChangeList = listquery.Spec{
 		Fields: map[string]listquery.Field{
-			"detected_at": {Expr: "detected_at", DefaultDir: listquery.Desc},
-			"kind":        {Expr: "change_type"},
+			"detected_at": {Expr: "detected_at", DefaultDir: listquery.Desc, NotNull: true},
+			"kind":        {Expr: "change_type", NotNull: true},
 		},
 		Default: "detected_at", TieBreak: "id",
 	}
@@ -48,8 +50,8 @@ var (
 	// AutoEnrollKeyList pages a tenant's auto-enrollment keys (in Go).
 	AutoEnrollKeyList = listquery.Spec{
 		Fields: map[string]listquery.Field{
-			"name":       {Expr: "name", Text: true},
-			"created_at": {Expr: "created_at", DefaultDir: listquery.Desc},
+			"name":       {Expr: "name", Text: true, NotNull: true},
+			"created_at": {Expr: "created_at", DefaultDir: listquery.Desc, NotNull: true},
 		},
 		Default: "name", TieBreak: "id",
 	}
