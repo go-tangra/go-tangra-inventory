@@ -110,12 +110,19 @@ func (s *Store) removeTemps(dir string) error {
 	return nil
 }
 
-// discardUnswitched removes generations of name newer than the live one
-// (all of them when there is no usable live link).
+// discardUnswitched removes generations of name newer than the live one.
+// Without a usable live link nothing is removed: the generations may hold
+// the only copy of an operator-provided key (key_policy certificate_only);
+// leftovers of a first install that never switched are pruned by the next
+// install of the name.
 func (s *Store) discardUnswitched(name string) {
 	cur, err := s.current(name)
 	if err != nil {
 		s.logf("certs: recovery: name %s: %v", name, err)
+		return
+	}
+	if cur.gen == "" {
+		s.logf("certs: recovery: name %s: no usable live link; archived generations kept", name)
 		return
 	}
 	gens, err := s.generations(name)

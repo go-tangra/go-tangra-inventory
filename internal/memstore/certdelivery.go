@@ -220,7 +220,11 @@ func (m *Mem) UpdateCertItem(_ context.Context, tenantID, id string, fn func(*st
 	if h := ch.HostCert; h != nil {
 		hc := *h
 		hc.TenantID = tenantID
-		c.hostCerts[[3]string{tenantID, hc.HostID, hc.Name}] = hc
+		key := [3]string{tenantID, hc.HostID, hc.Name}
+		if old, ok := c.hostCerts[key]; ok && old.CertificateID == hc.CertificateID && hc.RevokedAt == nil {
+			hc.RevokedAt = old.RevokedAt // a revocation of the same certificate is never cleared
+		}
+		c.hostCerts[key] = hc
 	}
 	m.audit = append(m.audit, ch.Audit...)
 	return next, nil

@@ -216,6 +216,8 @@ func TestInstallRejectsInvalidInput(t *testing.T) {
 		{"name traversal", func(r *Request) { r.Name = "../etc" }, store.ReasonInvalidName},
 		{"name hidden", func(r *Request) { r.Name = ".hidden" }, store.ReasonInvalidName},
 		{"name slash", func(r *Request) { r.Name = "a/b" }, store.ReasonInvalidName},
+		{"certificate id shell", func(r *Request) { r.CertificateID = "$(reboot)" }, store.ReasonInvalidBundle},
+		{"certificate id oversized", func(r *Request) { r.CertificateID = strings.Repeat("a", 200*1024) }, store.ReasonInvalidBundle},
 		{"garbage", func(r *Request) { r.CertPEM = []byte("not pem") }, store.ReasonInvalidBundle},
 		{"key required", func(r *Request) { r.KeyPEM = nil }, store.ReasonInvalidBundle},
 		{"key mismatch", func(r *Request) { _, r.KeyPEM = newKey(t) }, store.ReasonKeyMismatch},
@@ -493,7 +495,9 @@ func TestRecover(t *testing.T) {
 	if h.fs.node("live/.www.tmp") != nil || h.fs.node("renewal/.www.json.tmp") != nil {
 		t.Fatal("temp entries kept")
 	}
-	if h.fs.node(genPath("orphan", newer)) != nil || h.fs.node("archive/.junk") == nil || h.fs.node("archive/evil") == nil {
+	// Without a usable live link nothing is discarded: the generation may
+	// hold the only copy of an operator-provided key (T110).
+	if h.fs.node(genPath("orphan", newer)) == nil || h.fs.node("archive/.junk") == nil || h.fs.node("archive/evil") == nil {
 		t.Fatal("orphan/junk handling")
 	}
 	// A recovered store still installs and reports unchanged.

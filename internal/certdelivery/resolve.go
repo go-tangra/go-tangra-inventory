@@ -19,6 +19,11 @@ const (
 	CapabilityNotSupported     = "not_supported_platform"
 	CapabilityNoAgent          = "no_agent"
 	CapabilityDisabledOnServer = "disabled_on_server"
+	// CapabilityAmbiguousAgent: more than one non-revoked agent claims the
+	// host. An agent binds itself to a host by the identity it reports, so a
+	// second agent on a host may be an impostor; nothing is delivered until
+	// an operator revokes the stale or foreign agent.
+	CapabilityAmbiguousAgent = "ambiguous_agent"
 )
 
 // FirstCertVersion is the first agent release that can announce cert.v1.
@@ -45,10 +50,11 @@ func Capability(enabled bool, a *store.Agent) string {
 
 // target is one resolved host with its agent.
 type target struct {
-	host     store.Host
-	agent    *store.Agent
-	online   bool
-	explicit bool
+	host      store.Host
+	agent     *store.Agent
+	online    bool
+	explicit  bool
+	ambiguous bool // more than one non-revoked agent is bound to the host
 }
 
 // selection is a resolved host selector.
@@ -111,12 +117,23 @@ func (s *Service) resolve(ctx context.Context, tenantID string, ids, tags []stri
 	if err != nil {
 		return selection{}, err
 	}
+	// An agent binds itself to a host by the identity it reports; a host
+	// claimed by more than one non-revoked agent is ambiguous and receives
+	// nothing (a stolen credential must not attract another host's key).
 	agentOf := map[string]*store.Agent{}
+	ambiguous := map[string]bool{}
 	for k := range agents {
 		a := &agents[k]
-		if cur, ok := agentOf[a.HostID]; a.HostID != "" && (!ok || a.LastSeen.After(cur.LastSeen)) {
-			agentOf[a.HostID] = a
+		if a.HostID == "" {
+			continue
 		}
+		if cur, ok := agentOf[a.HostID]; ok {
+			ambiguous[a.HostID] = true
+			if !a.LastSeen.After(cur.LastSeen) {
+				continue
+			}
+		}
+		agentOf[a.HostID] = a
 	}
 	byID := make(map[string]store.Host, len(hosts))
 	for _, h := range hosts {
@@ -127,7 +144,7 @@ func (s *Service) resolve(ctx context.Context, tenantID string, ids, tags []stri
 	add := func(h store.Host, explicit bool) {
 		seen[h.ID] = true
 		a := agentOf[h.ID]
-		sel.targets = append(sel.targets, target{host: h, agent: a, online: a != nil && online[a.ID], explicit: explicit})
+		sel.targets = append(sel.targets, target{host: h, agent: a, online: a != nil && online[a.ID], explicit: explicit, ambiguous: ambiguous[h.ID]})
 	}
 	for _, id := range ids {
 		h, ok := byID[id]
@@ -196,8 +213,12 @@ func (s *Service) Preview(ctx context.Context, tenantID string, ids, tags []stri
 			p.Truncated = true
 			break
 		}
+		capability := Capability(true, t.agent)
+		if t.ambiguous {
+			capability = CapabilityAmbiguousAgent
+		}
 		p.Hosts = append(p.Hosts, TargetHost{HostID: t.host.ID, Hostname: t.host.Hostname, OSName: t.host.OSName, Tags: t.host.Tags,
-			AgentOnline: t.online, Capability: Capability(true, t.agent)})
+			AgentOnline: t.online, Capability: capability})
 	}
 	return p, nil
 }

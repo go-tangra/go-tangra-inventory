@@ -568,6 +568,25 @@ func CertDeliveryContract(t *testing.T, open func(t *testing.T) repo.Store, audi
 		if got, _ := st.RevokeHostCertificates(ctx, TenantB, "cert-2", at, row); len(got) != 0 {
 			t.Fatal("revoke across tenants")
 		}
+		// A write built from a read taken before the revocation (a report
+		// racing MarkRevoked) does not clear the flag of the same
+		// certificate; installing another certificate under the name does.
+		upsert := func(hc store.HostCertificate) {
+			t.Helper()
+			if _, err := st.UpdateCertItem(ctx, TenantA, i1.ID, func(*store.CertDeliveryItem) (repo.CertItemChange, error) {
+				return repo.CertItemChange{HostCert: &hc}, nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		upsert(store.HostCertificate{HostID: h1, Name: "www", CertificateID: "cert-1", State: store.DeliveryFailed, LastItemID: i1.ID, UpdatedAt: at})
+		if hc, _ := st.GetHostCertificate(ctx, TenantA, h1, "www"); hc.RevokedAt == nil || hc.State != store.DeliveryFailed {
+			t.Fatalf("stale write cleared the revocation: %+v", hc)
+		}
+		upsert(store.HostCertificate{HostID: h1, Name: "www", CertificateID: "cert-3", State: store.DeliveryInstalled, LastItemID: i1.ID, UpdatedAt: at})
+		if hc, _ := st.GetHostCertificate(ctx, TenantA, h1, "www"); hc.RevokedAt != nil || hc.CertificateID != "cert-3" {
+			t.Fatalf("new certificate kept the revocation: %+v", hc)
+		}
 	})
 
 	t.Run("deliveries and hostnames by id, active filter", func(t *testing.T) {

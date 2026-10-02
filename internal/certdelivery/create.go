@@ -65,7 +65,7 @@ func checkRequest(r Request) ([]string, error) {
 		return nil, invalid("target_id")
 	case r.Trigger != store.TriggerManual && r.Trigger != store.TriggerAutoDeploy && r.Trigger != store.TriggerRetry:
 		return nil, invalid("trigger")
-	case !validRef(r.CertificateID, 1):
+	case !certmaterial.ValidCertificateID(r.CertificateID):
 		return nil, invalid("certificate_id")
 	case !certmaterial.ValidName(r.Name):
 		return nil, invalid("name")
@@ -120,6 +120,8 @@ func unsupportedReason(t target) string {
 		return store.ReasonHostRetired
 	case t.agent == nil:
 		return store.ReasonNoAgent
+	case t.ambiguous:
+		return store.ReasonAmbiguousAgent
 	case t.agent.OS == "windows":
 		return store.ReasonPlatform
 	case t.online && !t.agent.HasCapability(store.CapCertV1):
@@ -210,6 +212,11 @@ func (s *Service) replayByKey(ctx context.Context, r Request, actor Actor) (Deli
 	}
 	if err != nil {
 		return DeliveryView{}, true, err
+	}
+	if d.CertificateID != r.CertificateID || d.Name != r.Name || d.KeyPolicy != r.KeyPolicy {
+		// The key was used for another payload: never answer with (or
+		// re-arm) a delivery of a different certificate or name.
+		return DeliveryView{}, true, invalid("idempotency_key")
 	}
 	if r.RearmFailed {
 		if err := s.rearm(ctx, d, actor); err != nil {

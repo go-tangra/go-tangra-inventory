@@ -6545,6 +6545,7 @@ type CertificateCommand struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ItemId        string                 `protobuf:"bytes,1,opt,name=item_id,json=itemId,proto3" json:"item_id,omitempty"` // uuid of the delivery item
 	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`                   // ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$, no ".."; validated again by the agent
+	Attempt       uint32                 `protobuf:"varint,3,opt,name=attempt,proto3" json:"attempt,omitempty"`            // the item's attempt; a re-armed item is a new attempt the agent must not dedupe away
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -6591,6 +6592,13 @@ func (x *CertificateCommand) GetName() string {
 		return x.Name
 	}
 	return ""
+}
+
+func (x *CertificateCommand) GetAttempt() uint32 {
+	if x != nil {
+		return x.Attempt
+	}
+	return 0
 }
 
 // UpgradeCommand asks the agent to upgrade to target_version. The agent
@@ -9120,10 +9128,11 @@ const file_inventory_v1_inventory_proto_rawDesc = "" +
 	"command_id\x18\x01 \x01(\tR\tcommandId\x12-\n" +
 	"\x04type\x18\x02 \x01(\x0e2\x19.inventory.v1.CommandTypeR\x04type\x126\n" +
 	"\aupgrade\x18\x03 \x01(\v2\x1c.inventory.v1.UpgradeCommandR\aupgrade\x12B\n" +
-	"\vcertificate\x18\x04 \x01(\v2 .inventory.v1.CertificateCommandR\vcertificate\"A\n" +
+	"\vcertificate\x18\x04 \x01(\v2 .inventory.v1.CertificateCommandR\vcertificate\"[\n" +
 	"\x12CertificateCommand\x12\x17\n" +
 	"\aitem_id\x18\x01 \x01(\tR\x06itemId\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\"\x7f\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
+	"\aattempt\x18\x03 \x01(\rR\aattempt\"\x7f\n" +
 	"\x0eUpgradeCommand\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12%\n" +

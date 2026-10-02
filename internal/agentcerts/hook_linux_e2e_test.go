@@ -28,13 +28,17 @@ func requireRoot(t *testing.T) {
 	}
 }
 
-// rootDir is a root-owned 0755 directory for hooks (t.TempDir lives under a
-// sticky world-writable /tmp, which is fine: only the hook's own directory
-// is checked).
+// rootDir is a root-owned 0755 directory for hooks directly under "/":
+// every ancestor of a hook must be root-owned and not group/other writable,
+// so t.TempDir (under the world-writable /tmp) cannot hold one.
 func rootDir(t *testing.T) string {
 	t.Helper()
-	d := filepath.Join(t.TempDir(), "hooks")
-	if err := os.Mkdir(d, 0o755); err != nil {
+	d, err := os.MkdirTemp("/", "agentcerts-hooks-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(d) })
+	if err := os.Chmod(d, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	return d
@@ -129,6 +133,20 @@ func TestE2EUserOwnedHookRefused(t *testing.T) {
 	st2, _ := e2eStore(t, hook2, 30*time.Second)
 	if res := st2.Install(context.Background(), ca.bundle(t, 2).request(ca, "www")); res.Reason != store.ReasonHookRefused {
 		t.Fatalf("writable dir: %+v", res)
+	}
+	// A root-owned hook in a root-owned directory under the world-writable
+	// /tmp is refused: an ancestor is writable by others (T110).
+	tmpDir := filepath.Join(t.TempDir(), "hooks")
+	if err := os.Mkdir(tmpDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	hook3 := writeHook(t, tmpDir, "root.sh", "touch "+marker, 0o755, 0)
+	st3, _ := e2eStore(t, hook3, 30*time.Second)
+	if res := st3.Install(context.Background(), ca.bundle(t, 3).request(ca, "www")); res.Reason != store.ReasonHookRefused {
+		t.Fatalf("writable ancestor: %+v", res)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("refused hook ran")
 	}
 }
 

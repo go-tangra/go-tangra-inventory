@@ -66,3 +66,17 @@ func TestValidTag(t *testing.T) {
 		}
 	}
 }
+
+// TestValidCertificateID (T110): the id reaches the hook environment.
+func TestValidCertificateID(t *testing.T) {
+	for _, id := range []string{"cert-1", "0190f7c2-6a3e-7c1a-9b2e-2f6f9d1b4c66", "a:b.c_d", strings.Repeat("a", 128)} {
+		if !ValidCertificateID(id) {
+			t.Errorf("%q refused", id)
+		}
+	}
+	for _, id := range []string{"", "$(reboot)", "a b", "a;b", "a`b", "a\nb", "é", strings.Repeat("a", 129)} {
+		if ValidCertificateID(id) {
+			t.Errorf("%q accepted", id)
+		}
+	}
+}

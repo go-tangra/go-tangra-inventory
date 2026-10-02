@@ -194,6 +194,8 @@ func TestHookRefused(t *testing.T) {
 		{"dir is a file", func(f *fakeHooks) { f.dir.Mode = 0o755 }},
 		{"dir not root-owned", func(f *fakeHooks) { f.dir.UID = 1000 }},
 		{"dir writable", func(f *fakeHooks) { f.dir.Mode = fs.ModeDir | 0o777 }},
+		{"ancestor writable", func(f *fakeHooks) { f.dirs = map[string]FileInfo{"/usr": {Mode: fs.ModeDir | 0o777}} }},
+		{"ancestor not root-owned", func(f *fakeHooks) { f.dirs = map[string]FileInfo{"/": {Mode: fs.ModeDir | 0o755, UID: 1000}} }},
 	} {
 		h := newHarness(t, withHook)
 		c.mut(h.hooks)
@@ -209,9 +211,14 @@ func TestHookRefused(t *testing.T) {
 			t.Fatalf("%s: lstat %q", c.name, h.hooks.lstatArg)
 		}
 	}
-	h := newHarness(t, withHook)
+	// A relative hook path (refused by the configuration as well) never runs.
+	h := newHarness(t, func(c *Config) { c.Hook = "reload.sh" })
+	if res := h.mustInstall(h.ca.bundle(t, 1).request(h.ca, "www"), store.DeliveryHookFailed); res.Reason != store.ReasonHookRefused || h.hooks.runCount() != 0 {
+		t.Fatalf("relative hook: %+v", res)
+	}
+	h = newHarness(t, withHook)
 	h.mustInstall(h.ca.bundle(t, 1).request(h.ca, "www"), store.DeliveryInstalled)
-	if h.hooks.statArg != "/usr/local/sbin" {
-		t.Fatalf("dir stat %q", h.hooks.statArg)
+	if strings.Join(h.hooks.statArgs, " ") != "/usr/local/sbin /usr/local /usr /" {
+		t.Fatalf("dir stats %q", h.hooks.statArgs)
 	}
 }

@@ -895,6 +895,7 @@ const (
 	ReasonBundleTooLarge      = "bundle_too_large"
 	ReasonFingerprintMismatch = "fingerprint_mismatch"
 	ReasonNoAgent             = "no_agent"
+	ReasonAmbiguousAgent      = "ambiguous_agent" // more than one non-revoked agent claims the host
 	ReasonNoCapability        = "no_capability"
 	ReasonPlatform            = "platform"
 	ReasonHostRetired         = "host_retired"

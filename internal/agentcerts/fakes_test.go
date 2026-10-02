@@ -359,10 +359,11 @@ type fakeHooks struct {
 	fileErr  error
 	dir      FileInfo
 	dirErr   error
+	dirs     map[string]FileInfo // per-path override of dir
 	outcome  HookOutcome
 	runs     []HookSpec
 	lstatArg string
-	statArg  string
+	statArgs []string
 }
 
 func newFakeHooks() *fakeHooks {
@@ -379,7 +380,10 @@ func (h *fakeHooks) Lstat(p string) (FileInfo, error) {
 func (h *fakeHooks) Stat(p string) (FileInfo, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.statArg = p
+	h.statArgs = append(h.statArgs, p)
+	if fi, ok := h.dirs[p]; ok {
+		return fi, nil
+	}
 	return h.dir, h.dirErr
 }
 

@@ -134,6 +134,42 @@ func TestFetchRefusals(t *testing.T) {
 	if f.met.refused[RefusedPlaintext] != 1 || f.met.refused[RefusedSourceNotAllowed] != 1 {
 		t.Fatalf("refused = %v", f.met.refused)
 	}
+	// Suppressed refusals are counted on the next audited row; an
+	// attacker-chosen subject that is not a uuid is not recorded.
+	f.now = f.now.Add(11 * time.Second)
+	f.svc.RefusePlaintext(ctx, a, strings.Repeat("x", 4096))
+	f.svc.RefusePlaintext(ctx, a, it.ID)
+	f.svc.RefusePlaintext(ctx, a, it.ID)
+	rows := f.mem.AuditRows()
+	if r := rows[len(rows)-1]; r.SubjectID != "" || r.Reason != RefusedPlaintext {
+		t.Fatalf("non-uuid subject audited: %+v", r)
+	}
+	f.now = f.now.Add(11 * time.Second)
+	f.svc.RefusePlaintext(ctx, a, it.ID)
+	rows = f.mem.AuditRows()
+	if r := rows[len(rows)-1]; r.SubjectID != it.ID || r.Detail["suppressed"] != 2 {
+		t.Fatalf("suppressed count: %+v", r)
+	}
+	// Long-idle throttle entries are pruned.
+	f.now = f.now.Add(time.Hour)
+	f.svc.Refuse(ctx, tenant, Actor{Kind: "service", ID: "ipam"}, RefusedSourceNotAllowed)
+	if len(f.svc.refused) != 1 {
+		t.Fatalf("throttle entries = %d", len(f.svc.refused))
+	}
+}
+
+// TestFetchAfterDeliveryWindow: an item whose delivery expired is not served
+// even before the sweeper ran.
+func TestFetchAfterDeliveryWindow(t *testing.T) {
+	f := newFix(t)
+	it, a := f.delivered(t, "job-1")
+	f.now = f.now.Add(169 * time.Hour)
+	if _, err := f.svc.Fetch(ctx, a, it.ID); !errors.Is(err, repo.ErrNotFound) || f.met.refused[RefusedNotActive] != 1 {
+		t.Fatalf("expired delivery served: %v", err)
+	}
+	if len(f.lcm.calls) != 1 { // the create's metadata call only
+		t.Fatalf("lcm calls = %v", f.lcm.calls)
+	}
 }
 
 func TestFetchKeyPolicies(t *testing.T) {

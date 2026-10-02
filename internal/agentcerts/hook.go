@@ -59,9 +59,14 @@ func (s *Store) runHook(ctx context.Context, req Request, b certmaterial.Bundle,
 
 // checkHook returns why the hook may not run ("" when it may): it must be a
 // regular file (not a symlink) owned by root, executable by its owner, not
-// writable by group or others, in a root-owned directory not writable by
-// group or others.
+// writable by group or others, and its directory and every ancestor up to
+// "/" must be root-owned directories not writable by group or others (a
+// writable ancestor would let a local user rename the path and substitute
+// the hook that runs as root).
 func (s *Store) checkHook() string {
+	if !path.IsAbs(s.cfg.Hook) { // the configuration refuses it too
+		return "hook path is not absolute"
+	}
 	fi, err := s.hooks.Lstat(s.cfg.Hook)
 	switch {
 	case err != nil:
@@ -75,11 +80,15 @@ func (s *Store) checkHook() string {
 	case fi.Mode.Perm()&0o100 == 0:
 		return "hook is not executable"
 	}
-	di, err := s.hooks.Stat(path.Dir(s.cfg.Hook))
-	if err != nil || !di.IsDir() || di.UID != s.root || di.Mode.Perm()&0o022 != 0 {
-		return "hook directory is not root-owned or is writable by group or others"
+	for dir := path.Dir(s.cfg.Hook); ; dir = path.Dir(dir) {
+		di, err := s.hooks.Stat(dir)
+		if err != nil || !di.IsDir() || di.UID != s.root || di.Mode.Perm()&0o022 != 0 {
+			return "hook directory " + dir + " is not root-owned or is writable by group or others"
+		}
+		if dir == "/" {
+			return ""
+		}
 	}
-	return ""
 }
 
 // hookEnv is the complete hook environment: PATH, LANG and the v3 LCM_*

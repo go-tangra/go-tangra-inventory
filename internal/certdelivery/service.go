@@ -134,13 +134,13 @@ type Service struct {
 	newID   func() string
 
 	mu      sync.Mutex
-	refused map[string]time.Time // tenant + actor id + reason -> last audited refusal
+	refused map[string]refusal // tenant + actor id + reason -> last audited refusal
 }
 
 // New builds the service. lcm may be nil while the relay is disabled.
 func New(r Repo, lcm LCM, reg Registry, pub Publisher, cfg Config) *Service {
 	return &Service{repo: r, lcm: lcm, reg: reg, pub: pub, cfg: cfg, now: utcNow, newID: store.NewID,
-		refused: map[string]time.Time{}}
+		refused: map[string]refusal{}}
 }
 
 func utcNow() time.Time { return time.Now().UTC() }
@@ -168,28 +168,47 @@ func (s *Service) committed(ctx context.Context, i store.CertDeliveryItem) {
 	s.pub.Publish(ctx, i.TenantID, events.CertificateDelivery, events.CertificateDeliveryPayload(i.HostID, i.ID, i.State))
 }
 
+// refusal is the throttle state of one actor and reason.
+type refusal struct {
+	at         time.Time // last audited refusal
+	suppressed int       // refusals since then that were not audited
+}
+
 // refuse records a refused request: counted always, audited at most once
-// per actor and reason within refusalWindow.
+// per actor and reason within refusalWindow; the next audited row carries
+// the number of refusals suppressed in between. A subject id that is not a
+// uuid (attacker-chosen text) is not recorded.
 func (s *Service) refuse(ctx context.Context, tenantID string, actor Actor, subjectID, reason string) {
 	s.metrics.refused(reason)
 	now := s.now()
 	key := tenantID + "\x00" + actor.ID + "\x00" + reason
 	s.mu.Lock()
 	last, seen := s.refused[key]
-	if seen && now.Sub(last) < refusalWindow {
+	if seen && now.Sub(last.at) < refusalWindow {
+		last.suppressed++
+		s.refused[key] = last
 		s.mu.Unlock()
 		return
 	}
-	s.refused[key] = now
-	for k, t := range s.refused { // keep the map small
-		if now.Sub(t) >= refusalWindow {
+	s.refused[key] = refusal{at: now}
+	for k, r := range s.refused { // keep the map small
+		// A suppressed count is kept a while for the next row; the map
+		// stays bounded by the actors refused within that time.
+		if age := now.Sub(r.at); age >= refusalWindow && (r.suppressed == 0 || age >= 6*refusalWindow) {
 			delete(s.refused, k)
 		}
 	}
 	s.mu.Unlock()
+	if !uuidRE.MatchString(subjectID) {
+		subjectID = ""
+	}
+	details := map[string]any{"reason": reason}
+	if last.suppressed > 0 {
+		details["suppressed"] = last.suppressed
+	}
 	row := audit.SafeRow(audit.Event{TenantID: tenantID, EventType: audit.CertDeliveryRefused, ActorKind: actor.Kind, ActorID: actor.ID,
 		SubjectKind: audit.SubjectCertDelivery, SubjectID: subjectID, Outcome: audit.OutcomeRefused, Reason: reason,
-		Details: map[string]any{"reason": reason}}, now)
+		Details: details}, now)
 	_ = s.repo.AppendAudit(ctx, row)
 }
 
@@ -201,7 +220,7 @@ func (s *Service) Refuse(ctx context.Context, tenantID string, actor Actor, reas
 // command is the CERTIFICATE command of an item (identifiers only).
 func command(i store.CertDeliveryItem) registry.Command {
 	return registry.Command{ID: i.ID, Type: registry.CommandCertificate,
-		Certificate: &registry.CertificatePayload{ItemID: i.ID, Name: i.Name}}
+		Certificate: &registry.CertificatePayload{ItemID: i.ID, Name: i.Name, Attempt: i.Attempts}}
 }
 
 // errNoChange rolls back an UpdateCertItem whose re-check found nothing to do.

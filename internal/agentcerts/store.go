@@ -145,6 +145,9 @@ func (s *Store) install(ctx context.Context, req Request) (Result, *failure) {
 	if !certmaterial.ValidName(req.Name) {
 		return res, fail(store.ReasonInvalidName, "")
 	}
+	if !certmaterial.ValidCertificateID(req.CertificateID) {
+		return res, fail(store.ReasonInvalidBundle, "invalid certificate id")
+	}
 	b, err := certmaterial.ParseBundle(req.CertPEM, req.ChainPEM, req.KeyPEM, certmaterial.Options{RequireKey: req.HasKey, Now: s.now})
 	if err != nil {
 		return res, fail(certmaterial.Reason(err), "")

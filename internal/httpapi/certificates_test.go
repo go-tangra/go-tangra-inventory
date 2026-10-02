@@ -286,13 +286,19 @@ func TestCertificateDeliveriesRoute(t *testing.T) {
 			t.Fatalf("item leaks %s: %v", k, first)
 		}
 	}
+	// Equal names tie-break on the id (UUIDv7 ids of one millisecond are not
+	// ordered by creation).
+	wwwAsc := []string{a.ID, c.ID}
+	if c.ID < a.ID {
+		wwwAsc = []string{c.ID, a.ID}
+	}
 	for q, want := range map[string][]string{
 		"host_id=" + f.host.ID:        {b.ID, a.ID},
 		"state=failed":                {b.ID},
 		"name=api":                    {b.ID},
 		"certificate_id=cert-1":       {c.ID, b.ID, a.ID},
 		"delivery_id=" + c.DeliveryID: {c.ID},
-		"sort=name&order=asc":         {b.ID, a.ID, c.ID},
+		"sort=name&order=asc":         {b.ID, wwwAsc[0], wwwAsc[1]},
 		"sort=created_at&order=asc":   {a.ID, b.ID, c.ID},
 		"page=2&page_size=2":          {a.ID},
 		"page=9&page_size=2":          {a.ID}, // beyond the end: the last page

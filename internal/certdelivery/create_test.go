@@ -220,6 +220,19 @@ func TestCreateIdempotentReplay(t *testing.T) {
 	if f.count("cert_delivery_requested") != 1 || len(f.reg.delivered) != 1 || len(f.lcm.calls) != 1 {
 		t.Fatalf("replay wrote: %v", f.actions())
 	}
+	// The key reused for another payload is refused.
+	for _, mut := range []func(*Request){
+		func(r *Request) { r.Name = "api" },
+		func(r *Request) { r.CertificateID = "cert-2" },
+		func(r *Request) { r.KeyPolicy = store.KeyPolicyCertificateOnly },
+	} {
+		r := f.req("job-1", web1.ID)
+		mut(&r)
+		var ie *InvalidError
+		if _, err := f.svc.Create(ctx, r); !errors.As(err, &ie) || ie.Field != "idempotency_key" {
+			t.Fatalf("key reuse: %v", err)
+		}
+	}
 	// A different source is another key space.
 	r := f.req("job-1", web1.ID)
 	r.Source = "other"
@@ -460,11 +473,57 @@ func TestPreview(t *testing.T) {
 	if _, err := f.svc.Preview(ctx, tenant, nil, []string{"role"}); err == nil {
 		t.Fatal("store error")
 	}
-	// The most recently seen agent of a host wins.
+	// A second non-revoked agent claiming the host makes it ambiguous.
 	newer := store.Agent{ID: store.NewID(), TenantID: tenant, HostID: web1.ID, AgentVersion: "4.6.0", EnrolledAt: t0, LastSeen: t0.Add(time.Hour)}
 	_ = f.mem.CreateAgent(ctx, newer)
 	p, _ = f.svc.Preview(ctx, tenant, []string{web1.ID}, nil)
-	if p.Hosts[0].Capability != CapabilityUpgradeRequired {
-		t.Fatalf("newest agent: %+v", p.Hosts[0])
+	if p.Hosts[0].Capability != CapabilityAmbiguousAgent {
+		t.Fatalf("two agents: %+v", p.Hosts[0])
+	}
+}
+
+// TestCreateAmbiguousAgent (T110, STRIDE S): an agent binds itself to a host
+// by the identity it reports, so a stolen credential could claim another
+// host. A host claimed by more than one non-revoked agent receives nothing:
+// its item is unsupported/ambiguous_agent, nothing is pushed and neither agent
+// can fetch it. Revoking the impostor restores delivery.
+func TestCreateAmbiguousAgent(t *testing.T) {
+	f := newFix(t)
+	web1, a1 := f.webHost(t, "web-1", true)
+	// The impostor (newer) and a stale older agent both claim web-1.
+	impostor := store.Agent{ID: store.NewID(), TenantID: tenant, HostID: web1.ID, AgentVersion: "4.7.0", EnrolledAt: t0, LastSeen: t0.Add(time.Hour)}
+	stale := store.Agent{ID: store.NewID(), TenantID: tenant, HostID: web1.ID, AgentVersion: "4.7.0", EnrolledAt: t0, LastSeen: t0.Add(-time.Hour)}
+	for _, a := range []store.Agent{impostor, stale} {
+		if err := f.mem.CreateAgent(ctx, a); err != nil {
+			t.Fatal(err)
+		}
+		_ = f.mem.SetAgentPlatform(ctx, a.ID, "linux", "amd64", "deb", []string{store.CapCertV1}, t0)
+		f.reg.online[a.ID] = true
+	}
+	v, err := f.svc.Create(ctx, f.req("job-1", web1.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := itemFor(v, web1.ID)
+	if i.State != store.DeliveryUnsupported || i.Reason != store.ReasonAmbiguousAgent || len(f.reg.delivered) != 0 {
+		t.Fatalf("ambiguous host: %+v pushes=%d", i, len(f.reg.delivered))
+	}
+	if f.count("cert_delivery_unsupported") != 1 {
+		t.Fatalf("audit = %v", f.actions())
+	}
+	for _, a := range []store.Agent{a1, impostor, stale} {
+		if _, err := f.svc.Fetch(ctx, a, i.ID); !errors.Is(err, repo.ErrNotFound) {
+			t.Fatalf("agent %s fetched an ambiguous item: %v", a.ID, err)
+		}
+	}
+	// The operator revokes the foreign agents: the host is unambiguous again.
+	for _, a := range []store.Agent{impostor, stale} {
+		if err := f.mem.RevokeAgent(ctx, tenant, a.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	v, err = f.svc.Create(ctx, f.req("job-2", web1.ID))
+	if i := itemFor(v, web1.ID); err != nil || i.State != store.DeliveryDelivered || i.AgentID != a1.ID {
+		t.Fatalf("after revocation: %+v %v", i, err)
 	}
 }

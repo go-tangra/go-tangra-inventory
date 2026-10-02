@@ -49,6 +49,7 @@ const REASONS: Record<string, string> = {
   bundle_too_large: 'The certificate bundle is too large',
   fingerprint_mismatch: 'The agent installed a different certificate than the one served',
   no_agent: 'The host has no agent',
+  ambiguous_agent: 'More than one agent claims this host; revoke the stale or foreign agent',
   no_capability: 'The agent cannot receive certificates',
   platform: 'Certificate delivery is not supported on this platform',
   host_retired: 'The host is retired',

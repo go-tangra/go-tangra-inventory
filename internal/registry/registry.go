@@ -44,8 +44,9 @@ type Command struct {
 // material: the agent pulls the bundle with FetchCertificate over its own
 // authenticated ingest connection.
 type CertificatePayload struct {
-	ItemID string `json:"item_id"`
-	Name   string `json:"name"`
+	ItemID  string `json:"item_id"`
+	Name    string `json:"name"`
+	Attempt int    `json:"attempt,omitempty"` // a re-armed item is a new attempt
 }
 
 // UpgradePayload asks an agent to upgrade (feature 023). It carries no

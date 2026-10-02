@@ -109,6 +109,12 @@ func (s *Service) Fetch(ctx context.Context, a store.Agent, itemID string) (*Mat
 	if err != nil {
 		return nil, err
 	}
+	if !s.now().Before(d.ExpiresAt) {
+		// Past the delivery window: the sweeper expires the item; until then
+		// it is not served.
+		s.refuse(ctx, a.TenantID, agentActor(a), itemID, RefusedNotActive)
+		return nil, repo.ErrNotFound
+	}
 	includeKey := d.KeyPolicy == store.KeyPolicyRequire
 	start := s.now()
 	m := &Material{ItemID: it.ID, Name: it.Name, CertificateID: it.CertificateID, RerunHook: it.RerunHook}

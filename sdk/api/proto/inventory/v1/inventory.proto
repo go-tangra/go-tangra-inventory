@@ -857,6 +857,7 @@ message Command {
 message CertificateCommand {
   string item_id = 1;                // uuid of the delivery item
   string name = 2;                   // ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$, no ".."; validated again by the agent
+  uint32 attempt = 3;                // the item's attempt; a re-armed item is a new attempt the agent must not dedupe away
 }
 
 // UpgradeCommand asks the agent to upgrade to target_version. The agent

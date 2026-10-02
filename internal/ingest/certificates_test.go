@@ -290,8 +290,9 @@ func TestStreamCommandsCertificateReplay(t *testing.T) {
 
 // TestCommandToPBCertificate maps ids only.
 func TestCommandToPBCertificate(t *testing.T) {
-	pb := commandToPB(registry.Command{ID: "i1", Type: registry.CommandCertificate, Certificate: &registry.CertificatePayload{ItemID: "i1", Name: "www"}})
-	if pb.GetType() != inventoryv1.CommandType_COMMAND_TYPE_CERTIFICATE || pb.GetCertificate().GetItemId() != "i1" || pb.GetCertificate().GetName() != "www" {
+	pb := commandToPB(registry.Command{ID: "i1", Type: registry.CommandCertificate, Certificate: &registry.CertificatePayload{ItemID: "i1", Name: "www", Attempt: 3}})
+	if pb.GetType() != inventoryv1.CommandType_COMMAND_TYPE_CERTIFICATE || pb.GetCertificate().GetItemId() != "i1" || pb.GetCertificate().GetName() != "www" ||
+		pb.GetCertificate().GetAttempt() != 3 {
 		t.Fatalf("pb = %v", pb)
 	}
 }

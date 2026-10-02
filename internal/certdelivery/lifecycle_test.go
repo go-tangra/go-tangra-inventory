@@ -292,6 +292,10 @@ func TestRearm(t *testing.T) {
 	if len(f.reg.delivered) != pushes+2 || f.count("cert_delivery_rearmed") != 2 {
 		t.Fatalf("pushes %d audit %v", len(f.reg.delivered)-pushes, f.actions())
 	}
+	// The push carries the new attempt, so the agent does not dedupe it away.
+	if c := f.reg.delivered[len(f.reg.delivered)-1].Certificate; c == nil || c.Attempt != 2 {
+		t.Fatalf("re-armed push = %+v", c)
+	}
 	d, _, _ := f.mem.GetCertDelivery(ctx, tenant, v.ID)
 	if !d.ExpiresAt.Equal(t0.Add(time.Hour + 168*time.Hour)) {
 		t.Fatalf("window not extended: %v", d.ExpiresAt)

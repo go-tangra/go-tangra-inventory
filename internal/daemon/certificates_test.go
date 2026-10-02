@@ -195,6 +195,41 @@ func TestCertificateCommandFlow(t *testing.T) {
 	}
 }
 
+// TestCertificateRearmedItemRunsAgain: the server re-arms a failed item
+// with the same id and a higher attempt (deployer retry, rearm_failed); the
+// agent handles that attempt even though the item id was handled before,
+// also after a NotFound fetch, while a replay of the same attempt stays a
+// duplicate.
+func TestCertificateRearmedItemRunsAgain(t *testing.T) {
+	d, inst, cl := certDaemon(nil)
+	attempt := func(id string, n uint32) *invv1.Command {
+		c := certCmd(id)
+		c.Certificate.Attempt = n
+		return c
+	}
+	d.handleCommand(context.Background(), attempt("item-1", 1))
+	drain(d)
+	d.handleCommand(context.Background(), attempt("item-1", 1))
+	drain(d)
+	if f, reps := cl.snapshot(); f != 1 || len(reps) != 1 || inst.count() != 1 {
+		t.Fatalf("same attempt: fetches=%d reports=%d", f, len(reps))
+	}
+	d.handleCommand(context.Background(), attempt("item-1", 2))
+	drain(d)
+	if f, reps := cl.snapshot(); f != 2 || len(reps) != 2 || inst.count() != 2 {
+		t.Fatalf("re-armed: fetches=%d reports=%d", f, len(reps))
+	}
+	// NotFound finishes only that attempt.
+	cl.fetchErrs = []error{status.Error(codes.NotFound, "no")}
+	d.handleCommand(context.Background(), attempt("item-2", 1))
+	drain(d)
+	d.handleCommand(context.Background(), attempt("item-2", 2))
+	drain(d)
+	if f, _ := cl.snapshot(); f != 4 || inst.count() != 3 {
+		t.Fatalf("after not found: fetches=%d installs=%d", f, inst.count())
+	}
+}
+
 func TestCertificateDuplicatesWhileQueued(t *testing.T) {
 	d, inst, cl := certDaemon(nil)
 	for i := 0; i < 3; i++ {
@@ -282,7 +317,7 @@ func TestCertificateFetchErrors(t *testing.T) {
 	if _, err := d.fetchCertificate(cctx, "item-9"); err == nil {
 		t.Fatal("canceled fetch")
 	}
-	if inst.count() != 0 || !d.certs.claim("item-1") {
+	if inst.count() != 0 || !d.certs.claim(certKey("item-1", 0)) {
 		t.Fatal("item not released after the stream ended")
 	}
 }
@@ -349,9 +384,9 @@ func TestCertStateMemoryBounded(t *testing.T) {
 	for i := 0; i < certDoneMemory+10; i++ {
 		id := strings.Repeat("x", i%7) + string(rune(i))
 		c.claim(id)
-		c.finish(id)
+		c.finish(id, id)
 	}
-	c.finish(c.order[len(c.order)-1])
+	c.finish(c.order[len(c.order)-1], "x")
 	if len(c.done) != certDoneMemory || len(c.order) != certDoneMemory {
 		t.Fatalf("done=%d order=%d", len(c.done), len(c.order))
 	}

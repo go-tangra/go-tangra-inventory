@@ -275,7 +275,12 @@ func upsertHostCertTx(ctx context.Context, tx pgx.Tx, tenantID string, h store.H
 		  configuration_id=EXCLUDED.configuration_id, common_name=EXCLUDED.common_name, serial=EXCLUDED.serial,
 		  fingerprint_sha256=EXCLUDED.fingerprint_sha256, not_after=EXCLUDED.not_after, state=EXCLUDED.state,
 		  reason=EXCLUDED.reason, hook_exit_code=EXCLUDED.hook_exit_code, last_item_id=EXCLUDED.last_item_id,
-		  last_delivered_at=EXCLUDED.last_delivered_at, revoked_at=EXCLUDED.revoked_at, updated_at=EXCLUDED.updated_at`,
+		  last_delivered_at=EXCLUDED.last_delivered_at,
+		  -- a revocation of the same certificate is never cleared (a report
+		  -- built from a read taken before MarkRevoked must not undo it)
+		  revoked_at=CASE WHEN EXCLUDED.certificate_id=inventory_host_certificates.certificate_id
+		    THEN COALESCE(EXCLUDED.revoked_at, inventory_host_certificates.revoked_at) ELSE EXCLUDED.revoked_at END,
+		  updated_at=EXCLUDED.updated_at`,
 		tenantID, h.HostID, h.Name, h.CertificateID, h.ConfigurationID, h.CommonName, h.Serial, h.FingerprintSHA256,
 		h.NotAfter, h.State, h.Reason, h.HookExitCode, h.LastItemID, h.LastDeliveredAt, h.RevokedAt, h.UpdatedAt)
 	return mapErr(err)

@@ -20,6 +20,25 @@ func isNameByte(c byte) bool {
 	return isAlnum(c) || c == '.' || c == '_' || c == '-'
 }
 
+// MaxCertificateIDLen bounds an lcm certificate id.
+const MaxCertificateIDLen = 128
+
+// ValidCertificateID reports whether s is an lcm certificate id the agent may
+// pass to its hook (LCM_CERTIFICATE_ID): 1..128 characters of
+// [A-Za-z0-9._:-], so no shell metacharacter or oversized value reaches the
+// hook environment.
+func ValidCertificateID(s string) bool {
+	if s == "" || len(s) > MaxCertificateIDLen {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if !isNameByte(s[i]) && s[i] != ':' {
+			return false
+		}
+	}
+	return true
+}
+
 // ValidName reports whether s is a certificate name: ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$
 // without "..". Such a name is a single path component that never starts
 // with a dot, so it cannot escape or hide in the agent's directory.

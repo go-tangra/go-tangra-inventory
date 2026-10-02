@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -30,7 +31,7 @@ const (
 	// certQueueSize bounds queued CERTIFICATE commands (the server replays
 	// at most 50 per connect).
 	certQueueSize = 128
-	// certDoneMemory bounds the item ids remembered as finished.
+	// certDoneMemory bounds the item attempts remembered as finished.
 	certDoneMemory = 1024
 	// maxReportDetail is the report detail bound (data-model §1.1).
 	maxReportDetail = 256
@@ -45,12 +46,19 @@ const (
 type certJob struct {
 	ctx    context.Context
 	itemID string
+	key    string // dedup key: item id and attempt
 }
 
-// certState deduplicates and queues CERTIFICATE commands: an item is handled
-// once at a time, finished items are remembered (bounded), and a result
-// whose report could not be sent is kept and re-sent on the next command for
-// the item instead of installing again.
+// certKey is the dedup key of a command: a re-armed item (retry, rearm of a
+// failed item) comes back with a higher attempt and must run again.
+func certKey(itemID string, attempt uint32) string {
+	return fmt.Sprintf("%s#%d", itemID, attempt)
+}
+
+// certState deduplicates and queues CERTIFICATE commands: an item attempt is
+// handled once at a time, finished attempts are remembered (bounded), and a
+// result whose report could not be sent is kept and re-sent on the next
+// command for the item instead of installing again.
 type certState struct {
 	mu       sync.Mutex
 	inflight map[string]bool
@@ -74,48 +82,49 @@ func certBackoff(attempt int) time.Duration {
 	return d
 }
 
-// claim marks an item in flight; false when it is already queued, running
-// or finished.
-func (c *certState) claim(id string) bool {
+// claim marks an item attempt in flight; false when it is already queued,
+// running or finished.
+func (c *certState) claim(key string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.inflight[id] || c.done[id] {
+	if c.inflight[key] || c.done[key] {
 		return false
 	}
-	c.inflight[id] = true
+	c.inflight[key] = true
 	return true
 }
 
-// release lets a later command for the item run again.
-func (c *certState) release(id string) {
+// release lets a later command for the item attempt run again.
+func (c *certState) release(key string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	delete(c.inflight, id)
+	delete(c.inflight, key)
 }
 
-// finish remembers an item as reported.
-func (c *certState) finish(id string) {
+// finish remembers an item attempt as reported and drops a kept result of
+// the item.
+func (c *certState) finish(key, itemID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	delete(c.inflight, id)
-	delete(c.unsent, id)
-	if c.done[id] {
+	delete(c.inflight, key)
+	delete(c.unsent, itemID)
+	if c.done[key] {
 		return
 	}
-	c.done[id] = true
-	c.order = append(c.order, id)
+	c.done[key] = true
+	c.order = append(c.order, key)
 	if len(c.order) > certDoneMemory {
 		delete(c.done, c.order[0])
 		c.order = c.order[1:]
 	}
 }
 
-// keepUnsent stores a result whose report failed and releases the item.
-func (c *certState) keepUnsent(r *invv1.ReportCertificateRequest) {
+// keepUnsent stores a result whose report failed and releases the attempt.
+func (c *certState) keepUnsent(key string, r *invv1.ReportCertificateRequest) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.unsent[r.GetItemId()] = r
-	delete(c.inflight, r.GetItemId())
+	delete(c.inflight, key)
 }
 
 func (c *certState) takeUnsent(id string) *invv1.ReportCertificateRequest {
@@ -145,15 +154,16 @@ func (d *Daemon) enqueueCertificate(ctx context.Context, cmd *invv1.Command) {
 		log.Printf("daemon: ignoring certificate command %s without an item id", cmd.GetCommandId())
 		return
 	}
-	if !d.certs.claim(id) {
+	key := certKey(id, cmd.GetCertificate().GetAttempt())
+	if !d.certs.claim(key) {
 		log.Printf("daemon: certificate item %s already handled; duplicate command ignored", id)
 		return
 	}
 	select {
-	case d.certs.queue <- certJob{ctx: ctx, itemID: id}:
+	case d.certs.queue <- certJob{ctx: ctx, itemID: id, key: key}:
 	default:
 		log.Printf("daemon: certificate item %s refused: queue full", id)
-		go d.sendCertReport(ctx, &invv1.ReportCertificateRequest{ItemId: id, State: store.DeliveryFailed, Reason: store.ReasonBusy,
+		go d.sendCertReport(ctx, key, &invv1.ReportCertificateRequest{ItemId: id, State: store.DeliveryFailed, Reason: store.ReasonBusy,
 			HookExitCode: agentcerts.HookNotRun})
 	}
 }
@@ -174,11 +184,11 @@ func (d *Daemon) certLoop(ctx context.Context) {
 // held only for the install; nothing of it is logged.
 func (d *Daemon) processCertificate(ctx context.Context, j certJob) {
 	if r := d.certs.takeUnsent(j.itemID); r != nil {
-		d.sendCertReport(ctx, r)
+		d.sendCertReport(ctx, j.key, r)
 		return
 	}
 	if !d.certsActive() {
-		d.sendCertReport(ctx, &invv1.ReportCertificateRequest{ItemId: j.itemID, State: store.DeliveryFailed,
+		d.sendCertReport(ctx, j.key, &invv1.ReportCertificateRequest{ItemId: j.itemID, State: store.DeliveryFailed,
 			Reason: store.ReasonDisabledLocally, HookExitCode: agentcerts.HookNotRun})
 		return
 	}
@@ -186,17 +196,17 @@ func (d *Daemon) processCertificate(ctx context.Context, j certJob) {
 	if err != nil {
 		log.Printf("daemon: certificate item %s: fetch: %s", j.itemID, status.Code(err))
 		if status.Code(err) == codes.NotFound {
-			d.certs.finish(j.itemID) // not ours or no longer active
+			d.certs.finish(j.key, j.itemID) // not ours or no longer active
 			return
 		}
-		d.certs.release(j.itemID)
+		d.certs.release(j.key)
 		return
 	}
 	res := d.certStore.Install(ctx, agentcerts.Request{ItemID: j.itemID, Name: b.GetName(), CertificateID: b.GetCertificateId(),
 		CertPEM: []byte(b.GetCertPem()), ChainPEM: []byte(b.GetChainPem()), KeyPEM: []byte(b.GetKeyPem()), HasKey: b.GetHasKey(),
 		RerunHook: b.GetRerunHook(), IsRenewal: b.GetIsRenewal()})
 	b.KeyPem = ""
-	d.sendCertReport(ctx, reportOf(j.itemID, res))
+	d.sendCertReport(ctx, j.key, reportOf(j.itemID, res))
 }
 
 // fetchCertificate calls FetchCertificate, retrying transient errors with
@@ -229,17 +239,17 @@ func transientFetch(err error) bool {
 
 // sendCertReport reports a result; a failed report is kept for the next
 // command of the item (the server replays it while the item is active).
-func (d *Daemon) sendCertReport(ctx context.Context, r *invv1.ReportCertificateRequest) {
+func (d *Daemon) sendCertReport(ctx context.Context, key string, r *invv1.ReportCertificateRequest) {
 	accepted, err := d.newCertClient(d.agentID, d.credential).Report(ctx, r)
 	if err != nil {
 		log.Printf("daemon: certificate item %s: report %s failed: %v", r.GetItemId(), r.GetState(), err)
-		d.certs.keepUnsent(r)
+		d.certs.keepUnsent(key, r)
 		return
 	}
 	if !accepted {
 		log.Printf("daemon: certificate item %s: report %s ignored by the server", r.GetItemId(), r.GetState())
 	}
-	d.certs.finish(r.GetItemId())
+	d.certs.finish(key, r.GetItemId())
 }
 
 // reportOf maps a store result to the report (detail bounded, never hook
