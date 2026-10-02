@@ -37,12 +37,11 @@ const (
 	StatusRevoked  = "revoked"
 )
 
-// noKeyMessage is lcm's message for a certificate without a stored key
-// (go-tangra-lcm internal/issue DownloadKey, an issue.ValidationError).
-// NOTE: lcm 4.x grpcapi.grpcError maps that ValidationError to
-// Unavailable "temporarily_unavailable", so until lcm returns it as
-// InvalidArgument with this message a key-less certificate surfaces here
-// as ErrUnavailable (feature 033 follow-up in go-tangra-lcm).
+// noKeyMessage is lcm's InvalidArgument message for a certificate without a
+// stored key (go-tangra-lcm grpcapi.grpcError, issue.ErrNoStoredKey, since
+// the lcm 033 change). Older lcm releases answer Unavailable
+// "temporarily_unavailable" instead, which surfaces here as ErrUnavailable
+// (the agent retries until the item expires).
 const noKeyMessage = "no stored private key"
 
 // Bundle is a downloaded certificate. KeyPEM is a byte slice so the caller
