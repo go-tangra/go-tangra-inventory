@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useAbility } from '@casl/vue'
-import { UiPage, UiAlert, UiCard, UiButton, UiDataTable, UiStatusChip, UiLiveIndicator, UiForm, UiInput, UiSecretField, UiCopyButton, UiDrawer, UiSelect, useConfirm, useListQuery, type Column } from '@go-tangra/ui'
+import { UiPage, UiAlert, UiCard, UiButton, UiDataTable, UiStatusChip, UiTooltip, UiLiveIndicator, UiForm, UiInput, UiSecretField, UiCopyButton, UiDrawer, UiSelect, useConfirm, useListQuery, type Column } from '@go-tangra/ui'
 import { useZodForm } from '@go-tangra/ui/forms'
 import { FLEET_LIST, useAgents, type FleetFilter } from '@/stores/agents'
 import { useLive } from '@/stores/live'
@@ -9,6 +9,7 @@ import { describe } from '@/api/client'
 import { enrollTokenSchema } from '@/schemas'
 import type { AgentFleetEntry, FleetState, MintedToken, UpgradeBatchResult } from '@/api/types'
 import { fleetStateLabel, reasonText, skipSummary, UPGRADABLE } from './upgrade-text'
+import { CAPABILITY_COLORS, capabilityLabel, capabilityText } from '../hosts/cert-text'
 import PolicyCard from './PolicyCard.vue'
 import AutoEnrollCard from './AutoEnrollCard.vue'
 
@@ -161,6 +162,7 @@ const columns: Column<AgentFleetEntry>[] = [
   { key: 'version', label: 'Version', sortable: true },
   { key: 'target_version', label: 'Target', hideOnStack: true },
   { key: 'state', label: 'Upgrade', sortable: true },
+  { key: 'certificate_capability', label: 'Certificates', hideOnStack: true },
   { key: 'enrolled_via', label: 'Enrolled with', hideOnStack: true, format: (a) => (a.enrolled_via === 'auto' ? 'key ' + (a.auto_enroll_key_id ?? '') : 'token') },
   { key: 'last_seen', label: 'Last seen', sortable: true, defaultDir: 'desc', format: (a) => fmt(a.last_seen || a.connected_at), hideOnStack: true },
   { key: 'state_changed_at', label: 'Last change', format: (a) => fmt(a.state_changed_at), hideOnStack: true },
@@ -194,6 +196,11 @@ const columns: Column<AgentFleetEntry>[] = [
             <UiStatusChip :status="row.upgrade_state" :label="fleetStateLabel(row.upgrade_state)" :colors="stateColors" :data-test="'agent-state-' + row.agent_id" />
             <span v-if="row.upgrade_reason" class="text-xs text-base-content/70" :data-test="'agent-reason-' + row.agent_id">{{ reasonText(row.upgrade_reason) }}</span>
           </span>
+        </template>
+        <template #cell-certificate_capability="{ row }">
+          <UiTooltip v-if="row.certificate_capability" :text="capabilityText(row.certificate_capability)" :data-test="'agent-cert-' + row.agent_id">
+            <UiStatusChip :status="row.certificate_capability" :label="capabilityLabel(row.certificate_capability)" :colors="CAPABILITY_COLORS" />
+          </UiTooltip>
         </template>
         <template #actions="{ row }">
           <template v-if="canManage">

@@ -10,7 +10,8 @@ import type { ConnectedAgent } from '@/api/types'
 // reference-counted so several views share one connection.
 export type Listener = (type: string, data: unknown) => void
 
-const EVENTS = ['snapshot.received', 'agent.online', 'agent.offline', 'agent.upgrade', 'inventory.agent.upgrade']
+// certificate.delivery (feature 033) carries host_id, item_id and state only.
+const EVENTS = ['snapshot.received', 'agent.online', 'agent.offline', 'agent.upgrade', 'inventory.agent.upgrade', 'certificate.delivery', 'inventory.certificate.delivery']
 
 interface SnapshotReceived {
   host_id: string

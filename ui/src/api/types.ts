@@ -437,6 +437,8 @@ export interface AgentFleetEntry extends ConnectedAgent {
   // Feature 029: how the agent enrolled.
   enrolled_via?: 'token' | 'auto'
   auto_enroll_key_id?: string
+  // Feature 033: whether the agent can receive certificates.
+  certificate_capability?: CertificateCapability
 }
 
 export interface AgentFleet extends PageInfo {
@@ -575,4 +577,58 @@ export interface AutoEnrollKeyInput {
   allowed_cidrs: string[]
   expires_at: string | null
   max_enrollments: number
+}
+
+// --- certificate delivery (feature 033): identity only, never material ---
+
+export type CertificateCapability = 'enabled' | 'disabled_on_host' | 'upgrade_required' | 'not_supported_platform' | 'disabled_on_server'
+
+/** States of a delivery item: pending/delivered/fetched wait for the agent, the others are final. */
+export type DeliveryState = 'pending' | 'delivered' | 'fetched' | 'installed' | 'unchanged' | 'failed' | 'hook_failed' | 'unsupported' | 'superseded' | 'expired' | 'cancelled'
+export type DeliveryTrigger = 'manual' | 'auto_deploy' | 'retry'
+
+/** One delivery of a certificate to one host (GET /certificate-deliveries). */
+export interface CertificateDeliveryItem {
+  id: string
+  delivery_id: string
+  host_id: string
+  hostname: string
+  name: string
+  certificate_id: string
+  configuration_id: string
+  trigger: DeliveryTrigger
+  state: DeliveryState
+  /** Reason code only. */
+  reason: string
+  attempts: number
+  serial: string
+  fingerprint_sha256: string
+  common_name: string
+  not_after: string | null
+  /** -1 hook not run, 256 timed out. */
+  hook_exit_code: number | null
+  detail: string
+  created_at: string
+  updated_at: string
+  finished_at: string | null
+}
+
+/** The current certificate of a host under one name (GET /hosts/{id}/certificates). */
+export interface HostCertificate {
+  name: string
+  certificate_id: string
+  configuration_id: string
+  common_name: string
+  serial: string
+  fingerprint_sha256: string
+  not_after: string | null
+  /** The last final state, or the queued item's state when nothing was installed under the name yet. */
+  state: DeliveryState
+  reason: string
+  hook_exit_code: number | null
+  last_delivered_at: string | null
+  revoked: boolean
+  revoked_at: string | null
+  /** The delivery still waiting for the agent. */
+  active_item: CertificateDeliveryItem | null
 }

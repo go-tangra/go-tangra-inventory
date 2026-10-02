@@ -7,6 +7,7 @@ import { useAgents } from '@/stores/agents'
 import { CHANGE_LIST, SNAPSHOT_LIST, useSnapshots } from '@/stores/snapshots'
 import { useLive } from '@/stores/live'
 import { describe } from '@/api/client'
+import CertificatesTab from './CertificatesTab.vue'
 import type { Change, Host, IfAddress, Snapshot, SnapshotDiff } from '@/api/types'
 
 const route = useRoute()
@@ -82,7 +83,7 @@ watch(changeLq.query, () => void loadChanges())
 
 const online = computed(() => agents.connected.some((a) => a.host_id === id.value))
 const inv = computed(() => latest.value?.payload ?? null)
-const tabs: TabItem[] = [{ key: 'hardware', label: 'Hardware' }, { key: 'software', label: 'Software' }, { key: 'network', label: 'Network' }, { key: 'history', label: 'History' }]
+const tabs: TabItem[] = [{ key: 'hardware', label: 'Hardware' }, { key: 'software', label: 'Software' }, { key: 'network', label: 'Network' }, { key: 'history', label: 'History' }, { key: 'certificates', label: 'Certificates' }]
 
 function humanBytes(bytes?: number): string {
   if (!bytes) return ''
@@ -308,7 +309,7 @@ const changeColors = { added: 'success', removed: 'error', modified: 'warning' }
     </UiCard>
 
     <UiTabs v-model="tab" :tabs="tabs" class="mb-4" />
-    <UiAlert v-if="tab !== 'history' && !inv" kind="info">No snapshot collected yet.</UiAlert>
+    <UiAlert v-if="tab !== 'history' && tab !== 'certificates' && !inv" kind="info">No snapshot collected yet.</UiAlert>
 
     <div v-if="tab === 'hardware' && inv" class="flex flex-col gap-4">
       <UiAlert v-if="truncatedText" kind="warning" data-test="hardware-truncated-notice">The agent dropped entries above its limits: {{ truncatedText }}.</UiAlert>
@@ -415,6 +416,8 @@ const changeColors = { added: 'success', removed: 'error', modified: 'warning' }
         <UiDataTable :items="guestRows" :columns="guestColumns" caption="Hypervisor guests" :virtual-at="200" />
       </UiCard>
     </div>
+
+    <CertificatesTab v-if="tab === 'certificates'" :host-id="id" />
 
     <div v-if="tab === 'history'" class="flex flex-col gap-4">
       <UiCard title="Compare snapshots">
