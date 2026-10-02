@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-tangra/go-tangra/v4/listquery"
 
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/audit"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/repo"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/store"
 )
@@ -258,6 +259,12 @@ func (m *Mem) CancelCertItems(_ context.Context, tenantID string, scope repo.Cer
 	if scope.HostID == "" && scope.AgentID == "" && scope.CertificateID == "" {
 		return nil, errEmptyScope
 	}
+	return m.cancelCertLocked(tenantID, scope, reason, row), nil
+}
+
+// cancelCertLocked cancels the scope's active items (lock held) with the
+// audit row of row (nil: audit.CertItemCancelledRow) and returns them.
+func (m *Mem) cancelCertLocked(tenantID string, scope repo.CertCancelScope, reason string, row func(store.CertDeliveryItem) store.AuditRow) []store.CertDeliveryItem {
 	now := m.Now()
 	var out []store.CertDeliveryItem
 	for id, i := range m.cs().items {
@@ -274,9 +281,13 @@ func (m *Mem) CancelCertItems(_ context.Context, tenantID string, scope repo.Cer
 	}
 	oldestFirst(out)
 	for _, i := range out {
+		if row == nil {
+			m.audit = append(m.audit, audit.CertItemCancelledRow(i, now))
+			continue
+		}
 		m.audit = append(m.audit, row(i))
 	}
-	return out, nil
+	return out
 }
 
 // GetHostCertificate implements repo.CertDeliveryStore.
@@ -341,4 +352,110 @@ func (m *Mem) PurgeCertItems(_ context.Context, olderThan time.Time) (int64, err
 		}
 	}
 	return n, nil
+}
+
+// ExtendCertDelivery implements repo.CertDeliveryStore.
+func (m *Mem) ExtendCertDelivery(_ context.Context, tenantID, id string, at time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.fail("ExtendCertDelivery"); err != nil {
+		return err
+	}
+	d, ok := m.cs().deliveries[id]
+	if !ok || d.TenantID != tenantID {
+		return repo.ErrNotFound
+	}
+	if at.After(d.ExpiresAt) {
+		d.ExpiresAt = at
+		m.cs().deliveries[id] = d
+	}
+	return nil
+}
+
+// ListStaleCertItems implements repo.CertDeliveryStore (system scope).
+func (m *Mem) ListStaleCertItems(_ context.Context, now, reportBefore time.Time, limit int) ([]repo.StaleCertItem, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.fail("ListStaleCertItems"); err != nil {
+		return nil, err
+	}
+	c := m.cs()
+	var items []store.CertDeliveryItem
+	for _, i := range c.items {
+		if !i.Active() {
+			continue
+		}
+		if c.deliveries[i.DeliveryID].ExpiresAt.Before(now) || (i.State == store.DeliveryFetched && i.UpdatedAt.Before(reportBefore)) {
+			items = append(items, i)
+		}
+	}
+	oldestFirst(items)
+	if limit > 0 && len(items) > limit {
+		items = items[:limit]
+	}
+	out := make([]repo.StaleCertItem, 0, len(items))
+	for _, i := range items {
+		out = append(out, repo.StaleCertItem{Item: i, ExpiresAt: c.deliveries[i.DeliveryID].ExpiresAt})
+	}
+	return out, nil
+}
+
+// ListHostCertificatesByName implements repo.CertDeliveryStore.
+func (m *Mem) ListHostCertificatesByName(_ context.Context, tenantID, name string) ([]store.HostCertificate, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.fail("ListHostCertificatesByName"); err != nil {
+		return nil, err
+	}
+	var out []store.HostCertificate
+	for k, hc := range m.cs().hostCerts {
+		if k[0] == tenantID && k[2] == name {
+			out = append(out, hc)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].HostID < out[j].HostID })
+	return out, nil
+}
+
+// ListActiveCertItemsByName implements repo.CertDeliveryStore.
+func (m *Mem) ListActiveCertItemsByName(_ context.Context, tenantID, name string) ([]store.CertDeliveryItem, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.fail("ListActiveCertItemsByName"); err != nil {
+		return nil, err
+	}
+	var out []store.CertDeliveryItem
+	for _, i := range m.cs().items {
+		if i.TenantID == tenantID && i.Name == name && i.Active() {
+			out = append(out, i)
+		}
+	}
+	oldestFirst(out)
+	return out, nil
+}
+
+// RevokeHostCertificates implements repo.CertDeliveryStore.
+func (m *Mem) RevokeHostCertificates(_ context.Context, tenantID, certificateID string, at time.Time, row func(store.HostCertificate) store.AuditRow) ([]store.HostCertificate, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.fail("RevokeHostCertificates"); err != nil {
+		return nil, err
+	}
+	var out []store.HostCertificate
+	for k, hc := range m.cs().hostCerts {
+		if k[0] != tenantID || hc.CertificateID != certificateID || hc.RevokedAt != nil {
+			continue
+		}
+		t := at
+		hc.RevokedAt, hc.UpdatedAt = &t, at
+		m.cs().hostCerts[k] = hc
+		out = append(out, hc)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].HostID < out[j].HostID || (out[i].HostID == out[j].HostID && out[i].Name < out[j].Name)
+	})
+	for _, hc := range out {
+		m.audit = append(m.audit, row(hc))
+	}
+	return out, nil
 }

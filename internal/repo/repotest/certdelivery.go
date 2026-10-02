@@ -452,4 +452,172 @@ func CertDeliveryContract(t *testing.T, open func(t *testing.T) repo.Store, audi
 			t.Fatalf("recent item purged: %v", err)
 		}
 	})
+
+	t.Run("extend, stale items, by-name lists", func(t *testing.T) {
+		st := open(t)
+		h1, h2, h3 := store.NewID(), store.NewID(), store.NewID()
+		d := delivery(TenantA, "job-1", "www", "cert-1", base)
+		d.ExpiresAt = base.Add(time.Hour)
+		i1 := item(d, h1, "", store.DeliveryPending)
+		i2 := item(d, h2, "", store.DeliveryFetched)
+		i2.UpdatedAt = base.Add(-time.Hour)
+		i3 := item(d, h3, "", store.DeliveryInstalled)
+		d2 := delivery(TenantB, "job-2", "www", "cert-2", base)
+		j1 := item(d2, h1, "", store.DeliveryDelivered)
+		for _, n := range []repo.NewCertDelivery{{Delivery: d, Items: []store.CertDeliveryItem{i1, i2, i3}}, {Delivery: d2, Items: []store.CertDeliveryItem{j1}}} {
+			if _, err := st.CreateCertDelivery(ctx, n); err != nil {
+				t.Fatal(err)
+			}
+		}
+		// Only the fetched item is stale before the expiry.
+		stale, err := st.ListStaleCertItems(ctx, base, base.Add(-30*time.Minute), 0)
+		if err != nil || len(stale) != 1 || stale[0].Item.ID != i2.ID || !stale[0].ExpiresAt.Equal(d.ExpiresAt) {
+			t.Fatalf("stale before expiry: %+v %v", stale, err)
+		}
+		// After the expiry every active item of d is stale (both tenants: system scope).
+		stale, err = st.ListStaleCertItems(ctx, base.Add(2*time.Hour), base.Add(-30*time.Minute), 0)
+		if err != nil || len(stale) != 2 {
+			t.Fatalf("stale after expiry: %+v %v", stale, err)
+		}
+		if stale, _ := st.ListStaleCertItems(ctx, base.Add(200*time.Hour), base, 1); len(stale) != 1 {
+			t.Fatalf("limit: %+v", stale)
+		}
+		// Extending moves the expiry forward only.
+		if err := st.ExtendCertDelivery(ctx, TenantA, d.ID, base.Add(48*time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.ExtendCertDelivery(ctx, TenantA, d.ID, base); err != nil {
+			t.Fatal(err)
+		}
+		if got, _, _ := st.GetCertDelivery(ctx, TenantA, d.ID); !got.ExpiresAt.Equal(base.Add(48 * time.Hour)) {
+			t.Fatalf("extended expiry = %v", got.ExpiresAt)
+		}
+		if err := st.ExtendCertDelivery(ctx, TenantB, d.ID, base.Add(72*time.Hour)); !errors.Is(err, repo.ErrNotFound) {
+			t.Fatalf("extend across tenants: %v", err)
+		}
+		active, err := st.ListActiveCertItemsByName(ctx, TenantA, "www")
+		if err != nil || len(active) != 2 {
+			t.Fatalf("active by name: %v %v", active, err)
+		}
+		if active, _ := st.ListActiveCertItemsByName(ctx, TenantA, "api"); len(active) != 0 {
+			t.Fatalf("other name: %v", active)
+		}
+		// Host certificates by name.
+		for _, h := range []string{h1, h2} {
+			hc := store.HostCertificate{HostID: h, Name: "www", CertificateID: "cert-1", State: store.DeliveryInstalled, LastItemID: i3.ID, UpdatedAt: base}
+			if _, err := st.UpdateCertItem(ctx, TenantA, i3.ID, func(*store.CertDeliveryItem) (repo.CertItemChange, error) {
+				return repo.CertItemChange{HostCert: &hc}, nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		hcs, err := st.ListHostCertificatesByName(ctx, TenantA, "www")
+		if err != nil || len(hcs) != 2 {
+			t.Fatalf("host certificates by name: %v %v", hcs, err)
+		}
+		if hcs, _ := st.ListHostCertificatesByName(ctx, TenantB, "www"); len(hcs) != 0 {
+			t.Fatal("host certificates leak across tenants")
+		}
+	})
+
+	t.Run("revoke host certificates", func(t *testing.T) {
+		st := open(t)
+		h1, h2 := store.NewID(), store.NewID()
+		d := delivery(TenantA, "job-1", "www", "cert-1", base)
+		i1 := item(d, h1, "", store.DeliveryInstalled)
+		if _, err := st.CreateCertDelivery(ctx, repo.NewCertDelivery{Delivery: d, Items: []store.CertDeliveryItem{i1}}); err != nil {
+			t.Fatal(err)
+		}
+		for _, hc := range []store.HostCertificate{
+			{HostID: h1, Name: "www", CertificateID: "cert-1", State: store.DeliveryInstalled, LastItemID: i1.ID, UpdatedAt: base},
+			{HostID: h2, Name: "www", CertificateID: "cert-1", State: store.DeliveryInstalled, LastItemID: i1.ID, UpdatedAt: base},
+			{HostID: h2, Name: "api", CertificateID: "cert-2", State: store.DeliveryInstalled, LastItemID: i1.ID, UpdatedAt: base},
+		} {
+			hc := hc
+			if _, err := st.UpdateCertItem(ctx, TenantA, i1.ID, func(*store.CertDeliveryItem) (repo.CertItemChange, error) {
+				return repo.CertItemChange{HostCert: &hc}, nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		row := func(h store.HostCertificate) store.AuditRow {
+			r := auditRow(TenantA, "host_certificate_revoked", h.HostID, base)
+			r.SubjectKind = "host"
+			return r
+		}
+		at := base.Add(time.Hour)
+		got, err := st.RevokeHostCertificates(ctx, TenantA, "cert-1", at, row)
+		if err != nil || len(got) != 2 || got[0].RevokedAt == nil || !got[0].RevokedAt.Equal(at) {
+			t.Fatalf("revoke: %+v %v", got, err)
+		}
+		if audits(t, TenantA, "host_certificate_revoked", h1) != 1 || audits(t, TenantA, "host_certificate_revoked", h2) != 1 {
+			t.Fatal("revocation audit rows")
+		}
+		if hc, _ := st.GetHostCertificate(ctx, TenantA, h2, "api"); hc.RevokedAt != nil {
+			t.Fatal("another certificate flagged")
+		}
+		// Idempotent, and tenant scoped.
+		if got, err := st.RevokeHostCertificates(ctx, TenantA, "cert-1", at, row); err != nil || len(got) != 0 {
+			t.Fatalf("second revoke: %v %v", got, err)
+		}
+		if got, _ := st.RevokeHostCertificates(ctx, TenantB, "cert-2", at, row); len(got) != 0 {
+			t.Fatal("revoke across tenants")
+		}
+	})
+
+	t.Run("host deletion and agent revocation cancel deliveries", func(t *testing.T) {
+		st := open(t)
+		host, err := st.ResolveHost(ctx, TenantA, store.Host{Hostname: "web-" + store.NewID(), MachineID: store.NewID()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		other, err := st.ResolveHost(ctx, TenantA, store.Host{Hostname: "web-" + store.NewID(), MachineID: store.NewID()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		agent := store.Agent{ID: store.NewID(), TenantID: TenantA, HostID: other.ID, CredentialSealed: []byte{1}, EnrolledAt: base, LastSeen: base}
+		if err := st.CreateAgent(ctx, agent); err != nil {
+			t.Fatal(err)
+		}
+		d := delivery(TenantA, "job-1", "www", "cert-1", base)
+		i1 := item(d, host.ID, "", store.DeliveryPending)
+		i2 := item(d, other.ID, agent.ID, store.DeliveryDelivered)
+		d2 := delivery(TenantA, "job-2", "api", "cert-2", base)
+		i3 := item(d2, host.ID, "", store.DeliveryInstalled)
+		for _, n := range []repo.NewCertDelivery{{Delivery: d, Items: []store.CertDeliveryItem{i1, i2}}, {Delivery: d2, Items: []store.CertDeliveryItem{i3}}} {
+			if _, err := st.CreateCertDelivery(ctx, n); err != nil {
+				t.Fatal(err)
+			}
+		}
+		hc := store.HostCertificate{HostID: host.ID, Name: "api", CertificateID: "cert-2", State: store.DeliveryInstalled, LastItemID: i3.ID, UpdatedAt: base}
+		if _, err := st.UpdateCertItem(ctx, TenantA, i3.ID, func(*store.CertDeliveryItem) (repo.CertItemChange, error) {
+			return repo.CertItemChange{HostCert: &hc}, nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.DeleteHost(ctx, TenantA, host.ID); err != nil {
+			t.Fatal(err)
+		}
+		if g, _ := st.GetCertItem(ctx, TenantA, i1.ID); g.State != store.DeliveryCancelled || g.Reason != store.ReasonHostDeleted || g.FinishedAt == nil {
+			t.Fatalf("host deletion: %+v", g)
+		}
+		if g, _ := st.GetCertItem(ctx, TenantA, i3.ID); g.State != store.DeliveryInstalled {
+			t.Fatalf("terminal item changed: %+v", g)
+		}
+		if audits(t, TenantA, "cert_delivery_cancelled", i1.ID) != 1 {
+			t.Fatal("host deletion audit row")
+		}
+		if hcs, _ := st.ListHostCertificates(ctx, TenantA, host.ID); len(hcs) != 0 {
+			t.Fatalf("host certificates kept: %v", hcs)
+		}
+		if err := st.RevokeAgent(ctx, TenantA, agent.ID); err != nil {
+			t.Fatal(err)
+		}
+		if g, _ := st.GetCertItem(ctx, TenantA, i2.ID); g.State != store.DeliveryCancelled || g.Reason != store.ReasonAgentRevoked {
+			t.Fatalf("agent revocation: %+v", g)
+		}
+		if audits(t, TenantA, "cert_delivery_cancelled", i2.ID) != 1 {
+			t.Fatal("agent revocation audit row")
+		}
+	})
 }

@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/store"
 )
 
 // TestCertDeliveryVocabulary (T014): every type of
@@ -93,5 +95,23 @@ func TestCertDeliverySerialKept(t *testing.T) {
 		Outcome: OutcomeOK, Details: map[string]any{"serial": "hw-123"}}
 	if row, _ := Row(host, now); row.Detail["serial"] != nil {
 		t.Fatal("hardware serial kept for a host event")
+	}
+}
+
+func TestCertItemCancelledRow(t *testing.T) {
+	now := time.Date(2026, 10, 2, 9, 0, 0, 0, time.UTC)
+	i := store.CertDeliveryItem{ID: "i1", TenantID: "t1", DeliveryID: "d1", HostID: "h1", AgentID: "a1", Name: "www",
+		CertificateID: "c1", State: store.DeliveryCancelled, Reason: store.ReasonHostDeleted}
+	r := CertItemCancelledRow(i, now)
+	if r.ID == "" || r.TenantID != "t1" || !r.At.Equal(now) || r.ActorKind != ActorSystem || r.ActorID != SystemActor ||
+		r.Action != "cert_delivery_cancelled" || r.SubjectKind != SubjectCertDelivery || r.SubjectID != "i1" ||
+		r.Outcome != OutcomeOK || r.Reason != "host_deleted" {
+		t.Fatalf("row = %+v", r)
+	}
+	for k, want := range map[string]string{"delivery_id": "d1", "item_id": "i1", "host_id": "h1", "agent_id": "a1", "name": "www",
+		"certificate_id": "c1", "state": "cancelled", "reason": "host_deleted"} {
+		if r.Detail[k] != want {
+			t.Errorf("detail %s = %v", k, r.Detail[k])
+		}
 	}
 }

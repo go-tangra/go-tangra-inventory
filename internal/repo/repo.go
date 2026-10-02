@@ -49,6 +49,9 @@ type Store interface {
 	ListHosts(ctx context.Context, tenantID string, f store.HostFilter) ([]store.Host, error)
 	SetHostTags(ctx context.Context, tenantID, id string, tags map[string]string) error
 	RetireHost(ctx context.Context, tenantID, id string) error
+	// DeleteHost deletes the host; in the same transaction its active
+	// certificate delivery items are cancelled (host_deleted, audited) and
+	// its host certificates deleted (feature 033).
 	DeleteHost(ctx context.Context, tenantID, id string) error
 	MarkStaleHosts(ctx context.Context, olderThan time.Time) (int64, error) // system scope
 
@@ -81,6 +84,8 @@ type Store interface {
 	GetAgent(ctx context.Context, tenantID, id string) (store.Agent, error)
 	GetAgentByID(ctx context.Context, id string) (store.Agent, error) // ingest auth: id -> tenant/host scope
 	TouchAgent(ctx context.Context, id, version string, hostID string, at time.Time) error
+	// RevokeAgent revokes the agent; in the same transaction its active
+	// certificate delivery items are cancelled (agent_revoked, audited).
 	RevokeAgent(ctx context.Context, tenantID, id string) error
 
 	// Enrollment tokens
@@ -279,4 +284,30 @@ type CertDeliveryStore interface {
 	// PurgeCertItems deletes (system scope) terminal items last updated
 	// before olderThan and the deliveries left without items.
 	PurgeCertItems(ctx context.Context, olderThan time.Time) (int64, error)
+
+	// ExtendCertDelivery moves a delivery's expiry to at when at is later
+	// (a re-arm opens a new delivery window). ErrNotFound for another
+	// tenant's or a missing id.
+	ExtendCertDelivery(ctx context.Context, tenantID, id string, at time.Time) error
+	// ListStaleCertItems lists (system scope) the active items whose
+	// delivery expired before now and the fetched items not updated since
+	// reportBefore, oldest first, at most limit (<= 0: no limit).
+	ListStaleCertItems(ctx context.Context, now, reportBefore time.Time, limit int) ([]StaleCertItem, error)
+	// ListHostCertificatesByName lists the tenant's host certificates under
+	// name (one per host).
+	ListHostCertificatesByName(ctx context.Context, tenantID, name string) ([]store.HostCertificate, error)
+	// ListActiveCertItemsByName lists the tenant's active items under name
+	// (at most one per host).
+	ListActiveCertItemsByName(ctx context.Context, tenantID, name string) ([]store.CertDeliveryItem, error)
+	// RevokeHostCertificates sets revoked_at = at on the tenant's host
+	// certificates holding certificateID that are not flagged yet, each with
+	// the audit row of row, in one transaction, and returns them.
+	RevokeHostCertificates(ctx context.Context, tenantID, certificateID string, at time.Time, row func(store.HostCertificate) store.AuditRow) ([]store.HostCertificate, error)
+}
+
+// StaleCertItem is an active delivery item with the expiry of its delivery
+// (ListStaleCertItems).
+type StaleCertItem struct {
+	Item      store.CertDeliveryItem
+	ExpiresAt time.Time
 }

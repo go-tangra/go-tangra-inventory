@@ -106,3 +106,25 @@ func TestCertDeliveryMemEdges(t *testing.T) {
 		t.Fatalf("failed commit changed the item: %+v", g)
 	}
 }
+
+func TestCertDeliveryFailNextAdditions(t *testing.T) {
+	tid := repotest.TenantA
+	calls := map[string]func(m *Mem) error{
+		"ExtendCertDelivery":         func(m *Mem) error { return m.ExtendCertDelivery(ctx(), tid, "d", time.Now()) },
+		"ListStaleCertItems":         func(m *Mem) error { _, e := m.ListStaleCertItems(ctx(), time.Now(), time.Now(), 0); return e },
+		"ListHostCertificatesByName": func(m *Mem) error { _, e := m.ListHostCertificatesByName(ctx(), tid, "n"); return e },
+		"ListActiveCertItemsByName":  func(m *Mem) error { _, e := m.ListActiveCertItemsByName(ctx(), tid, "n"); return e },
+		"RevokeHostCertificates": func(m *Mem) error {
+			_, e := m.RevokeHostCertificates(ctx(), tid, "c", time.Now(), nil)
+			return e
+		},
+	}
+	for method, run := range calls {
+		m := New()
+		m.FailNext(method)
+		var ie injectedErr
+		if err := run(m); !errors.As(err, &ie) {
+			t.Errorf("%s: want injected error, got %v", method, err)
+		}
+	}
+}

@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-tangra/go-tangra/v4/listquery"
 
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/audit"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/repo"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/store"
 )
@@ -35,10 +36,15 @@ const itemCols = `id, tenant_id, delivery_id, host_id, coalesce(agent_id::text,'
 
 func scanItem(sc scanner) (store.CertDeliveryItem, error) {
 	var i store.CertDeliveryItem
-	err := sc.Scan(&i.ID, &i.TenantID, &i.DeliveryID, &i.HostID, &i.AgentID, &i.Name, &i.CertificateID, &i.State, &i.Reason,
-		&i.Attempts, &i.Fetches, &i.RerunHook, &i.Serial, &i.FingerprintSHA256, &i.NotAfter, &i.HookExitCode, &i.Detail,
-		&i.CreatedAt, &i.UpdatedAt, &i.DeliveredAt, &i.FetchedAt, &i.FinishedAt)
+	err := sc.Scan(itemDest(&i)...)
 	return i, err
+}
+
+// itemDest lists the scan destinations of itemCols.
+func itemDest(i *store.CertDeliveryItem) []any {
+	return []any{&i.ID, &i.TenantID, &i.DeliveryID, &i.HostID, &i.AgentID, &i.Name, &i.CertificateID, &i.State, &i.Reason,
+		&i.Attempts, &i.Fetches, &i.RerunHook, &i.Serial, &i.FingerprintSHA256, &i.NotAfter, &i.HookExitCode, &i.Detail,
+		&i.CreatedAt, &i.UpdatedAt, &i.DeliveredAt, &i.FetchedAt, &i.FinishedAt}
 }
 
 func queryItems(ctx context.Context, tx pgx.Tx, q string, args ...any) ([]store.CertDeliveryItem, error) {
@@ -286,25 +292,36 @@ func (d *DB) CancelCertItems(ctx context.Context, tenantID string, scope repo.Ce
 		return nil, errEmptyCancelScope
 	}
 	err = d.tenant(ctx, tenantID, func(tx pgx.Tx) error {
-		now := time.Now().UTC()
 		var e error
-		out, e = queryItems(ctx, tx, "UPDATE inventory_cert_delivery_items SET state='cancelled', reason=$3, updated_at=$4, finished_at=$4"+
-			" WHERE tenant_id=$1 AND "+col+"=$2 AND state IN ('pending','delivered','fetched') RETURNING "+itemCols,
-			tenantID, val, reason, now)
-		if e != nil {
-			return mapErr(e)
-		}
-		for _, i := range out {
-			if e := insertAuditTx(ctx, tx, row(i)); e != nil {
-				return e
-			}
-		}
-		return nil
+		out, e = cancelItemsTx(ctx, tx, tenantID, col, val, reason, row)
+		return e
 	})
 	if err != nil {
 		return nil, err
 	}
 	sortItemsOldestFirst(out)
+	return out, nil
+}
+
+// cancelItemsTx cancels the tenant's active items whose col equals val with
+// reason, each with the audit row of row (nil: audit.CertItemCancelledRow).
+func cancelItemsTx(ctx context.Context, tx pgx.Tx, tenantID, col, val, reason string, row func(store.CertDeliveryItem) store.AuditRow) ([]store.CertDeliveryItem, error) {
+	now := time.Now().UTC()
+	out, err := queryItems(ctx, tx, "UPDATE inventory_cert_delivery_items SET state='cancelled', reason=$3, updated_at=$4, finished_at=$4"+
+		" WHERE tenant_id=$1 AND "+col+"=$2 AND state IN ('pending','delivered','fetched') RETURNING "+itemCols,
+		tenantID, val, reason, now)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	for _, i := range out {
+		r := audit.CertItemCancelledRow(i, now)
+		if row != nil {
+			r = row(i)
+		}
+		if err := insertAuditTx(ctx, tx, r); err != nil {
+			return nil, err
+		}
+	}
 	return out, nil
 }
 
@@ -362,4 +379,117 @@ func (d *DB) PurgeCertItems(ctx context.Context, olderThan time.Time) (n int64, 
 		return e
 	})
 	return n, err
+}
+
+// ExtendCertDelivery implements repo.CertDeliveryStore.
+func (d *DB) ExtendCertDelivery(ctx context.Context, tenantID, id string, at time.Time) error {
+	return d.tenant(ctx, tenantID, func(tx pgx.Tx) error {
+		ct, e := tx.Exec(ctx, `UPDATE inventory_cert_deliveries SET expires_at = greatest(expires_at, $3) WHERE tenant_id=$1 AND id=$2`,
+			tenantID, id, at)
+		if e != nil {
+			return mapErr(e)
+		}
+		if ct.RowsAffected() == 0 {
+			return repo.ErrNotFound
+		}
+		return nil
+	})
+}
+
+// ListStaleCertItems implements repo.CertDeliveryStore (system scope).
+func (d *DB) ListStaleCertItems(ctx context.Context, now, reportBefore time.Time, limit int) (out []repo.StaleCertItem, err error) {
+	err = d.system(ctx, func(tx pgx.Tx) error {
+		q := `WITH i AS (SELECT it.*, d.expires_at AS delivery_expires_at FROM inventory_cert_delivery_items it
+			JOIN inventory_cert_deliveries d ON d.id = it.delivery_id
+			WHERE it.state IN ('pending','delivered','fetched')
+			  AND (d.expires_at < $1 OR (it.state = 'fetched' AND it.updated_at < $2)))
+			SELECT delivery_expires_at, ` + itemCols + ` FROM i ORDER BY created_at, id`
+		args := []any{now, reportBefore}
+		if limit > 0 {
+			q += " LIMIT $3"
+			args = append(args, limit)
+		}
+		rows, e := tx.Query(ctx, q, args...)
+		if e != nil {
+			return e
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var s repo.StaleCertItem
+			if e := rows.Scan(append([]any{&s.ExpiresAt}, itemDest(&s.Item)...)...); e != nil {
+				return e
+			}
+			out = append(out, s)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
+// ListHostCertificatesByName implements repo.CertDeliveryStore.
+func (d *DB) ListHostCertificatesByName(ctx context.Context, tenantID, name string) (out []store.HostCertificate, err error) {
+	err = d.tenant(ctx, tenantID, func(tx pgx.Tx) error {
+		rows, e := tx.Query(ctx, "SELECT "+hostCertCols+" FROM inventory_host_certificates WHERE tenant_id=$1 AND name=$2 ORDER BY host_id", tenantID, name)
+		if e != nil {
+			return e
+		}
+		defer rows.Close()
+		for rows.Next() {
+			h, e := scanHostCert(rows)
+			if e != nil {
+				return e
+			}
+			out = append(out, h)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
+// ListActiveCertItemsByName implements repo.CertDeliveryStore.
+func (d *DB) ListActiveCertItemsByName(ctx context.Context, tenantID, name string) (out []store.CertDeliveryItem, err error) {
+	err = d.tenant(ctx, tenantID, func(tx pgx.Tx) error {
+		var e error
+		out, e = queryItems(ctx, tx, "SELECT "+itemCols+` FROM inventory_cert_delivery_items
+			WHERE tenant_id=$1 AND name=$2 AND state IN ('pending','delivered','fetched') ORDER BY created_at, id`, tenantID, name)
+		return e
+	})
+	return out, err
+}
+
+// RevokeHostCertificates implements repo.CertDeliveryStore.
+func (d *DB) RevokeHostCertificates(ctx context.Context, tenantID, certificateID string, at time.Time, row func(store.HostCertificate) store.AuditRow) (out []store.HostCertificate, err error) {
+	err = d.tenant(ctx, tenantID, func(tx pgx.Tx) error {
+		out = nil
+		rows, e := tx.Query(ctx, `UPDATE inventory_host_certificates SET revoked_at=$3, updated_at=$3
+			WHERE tenant_id=$1 AND certificate_id=$2 AND revoked_at IS NULL RETURNING `+hostCertCols, tenantID, certificateID, at)
+		if e != nil {
+			return e
+		}
+		for rows.Next() {
+			h, e := scanHostCert(rows)
+			if e != nil {
+				rows.Close()
+				return e
+			}
+			out = append(out, h)
+		}
+		rows.Close()
+		if e := rows.Err(); e != nil {
+			return e
+		}
+		sort.Slice(out, func(i, j int) bool {
+			return out[i].HostID < out[j].HostID || (out[i].HostID == out[j].HostID && out[i].Name < out[j].Name)
+		})
+		for _, h := range out {
+			if e := insertAuditTx(ctx, tx, row(h)); e != nil {
+				return e
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		out = nil
+	}
+	return out, err
 }
