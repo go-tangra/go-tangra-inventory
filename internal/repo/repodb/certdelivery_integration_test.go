@@ -5,9 +5,12 @@ package repodb_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -242,4 +245,54 @@ func TestCertDeliveryRepoContract(t *testing.T) {
 		return c
 	}
 	repotest.CertDeliveryContract(t, open, audits)
+}
+
+// TestCertDeliveryConcurrentSupersede (T055): concurrent creates of active
+// items for the same host and name leave exactly one active item; the
+// losers either superseded the winner's predecessor or got ErrConflict.
+func TestCertDeliveryConcurrentSupersede(t *testing.T) {
+	adminDSN, appDSN := startDB(t)
+	ctx := context.Background()
+	if err := store.Migrate(ctx, adminDSN); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(ctx, appDSN, 16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(st.Close)
+	db := repodb.New(st)
+	host := store.NewID()
+	now := time.Now().UTC().Truncate(time.Second)
+	const n = 8
+	errs := make(chan error, n)
+	var wg sync.WaitGroup
+	for k := 0; k < n; k++ {
+		wg.Add(1)
+		go func(k int) {
+			defer wg.Done()
+			d := store.CertDelivery{ID: store.NewID(), TenantID: tenantA, Source: "deployer", IdempotencyKey: fmt.Sprintf("job-%d", k),
+				Trigger: store.TriggerManual, CertificateID: "cert-1", Name: "www", KeyPolicy: store.KeyPolicyRequire,
+				RequestedBy: "spiffe://example.org/svc/deployer", CreatedAt: now, ExpiresAt: now.Add(time.Hour)}
+			i := store.CertDeliveryItem{ID: store.NewID(), TenantID: tenantA, DeliveryID: d.ID, HostID: host, Name: "www", CertificateID: "cert-1",
+				State: store.DeliveryPending, Attempts: 1, CreatedAt: now, UpdatedAt: now}
+			_, err := db.CreateCertDelivery(ctx, repo.NewCertDelivery{Delivery: d, Items: []store.CertDeliveryItem{i}})
+			errs <- err
+		}(k)
+	}
+	wg.Wait()
+	close(errs)
+	ok := 0
+	for err := range errs {
+		switch {
+		case err == nil:
+			ok++
+		case !errors.Is(err, repo.ErrConflict):
+			t.Fatalf("unexpected error: %v", err)
+		}
+	}
+	active, err := db.ListActiveCertItemsByName(ctx, tenantA, "www")
+	if err != nil || len(active) != 1 || ok < 1 {
+		t.Fatalf("active = %d (created %d) %v", len(active), ok, err)
+	}
 }
