@@ -306,7 +306,7 @@ can be recreated in v4 and renew in place; quickstart manual 13 passes.
 - [X] T111 [P] `govulncheck` (`make vuln`) in inventory and deployer; `buf lint`; `gosec` clean for new packages (G304/G302 file modes justified inline)
 - [X] T112 [P] Coverage gates: `make cover` inventory (100 % new security packages, ≥ 80 % total) and deployer (100 % `inventoryagent` and `internal/provider`, ≥ 90 % for the new BIG-IP/FortiGate profile code, ≥ 80 % total)
 - [X] T113 [P] Docs: `README.md` (feature overview, agent config, layout, hook), `deploy/README.md` (service config, policies, stack diffs), `SECURITY.md` (key handling statement), `go-tangra-deployer-v4/README.md` (provider, field table incl. overridable fields and the BIG-IP/FortiGate profile options, migration note for v3 `ssl_profile`/`default_ssl_profile` users)
-- [ ] T114 Local freya-stack validation with locally built images (quickstart manual 1–13); record results in `specs/033-agent-cert-delivery/checklists/security-review.md`
+- [X] T114 Local freya-stack validation with locally built images (quickstart manual 1–13); record results in `specs/033-agent-cert-delivery/checklists/security-review.md` — **done 2026-10-02**: steps 1–12 pass; step 13 not run live (no lab appliances, fake-appliance tests only)
 - [X] T115 Run `/speckit-analyze` consistency check across spec/plan/tasks; fix drift
 - [ ] T116 Release inventory SDK: PR merge, tag `sdk/v4.4.0` (**user confirmation**)
 - [ ] T117 Release inventory v4.7.0: PR merge, tag; approve the `release` environment signing job (**user approval in GitHub**); verify the GitHub release carries the signed agent artifacts (**user confirmation**)

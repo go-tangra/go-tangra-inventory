@@ -223,3 +223,82 @@ path element.
 - An agent binds to a host by reported identity; ambiguity is detected
   (finding 3) but a sole impostor on a host without its real agent is
   only caught by the operator (enrollment controls apply).
+
+## Local freya-stack validation (T114, 2026-10-02)
+
+Stack: freya-stack with locally built inventory 4.7.0-dev033 (agent built
+as 4.7.0), deployer 4.4.0-dev033, lcm 4.4.1-dev033 (inventory-download
+rule), auth 4.7.0 / portal 4.6.0 (production pair; the deployer remote
+needs `@go-tangra/ui` ≥ 4.3), configs from contracts/mesh-policy.md;
+inventory migrated to 11 (pg_dumpall backup taken first). Two Debian 12
+containers run the agent as root (`cert-host-a`, `cert-host-b` tagged
+`role=web`), dev plaintext opt-outs on both sides; a self-signed test issuer
+`test-web` (trust domain `test.local`) issues the certificates.
+
+- [x] 1 Capability — both `enabled`; B with `certificates.enabled: false`
+  → `disabled_on_host`; re-enabled. (A dev agent version `4.7.0-dev033`
+  shows `upgrade_required`: semver prerelease < 4.7.0, correct.)
+- [x] 2 US1 — Preview lists both hosts `enabled`; deploy → "Installed on
+  2"; certbot layout, `privkey.pem` `-rw------- root root`, dirs 0750,
+  `live/www → ../archive/www/<gen>`, fingerprint = lcm, key matches
+  certificate; Verify "present on 2 of 2 hosts".
+- [x] 3 Idempotency — redeploy "unchanged on 2", mtimes and generation
+  unchanged.
+- [x] 4 US2 — auto-deploy target (`*.test.local`), B stopped: renewal
+  installed on A within seconds (`renewal_count` 1, `previous_serial`),
+  job "queued for 1"; two more renewals → older items `superseded`; B
+  started → only the newest installed; host B Certificates `installed`.
+- [x] 5 US3 — root 0755 hook: all `LCM_*` variables, `LCM_IS_RENEWAL=true`,
+  exit 0; `chmod 0777` → `hook_failed/hook_refused`, hook not run, files
+  installed; `exit 3` → `hook_failed` (3); deployer retries re-armed the
+  same item (attempts 2, 3) and re-ran only the hook (generation and
+  mtimes unchanged) until it succeeded.
+- [x] 6 Key policy — CSR certificate (`has_key: false`) with `require` →
+  `failed/key_unavailable`, files intact; `certificate_only` with the
+  matching key in place → installed, key carried over; other key →
+  `failed/key_mismatch`, previous certificate and key intact.
+- [x] 7 US4 — host Certificates tab and API: name, CN, serial,
+  fingerprint, expiry, state, hook exit, last delivered, deployer link,
+  delivery history with reasons; no PEM in page or responses; operator
+  cancel of a queued item → `cancelled/cancelled_by_user`.
+- [x] 8 US7 — revoke in lcm → host rows `revoked` within seconds, files
+  untouched, queued item `cancelled/certificate_revoked`.
+- [x] 9 Negative — `cert_name: "../x"` → 422 `pattern` (value not echoed);
+  forged `FetchCertificate` of B's item with A's credential and of an
+  unknown id → identical `NotFound`, one `cert_delivery_refused/not_found`
+  audit row (second throttled), B's item untouched.
+- [x] 10 Key hygiene — `PRIVATE KEY` in inventory/deployer/gateway logs,
+  agent logs, `pg_dump` inventory and deployer, all 46 Valkey keys
+  (strings, hashes, lists, sets, zsets, streams): 0.
+- [x] 11 US5 drawer — API: BIG-IP without password → 422
+  `credentials.password: required`; a marker password never appears in
+  create/get/list/validate responses, deployer logs or the DB dump. UI:
+  deployer e2e `configuration drawer (credentials write-only), target
+  drawer, jobs` passes at phone, tablet and desktop widths.
+- [x] 12 US5 target-supplied — Cloudflare without zone id saved with
+  `target_supplied: [zone_id]`; direct deploy fails "configuration
+  incomplete: Zone ID must be provided by the target" without retry;
+  attach without zone → 422 `config_overrides.zone_id: required`;
+  `api_token` / webhook `url` overrides → `not_overridable`; clearing the
+  zone of a relied-on configuration → 422 `required_by_targets` naming the
+  target; e2e "Cloudflare … target-supplied zone id, end to end" passes.
+- [ ] 13 US8 profiles — **not run live** (no lab BIG-IP/FortiGate);
+  covered only by the fake iControl/FortiOS provider tests (T106/T107).
+
+Fixed during the validation: deployer d926457 (an empty `zone_id`/`region`
+sent by an API caller was refused by the provider check instead of being
+left to the targets), 413e400 (e2e API calls send `Origin`), 5ee7310
+(image build: UI stage carries the test vectors).
+
+Observations (not fixed, outside 033 or design questions):
+- Item failures that a retry cannot fix (`key_unavailable`,
+  `key_mismatch`) are re-armed by every deployer retry (attempts reached
+  4); the spec does not say whether they should be permanent.
+- BIG-IP "Test connection" reports `valid` for an unreachable host
+  (`ValidateCredentials` treats a transport error as success; spec 008).
+- `@go-tangra/ui` forms: the first field is focused when a drawer opens
+  and blur validation adds messages that shift the layout, so the first
+  click elsewhere (e.g. a target's configuration checkbox) is lost.
+- axe `scrollable-region-focusable` (serious) on a `.rounded-box` table
+  container on the deployer dashboard (kit table, not 033 code); the two
+  deployer a11y specs fail on this and on the lost first click.
