@@ -186,6 +186,17 @@ Update (`PUT /configurations/{id}`):
 - `provider_type` cannot change on update (422 `provider_type`); the UI
   disables the select on edit.
 
+**Destination change (update and validate).** When a stored
+configuration's destination changes — a config `url`, `verify_url`,
+`rollback_url` or the credential `host` (trimmed, case-insensitive) — every
+stored credential that is not a declared non-secret field must be
+re-entered or listed in `clear_credentials` in the same request, else 422
+with the changed field carrying "credentials must be re-entered when the
+destination changes" and each carried secret `required` (no value echoed).
+The same rule applies to `POST /configurations/validate` with a
+`configuration_id`, so a test can never send stored secrets to another
+endpoint.
+
 ## 4a. Target overrides — `POST /api/deployer/v1/targets/{id}/configurations`
 
 Existing attach route (`attachConfigurations`, permission
@@ -226,6 +237,12 @@ Existing attach route (`attachConfigurations`, permission
   attached configuration, `missing_required` (labels of required fields
   the merged config lacks — normally `[]`; non-empty only for rows saved
   before this feature or after a provider change).
+
+**At job start** stored overrides are filtered again by the descriptor:
+only declared, overridable config fields with valid values (or empty)
+apply; anything else (url, TLS switch, headers, credentials, undeclared
+keys of legacy or restored rows) is dropped and logged once by key name,
+never by value.
 
 ## 5. Validate / test connection — `POST /configurations/validate`
 
@@ -381,7 +398,7 @@ hotfix; refused by the 033 validator (regression tests).
 | `vdom` | config | string | R | | O | `root` | C | `^[A-Za-z0-9_-]{1,31}$` | R | R |
 | `api_token` | creds | string | R | S | | | K | ≤ 256; REST API administrator token | R | R, S |
 | `import_scope` | config | enum | | | O | `global` | O | `global` \| `vdom` | read | read |
-| `default_ssl_profile` | config | string | | | O | | O | `^[^\x00-\x1f"\\/]{1,35}$`; placeholder `inbound-www`; help "Existing SSL/SSH inspection profile (server certificate mode replace) whose server certificate list is updated in place; other domains' certificates are kept. Renewals are imported under dated names." (US8, research D27) | opt | — |
+| `default_ssl_profile` | config | string | | | O | | O | `^[^\x00-\x1f"\\/.][^\x00-\x1f"\\/]{0,34}$` (no leading dot: `.`/`..` would be FortiOS URL path segments); placeholder `inbound-www`; help "Existing SSL/SSH inspection profile (server certificate mode replace) whose server certificate list is updated in place; other domains' certificates are kept. Renewals are imported under dated names." (US8, research D27) | opt | — |
 
 v3 knobs not carried over (research Q9): `replace_strategy`,
 `profile_suffix`, `rebind_references`, `prune_old` (and the audit profile

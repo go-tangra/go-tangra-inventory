@@ -24,7 +24,7 @@ delivery id). Common `detail` keys: `delivery_id`, `item_id`, `host_id`,
 | `cert_delivery_superseded` | system / `inventory` | cert_delivery / item id | ok | `superseded_by` (item id) or `reason: older_than_installed` |
 | `cert_delivery_expired` | system / `inventory` | cert_delivery / item id | error | — |
 | `cert_delivery_cancelled` | user / user id; system / `inventory` (revocation, host/agent removal) | cert_delivery / item id | ok | `reason` |
-| `cert_delivery_refused` | agent / agent id; service / name | cert_delivery / requested id | refused | `reason` (`not_found`, `not_active`, `fetch_limit`, `plaintext`, `source_not_allowed`, `fingerprint_mismatch`) — throttled 1 per agent+reason per 10 s |
+| `cert_delivery_refused` | agent / agent id; service / name | cert_delivery / requested id | refused | `reason` (`not_found`, `not_active`, `fetch_limit`, `plaintext`, `source_not_allowed`, `fingerprint_mismatch`) — throttled 1 per agent+reason per 10 s; the next audited row carries `suppressed` (refusals not audited in between); a requested id that is not a uuid is not recorded as subject |
 | `host_certificate_revoked` | service / `deployer` | host / host id | ok | `certificate_id`, `name` |
 
 `detail` never contains PEM, key bytes, hook output or file contents.

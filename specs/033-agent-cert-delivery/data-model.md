@@ -32,7 +32,7 @@ const (
 // server: key_unavailable, certificate_revoked, certificate_expired,
 //         certificate_not_found, lcm_unavailable, bundle_too_large,
 //         invalid_bundle, fingerprint_mismatch,
-//         no_agent, no_capability, platform, host_retired, agent_revoked,
+//         no_agent, ambiguous_agent, no_capability, platform, host_retired, agent_revoked,
 //         host_deleted, no_report, expired, older_than_installed,
 //         cancelled_by_user, unknown_host
 
@@ -262,6 +262,7 @@ failed|hook_failed|expired ── deployer retry (rearm_failed) ─▶ pending (
 | Condition (first match) | Shown as |
 |---|---|
 | `cert_delivery.enabled = false` | `disabled_on_server` |
+| more than one non-revoked agent bound to the host (preview/create) | `ambiguous_agent` |
 | agent `os = windows` | `not_supported_platform` |
 | agent announces `cert.v1` | `enabled` |
 | agent version ≥ 4.7.0 without `cert.v1` | `disabled_on_host` |

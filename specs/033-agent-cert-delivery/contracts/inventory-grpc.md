@@ -102,7 +102,7 @@ message TargetHost {
   string os_name = 3;
   map<string, string> tags = 4;
   bool agent_online = 5;
-  string capability = 6;          // enabled | disabled_on_host | upgrade_required | not_supported_platform | no_agent | disabled_on_server
+  string capability = 6;          // enabled | disabled_on_host | upgrade_required | not_supported_platform | no_agent | disabled_on_server | ambiguous_agent
 }
 
 message PreviewCertificateTargetsResponse {
@@ -148,8 +148,13 @@ message MarkCertificateRevokedResponse {
 ### Server rules
 
 - **Create**: validates every field (InvalidArgument with field name);
-  `(tenant, source, idempotency_key)` exists → returns it (`created=false`),
-  re-arming items when `rearm_failed`; otherwise resolves the selection
+  `certificate_id` must match `[A-Za-z0-9._:-]{1,128}` (it reaches the
+  agent's hook environment); `(tenant, source, idempotency_key)` exists →
+  returns it (`created=false`), re-arming items when `rearm_failed` — but a
+  key reused for another `certificate_id`, `name` or `key_policy` →
+  InvalidArgument `idempotency_key`; a host claimed by more than one
+  non-revoked agent becomes `unsupported/ambiguous_agent` (nothing pushed,
+  nothing fetchable); otherwise resolves the selection
   under RLS (explicit ids ∪ non-retired hosts matching **all** tags; > 1000
   → InvalidArgument `too_many_hosts`), fetches the certificate's metadata
   from lcm (`Download(include_key=false)`: not_after, serial, CN; NotFound →
@@ -192,6 +197,7 @@ message Command {
 message CertificateCommand {
   string item_id = 1;                   // uuid
   string name = 2;                      // validated again by the agent
+  uint32 attempt = 3;                   // the item's attempt; a re-armed item is a new attempt the agent must not dedupe away
 }
 
 service IngestService {
@@ -248,7 +254,8 @@ message ReportCertificateResponse {
 
 - `FetchCertificate`: agent from context; item must belong to
   `(agent.TenantID, agent.ID)` and be `pending|delivered|fetched` with
-  `fetches < 5`, else `NotFound` (audited `cert_delivery_refused`). Plaintext
+  `fetches < 5` and its delivery's `expires_at` not yet passed (even before
+  the sweeper runs), else `NotFound` (audited `cert_delivery_refused`). Plaintext
   ingest without `allow_plaintext_ingest` → `FailedPrecondition`. One
   concurrent fetch per agent, `max_concurrent_fetches` per replica →
   `ResourceExhausted`. Calls lcm `Download(tenant, certificate_id,

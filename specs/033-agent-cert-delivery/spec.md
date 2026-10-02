@@ -557,7 +557,9 @@ Verify and Rollback behave as in the scenarios below.
   configured partition.
 - **FortiGate same-day reissue**: a second, different certificate on the
   same day is imported as `<base>_<yyyymmdd>_01` (up to `_99`); a
-  re-deployment of the same certificate (same serial) imports nothing.
+  re-deployment of the same certificate (same serial and identical
+  certificate bytes) imports nothing; a device certificate that only shares
+  the serial is not reused.
 - **FortiGate profile shared by several domains**: only entries of the
   deployed certificate's family are replaced; entries of other domains
   are kept in their order.
@@ -844,7 +846,11 @@ Verify and Rollback behave as in the scenarios below.
   or environment from the server.
 - **SR-006**: The deploy hook is configured only locally, disabled by
   default, executed without a shell with a minimal environment, a timeout
-  and only if the file is root-owned and not writable by group or others.
+  and only if its path is absolute, the file is root-owned and not writable
+  by group or others, and its directory and every ancestor up to `/` are
+  root-owned and not writable by group or others. Server-supplied values
+  that reach the hook environment are validated (certificate id
+  `[A-Za-z0-9._:-]{1,128}`, name rule of SR-005).
 - **SR-007**: Delivery over a plaintext ingest edge MUST be refused by the
   agent and the inventory module unless each side explicitly opts out for
   development (named settings, warning at start, refused in production).
@@ -880,6 +886,11 @@ Verify and Rollback behave as in the scenarios below.
   starts); 033 keeps the requirement and its regression tests through the
   shared descriptor validator (undeclared `endpoint`/`api_base` refused,
   forbidden header names refused).*
+  Changing where a stored configuration sends its credentials (`url`,
+  `verify_url`, `rollback_url`, the appliance credential `host`) on update
+  or in a validate of the stored configuration requires every stored
+  secret to be re-entered or cleared in the same request. HTTP clients
+  that carry credentials or key material never follow redirects.
 - **SR-015**: Target overrides are stored unsealed; therefore secrets and
   credential fields MUST never be overridable or accepted in an override
   (descriptor rule enforced at registration, plus the existing

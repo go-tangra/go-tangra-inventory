@@ -131,8 +131,10 @@ v3 field names (go-tangra-client `CertMetadata`) plus v4 identifiers:
   before the swap.
 - Checks before each run (else `hook_refused`, hook exit code −1): `lstat`
   is a regular file (no symlink), uid 0, mode has no group/other write,
-  executable by owner; parent directory uid 0 and not group/other
-  writable.
+  executable by owner; the path is absolute and its directory and every
+  ancestor up to `/` are uid 0 directories without group/other write (a
+  writable ancestor would let a local user rename the path and substitute
+  the hook), so no hook under `/tmp` or a user's tree.
 - `exec` of the file itself — no shell, no arguments; working directory
   `live/<name>`; new process group; `hook_timeout_seconds` then SIGTERM,
   5 s, SIGKILL to the group (`hook_timeout`, exit code reported as 256);
@@ -156,7 +158,7 @@ v3 field names (go-tangra-client `CertMetadata`) plus v4 identifiers:
 | `LCM_SERIAL_NUMBER` | lowercase hex serial |
 | `LCM_EXPIRES_AT` | RFC 3339 UTC |
 | `LCM_IS_RENEWAL` | `true` / `false` |
-| `LCM_CERTIFICATE_ID` | lcm certificate id (new in v4) |
+| `LCM_CERTIFICATE_ID` | lcm certificate id (new in v4), validated `[A-Za-z0-9._:-]{1,128}` by inventory and the agent |
 
 Values derived from the certificate are taken from the agent's own parse
 of the PEM (not from server-supplied strings), and contain no control

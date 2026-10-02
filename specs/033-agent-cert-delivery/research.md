@@ -538,7 +538,9 @@ directory; set its final mode; create `live/.<name>.tmp` symlink and
 `keep_previous`. Paths seen by consumers are exactly the certbot ones
 (`live/<name>/fullchain.pem`). Crash recovery: on start, generation
 directories not referenced by `live/<name>` and newer than it are
-removed.
+removed; without a usable live link nothing is removed (a generation may
+hold the only copy of an operator-provided key under `certificate_only`)
+and leftovers are pruned by the next install of the name.
 
 **Rationale**: per-file rename (v3, certbot's archive file symlinks) can
 expose a new certificate with the old key between renames; a directory
@@ -854,8 +856,9 @@ an SSL server); its server certificate list is updated in place"). When
 set, Deploy follows the v3 `ssl_profile` strategy **without** the audit
 profile:
 1. Leaf only (FortiOS rejects chains, −145); `base` from the leaf subject
-   (v4 `certName`). Reuse a local certificate with the same serial
-   (`findLocalCertBySerial`); otherwise resolve a free name
+   (v4 `certName`). Reuse a local certificate with the same serial and
+   identical DER (`findLocalCert`; a lookalike sharing only the serial is
+   not reused); otherwise resolve a free name
    `<base>_<yyyymmdd>` / `<base>_<yyyymmdd>_<nn>` (nn 01–99, ≤ 35 chars,
    v3 `resolveFreeImportName`) and import; verify presence. Never delete
    or overwrite a certificate.
