@@ -42,7 +42,14 @@ var agentReasons = func() map[string]bool {
 
 // sanitize keeps at most store.MaxDetailBytes of printable text (control
 // characters become spaces); text carrying PEM is dropped entirely.
-func sanitize(d string) string {
+func sanitize(d string) string { return clean(d, store.MaxDetailBytes) }
+
+// commonName is the leaf subject CN as stored on items and host
+// certificates: cleaned like a detail, at most store.MaxCommonNameBytes.
+func commonName(cn string) string { return clean(cn, store.MaxCommonNameBytes) }
+
+// clean keeps at most limit bytes of printable text (see sanitize).
+func clean(d string, limit int) string {
 	if strings.Contains(d, "-----BEGIN") {
 		return ""
 	}
@@ -53,7 +60,7 @@ func sanitize(d string) string {
 		}
 		return r
 	}, d)
-	for len(d) > store.MaxDetailBytes {
+	for len(d) > limit {
 		_, size := utf8.DecodeLastRuneInString(d)
 		d = d[:len(d)-size]
 	}
@@ -144,9 +151,9 @@ func (s *Service) Report(ctx context.Context, a store.Agent, r Report) (bool, er
 		renewal := hasPrev && prev.FingerprintSHA256 != "" && prev.FingerprintSHA256 != cur.FingerprintSHA256
 		if done {
 			if hc.CertificateID != cur.CertificateID {
-				hc.CommonName, hc.RevokedAt = "", nil
+				hc.RevokedAt = nil
 			}
-			hc.CertificateID, hc.ConfigurationID, hc.Serial = cur.CertificateID, d.ConfigurationID, cur.Serial
+			hc.CertificateID, hc.ConfigurationID, hc.Serial, hc.CommonName = cur.CertificateID, d.ConfigurationID, cur.Serial, cur.CommonName
 			hc.FingerprintSHA256, hc.NotAfter, hc.LastDeliveredAt = cur.FingerprintSHA256, cur.NotAfter, &now
 		}
 		ev := reportEvents[state]

@@ -804,6 +804,7 @@ type CertDeliveryItem struct {
 	RerunHook         bool       `json:"rerun_hook,omitempty"`
 	Serial            string     `json:"serial,omitempty"`
 	FingerprintSHA256 string     `json:"fingerprint_sha256,omitempty"`
+	CommonName        string     `json:"common_name,omitempty"` // leaf subject CN served at fetch (<= MaxCommonNameBytes)
 	NotAfter          *time.Time `json:"not_after,omitempty"`
 	HookExitCode      *int       `json:"hook_exit_code,omitempty"`
 	Detail            string     `json:"detail,omitempty"` // <= MaxDetailBytes, sanitised
@@ -932,6 +933,7 @@ const (
 	MaxItemFetches      = 5
 	MaxReplayPerConnect = 50
 	MaxDetailBytes      = 256
+	MaxCommonNameBytes  = 256 // item and host certificate common_name
 )
 
 // --- audit ---

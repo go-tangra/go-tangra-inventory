@@ -58,6 +58,17 @@ var (
 		},
 		Default: "created_at", TieBreak: "id",
 	}
+	// HostCertList pages a host's certificates (feature 033,
+	// GET /hosts/{id}/certificates; ordered in Go, one row per name).
+	HostCertList = listquery.Spec{
+		Fields: map[string]listquery.Field{
+			"name":              {Expr: "name", Text: true, NotNull: true},
+			"state":             {Expr: "state", NotNull: true},
+			"not_after":         {Expr: "not_after"},
+			"last_delivered_at": {Expr: "last_delivered_at", DefaultDir: listquery.Desc},
+		},
+		Default: "name", TieBreak: "name",
+	}
 	// AutoEnrollKeyList pages a tenant's auto-enrollment keys (in Go).
 	AutoEnrollKeyList = listquery.Spec{
 		Fields: map[string]listquery.Field{

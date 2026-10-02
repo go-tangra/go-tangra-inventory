@@ -116,6 +116,51 @@ func (m *Mem) GetCertDelivery(_ context.Context, tenantID, id string) (store.Cer
 	return cloneDelivery(d), items, nil
 }
 
+// ListCertDeliveriesByID implements repo.CertDeliveryStore.
+func (m *Mem) ListCertDeliveriesByID(_ context.Context, tenantID string, ids []string) ([]store.CertDelivery, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.fail("ListCertDeliveriesByID"); err != nil {
+		return nil, err
+	}
+	out := []store.CertDelivery{}
+	for _, id := range dedupe(ids) {
+		if d, ok := m.cs().deliveries[id]; ok && d.TenantID == tenantID {
+			out = append(out, cloneDelivery(d))
+		}
+	}
+	return out, nil
+}
+
+// HostnamesByID implements repo.CertDeliveryStore.
+func (m *Mem) HostnamesByID(_ context.Context, tenantID string, ids []string) (map[string]string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.fail("HostnamesByID"); err != nil {
+		return nil, err
+	}
+	out := map[string]string{}
+	for _, id := range ids {
+		if h, ok := m.hosts[id]; ok && h.TenantID == tenantID {
+			out[id] = h.Hostname
+		}
+	}
+	return out, nil
+}
+
+// dedupe drops repeated ids (first occurrence kept).
+func dedupe(ids []string) []string {
+	seen := make(map[string]bool, len(ids))
+	out := ids[:0:0]
+	for _, id := range ids {
+		if !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
 // GetCertDeliveryByKey implements repo.CertDeliveryStore.
 func (m *Mem) GetCertDeliveryByKey(_ context.Context, tenantID, source, key string) (store.CertDelivery, error) {
 	m.mu.Lock()
@@ -236,7 +281,7 @@ func (m *Mem) ListCertItemsPage(_ context.Context, tenantID string, f repo.CertI
 	var all []store.CertDeliveryItem
 	for _, i := range m.cs().items {
 		if i.TenantID == tenantID && match(f.HostID, i.HostID) && match(f.State, i.State) && match(f.Name, i.Name) &&
-			match(f.CertificateID, i.CertificateID) && match(f.DeliveryID, i.DeliveryID) {
+			match(f.CertificateID, i.CertificateID) && match(f.DeliveryID, i.DeliveryID) && (!f.Active || i.Active()) {
 			all = append(all, i)
 		}
 	}

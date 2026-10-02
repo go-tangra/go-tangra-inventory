@@ -58,13 +58,14 @@ func TestReportInstalledAndRenewal(t *testing.T) {
 		t.Fatal(accepted, err)
 	}
 	g := f.item(t, it.ID)
-	if g.State != store.DeliveryInstalled || g.Reason != "" || g.HookExitCode == nil || *g.HookExitCode != 0 || g.Detail != "ok fine" || g.FinishedAt == nil {
+	if g.State != store.DeliveryInstalled || g.Reason != "" || g.HookExitCode == nil || *g.HookExitCode != 0 || g.Detail != "ok fine" || g.FinishedAt == nil ||
+		g.CommonName != "www.example.com" {
 		t.Fatalf("item = %+v", g)
 	}
 	hc, err := f.mem.GetHostCertificate(ctx, tenant, it.HostID, "www")
 	if err != nil || hc.CertificateID != cert1 || hc.ConfigurationID != "cfg-1" || hc.FingerprintSHA256 != it.FingerprintSHA256 ||
 		hc.Serial != it.Serial || hc.State != store.DeliveryInstalled || hc.LastItemID != it.ID || hc.LastDeliveredAt == nil ||
-		hc.NotAfter == nil || hc.RevokedAt != nil {
+		hc.NotAfter == nil || hc.RevokedAt != nil || hc.CommonName != "www.example.com" {
 		t.Fatalf("host certificate = %+v %v", hc, err)
 	}
 	row := f.mem.AuditRows()[len(f.mem.AuditRows())-1]
@@ -135,7 +136,7 @@ func TestReportUnchangedMismatchAndFailures(t *testing.T) {
 		t.Fatalf("mismatch row = %+v", row)
 	}
 	hc, _ := f.mem.GetHostCertificate(ctx, tenant, it.HostID, "www")
-	if hc.State != store.DeliveryFailed || hc.FingerprintSHA256 != "" || hc.LastDeliveredAt != nil || hc.CertificateID != cert1 {
+	if hc.State != store.DeliveryFailed || hc.FingerprintSHA256 != "" || hc.LastDeliveredAt != nil || hc.CertificateID != cert1 || hc.CommonName != "" {
 		t.Fatalf("mismatch host certificate = %+v", hc)
 	}
 	// installed before any fetch -> mismatch too.
@@ -154,7 +155,8 @@ func TestReportUnchangedMismatchAndFailures(t *testing.T) {
 		t.Fatal("failed refused")
 	}
 	hc, _ = f.mem.GetHostCertificate(ctx, tenant, it.HostID, "www")
-	if hc.State != store.DeliveryFailed || hc.Reason != store.ReasonDisabledLocally || hc.FingerprintSHA256 != it.FingerprintSHA256 || hc.LastItemID != it2.ID {
+	if hc.State != store.DeliveryFailed || hc.Reason != store.ReasonDisabledLocally || hc.FingerprintSHA256 != it.FingerprintSHA256 || hc.LastItemID != it2.ID ||
+		hc.CommonName != "www.example.com" {
 		t.Fatalf("failed keeps identity: %+v", hc)
 	}
 	// hook_failed without a reason gets hook_failed; exit code kept.
@@ -206,5 +208,12 @@ func TestSanitize(t *testing.T) {
 	long := strings.Repeat("é", 200) // 400 bytes
 	if got := sanitize(long); len(got) > store.MaxDetailBytes || !strings.HasPrefix(long, got) || len(got) != 256 {
 		t.Fatalf("truncation: %d", len(got))
+	}
+	// Common names are cleaned and bounded the same way.
+	if got := commonName("www\x00.example.com"); got != "www .example.com" {
+		t.Fatalf("common name = %q", got)
+	}
+	if got := commonName(strings.Repeat("a", 300)); len(got) != store.MaxCommonNameBytes {
+		t.Fatalf("common name bound: %d", len(got))
 	}
 }

@@ -296,3 +296,30 @@ func TestCertDeliveryConcurrentSupersede(t *testing.T) {
 		t.Fatalf("active = %d (created %d) %v", len(active), ok, err)
 	}
 }
+
+// TestCertItemCommonNameMigration (US4): 0011 adds the item common name to a
+// populated 0010 database (existing items get ''), bounded to 256 bytes.
+func TestCertItemCommonNameMigration(t *testing.T) {
+	adminDSN, _ := startDB(t)
+	ctx := context.Background()
+	migrateTo(t, adminDSN, 10)
+	admin, err := sql.Open("pgx", adminDSN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = admin.Close() }()
+	host, d, i := store.NewID(), store.NewID(), store.NewID()
+	mustExec(t, admin, `INSERT INTO inventory_cert_deliveries (id, tenant_id, source, idempotency_key, trigger, certificate_id, name, key_policy, requested_by, expires_at)
+		VALUES ($1, $2, 'deployer', 'job-1', 'manual', 'cert-1', 'www', 'require', 'spiffe://example.org/svc/deployer', now() + interval '1 day')`, d, tenantA)
+	mustExec(t, admin, `INSERT INTO inventory_cert_delivery_items (id, tenant_id, delivery_id, host_id, name, certificate_id, state)
+		VALUES ($1, $2, $3, $4, 'www', 'cert-1', 'pending')`, i, tenantA, d, host)
+	if err := store.Migrate(ctx, adminDSN); err != nil {
+		t.Fatalf("migrate 0011: %v", err)
+	}
+	var cn string
+	if err := admin.QueryRowContext(ctx, "SELECT common_name FROM inventory_cert_delivery_items WHERE id=$1", i).Scan(&cn); err != nil || cn != "" {
+		t.Fatalf("existing item common name = %q %v", cn, err)
+	}
+	mustExec(t, admin, `UPDATE inventory_cert_delivery_items SET common_name=repeat('c', 256) WHERE id=$1`, i)
+	mustFail(t, admin, "item common name > 256 bytes", `UPDATE inventory_cert_delivery_items SET common_name=repeat('c', 257) WHERE id=$1`, i)
+}

@@ -226,10 +226,15 @@ func CertDeliveryContract(t *testing.T, open func(t *testing.T) repo.Store, audi
 				t.Fatalf("callback sees %q", i.State)
 			}
 			i.State, i.Fetches, i.Serial, i.NotAfter, i.FetchedAt, i.UpdatedAt = store.DeliveryFetched, 1, "4f3a", &notAfter, &at, at
+			i.CommonName = "www.example.com"
 			return repo.CertItemChange{Audit: []store.AuditRow{auditRow(TenantA, "cert_delivery_fetched", it.ID, at)}}, nil
 		})
-		if err != nil || got.State != store.DeliveryFetched || got.Fetches != 1 || got.Serial != "4f3a" || !got.NotAfter.Equal(notAfter) {
+		if err != nil || got.State != store.DeliveryFetched || got.Fetches != 1 || got.Serial != "4f3a" || !got.NotAfter.Equal(notAfter) ||
+			got.CommonName != "www.example.com" {
 			t.Fatalf("fetch transition: %+v %v", got, err)
+		}
+		if g, err := st.GetCertItem(ctx, TenantA, it.ID); err != nil || g.CommonName != "www.example.com" {
+			t.Fatalf("common name round trip: %+v %v", g, err)
 		}
 		code := 0
 		hc := store.HostCertificate{TenantID: TenantA, HostID: host, Name: "www", CertificateID: "cert-1", ConfigurationID: "cfg-1",
@@ -562,6 +567,59 @@ func CertDeliveryContract(t *testing.T, open func(t *testing.T) repo.Store, audi
 		}
 		if got, _ := st.RevokeHostCertificates(ctx, TenantB, "cert-2", at, row); len(got) != 0 {
 			t.Fatal("revoke across tenants")
+		}
+	})
+
+	t.Run("deliveries and hostnames by id, active filter", func(t *testing.T) {
+		st := open(t)
+		h1, err := st.ResolveHost(ctx, TenantA, store.Host{Hostname: "web-1", MachineID: store.NewID()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		h2, err := st.ResolveHost(ctx, TenantA, store.Host{Hostname: "web-2", MachineID: store.NewID()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		hb, err := st.ResolveHost(ctx, TenantB, store.Host{Hostname: "b-1", MachineID: store.NewID()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		names, err := st.HostnamesByID(ctx, TenantA, []string{h1.ID, h2.ID, hb.ID, store.NewID()})
+		if err != nil || len(names) != 2 || names[h1.ID] != "web-1" || names[h2.ID] != "web-2" {
+			t.Fatalf("hostnames: %v %v", names, err)
+		}
+		if names, err := st.HostnamesByID(ctx, TenantA, nil); err != nil || len(names) != 0 {
+			t.Fatalf("no ids: %v %v", names, err)
+		}
+		d1 := delivery(TenantA, "job-1", "www", "cert-1", base)
+		d2 := delivery(TenantA, "job-2", "api", "cert-2", base.Add(time.Second))
+		db := delivery(TenantB, "job-1", "www", "cert-1", base)
+		active := item(d1, h1.ID, "", store.DeliveryPending)
+		done := item(d2, h1.ID, "", store.DeliveryFailed)
+		for _, n := range []repo.NewCertDelivery{
+			{Delivery: d1, Items: []store.CertDeliveryItem{active}},
+			{Delivery: d2, Items: []store.CertDeliveryItem{done}},
+			{Delivery: db},
+		} {
+			if _, err := st.CreateCertDelivery(ctx, n); err != nil {
+				t.Fatal(err)
+			}
+		}
+		ds, err := st.ListCertDeliveriesByID(ctx, TenantA, []string{d1.ID, d2.ID, db.ID, store.NewID()})
+		if err != nil || len(ds) != 2 {
+			t.Fatalf("deliveries: %v %v", ds, err)
+		}
+		for _, d := range ds {
+			if (d.ID != d1.ID && d.ID != d2.ID) || d.TenantID != TenantA || d.ConfigurationID != "cfg-1" || d.RequestedBy == "" {
+				t.Fatalf("delivery: %+v", d)
+			}
+		}
+		if ds, err := st.ListCertDeliveriesByID(ctx, TenantA, nil); err != nil || len(ds) != 0 {
+			t.Fatalf("no ids: %v %v", ds, err)
+		}
+		items, total, _, err := st.ListCertItemsPage(ctx, TenantA, repo.CertItemFilter{HostID: h1.ID, Active: true}, listquery.Request{})
+		if err != nil || total != 1 || len(items) != 1 || items[0].ID != active.ID {
+			t.Fatalf("active filter: %v %d %v", items, total, err)
 		}
 	})
 

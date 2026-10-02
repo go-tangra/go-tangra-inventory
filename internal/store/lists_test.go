@@ -10,7 +10,7 @@ import (
 func TestListSpecsValid(t *testing.T) {
 	for name, s := range map[string]listquery.Spec{
 		"hosts": HostList, "snapshots": SnapshotList, "changes": ChangeList,
-		"fleet": FleetList, "auto-enroll keys": AutoEnrollKeyList, "certificate items": CertItemList,
+		"fleet": FleetList, "auto-enroll keys": AutoEnrollKeyList, "certificate items": CertItemList, "host certificates": HostCertList,
 	} {
 		if err := s.Validate(); err != nil {
 			t.Errorf("%s: %v", name, err)

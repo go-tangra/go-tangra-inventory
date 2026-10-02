@@ -31,7 +31,7 @@ func scanDelivery(sc scanner) (store.CertDelivery, error) {
 }
 
 const itemCols = `id, tenant_id, delivery_id, host_id, coalesce(agent_id::text,''), name, certificate_id, state, reason,
-	attempts, fetches, rerun_hook, serial, fingerprint_sha256, not_after, hook_exit_code, detail,
+	attempts, fetches, rerun_hook, serial, fingerprint_sha256, common_name, not_after, hook_exit_code, detail,
 	created_at, updated_at, delivered_at, fetched_at, finished_at`
 
 func scanItem(sc scanner) (store.CertDeliveryItem, error) {
@@ -43,7 +43,7 @@ func scanItem(sc scanner) (store.CertDeliveryItem, error) {
 // itemDest lists the scan destinations of itemCols.
 func itemDest(i *store.CertDeliveryItem) []any {
 	return []any{&i.ID, &i.TenantID, &i.DeliveryID, &i.HostID, &i.AgentID, &i.Name, &i.CertificateID, &i.State, &i.Reason,
-		&i.Attempts, &i.Fetches, &i.RerunHook, &i.Serial, &i.FingerprintSHA256, &i.NotAfter, &i.HookExitCode, &i.Detail,
+		&i.Attempts, &i.Fetches, &i.RerunHook, &i.Serial, &i.FingerprintSHA256, &i.CommonName, &i.NotAfter, &i.HookExitCode, &i.Detail,
 		&i.CreatedAt, &i.UpdatedAt, &i.DeliveredAt, &i.FetchedAt, &i.FinishedAt}
 }
 
@@ -74,11 +74,12 @@ func nonNil(s []string) []string {
 func insertItemTx(ctx context.Context, tx pgx.Tx, i store.CertDeliveryItem) error {
 	_, err := tx.Exec(ctx, `INSERT INTO inventory_cert_delivery_items
 		(id, tenant_id, delivery_id, host_id, agent_id, name, certificate_id, state, reason, attempts, fetches, rerun_hook,
-		 serial, fingerprint_sha256, not_after, hook_exit_code, detail, created_at, updated_at, delivered_at, fetched_at, finished_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)`,
+		 serial, fingerprint_sha256, not_after, hook_exit_code, detail, created_at, updated_at, delivered_at, fetched_at, finished_at,
+		 common_name)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)`,
 		i.ID, i.TenantID, i.DeliveryID, i.HostID, nullUUID(i.AgentID), i.Name, i.CertificateID, i.State, i.Reason, i.Attempts,
 		i.Fetches, i.RerunHook, i.Serial, i.FingerprintSHA256, i.NotAfter, i.HookExitCode, i.Detail, i.CreatedAt, i.UpdatedAt,
-		i.DeliveredAt, i.FetchedAt, i.FinishedAt)
+		i.DeliveredAt, i.FetchedAt, i.FinishedAt, i.CommonName)
 	return mapErr(err)
 }
 
@@ -147,6 +148,54 @@ func (d *DB) GetCertDelivery(ctx context.Context, tenantID, id string) (out stor
 	return out, items, err
 }
 
+// ListCertDeliveriesByID implements repo.CertDeliveryStore.
+func (d *DB) ListCertDeliveriesByID(ctx context.Context, tenantID string, ids []string) (out []store.CertDelivery, err error) {
+	out = []store.CertDelivery{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	err = d.tenant(ctx, tenantID, func(tx pgx.Tx) error {
+		rows, e := tx.Query(ctx, "SELECT "+deliveryCols+" FROM inventory_cert_deliveries WHERE tenant_id=$1 AND id::text = ANY($2)", tenantID, ids)
+		if e != nil {
+			return e
+		}
+		defer rows.Close()
+		for rows.Next() {
+			dl, e := scanDelivery(rows)
+			if e != nil {
+				return e
+			}
+			out = append(out, dl)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
+// HostnamesByID implements repo.CertDeliveryStore.
+func (d *DB) HostnamesByID(ctx context.Context, tenantID string, ids []string) (out map[string]string, err error) {
+	out = map[string]string{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	err = d.tenant(ctx, tenantID, func(tx pgx.Tx) error {
+		rows, e := tx.Query(ctx, "SELECT id::text, hostname FROM inventory_hosts WHERE tenant_id=$1 AND id::text = ANY($2)", tenantID, ids)
+		if e != nil {
+			return e
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id, name string
+			if e := rows.Scan(&id, &name); e != nil {
+				return e
+			}
+			out[id] = name
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
 // GetCertDeliveryByKey implements repo.CertDeliveryStore.
 func (d *DB) GetCertDeliveryByKey(ctx context.Context, tenantID, source, key string) (out store.CertDelivery, err error) {
 	err = d.tenant(ctx, tenantID, func(tx pgx.Tx) error {
@@ -182,10 +231,10 @@ func (d *DB) UpdateCertItem(ctx context.Context, tenantID, id string, fn func(*s
 		}
 		if _, e := tx.Exec(ctx, `UPDATE inventory_cert_delivery_items SET agent_id=$3, state=$4, reason=$5, attempts=$6, fetches=$7,
 			rerun_hook=$8, serial=$9, fingerprint_sha256=$10, not_after=$11, hook_exit_code=$12, detail=$13, updated_at=$14,
-			delivered_at=$15, fetched_at=$16, finished_at=$17
+			delivered_at=$15, fetched_at=$16, finished_at=$17, common_name=$18
 			WHERE tenant_id=$1 AND id=$2`, tenantID, id, nullUUID(i.AgentID), i.State, i.Reason, i.Attempts, i.Fetches,
 			i.RerunHook, i.Serial, i.FingerprintSHA256, i.NotAfter, i.HookExitCode, i.Detail, i.UpdatedAt,
-			i.DeliveredAt, i.FetchedAt, i.FinishedAt); e != nil {
+			i.DeliveredAt, i.FetchedAt, i.FinishedAt, i.CommonName); e != nil {
 			return mapErr(e)
 		}
 		if h := ch.HostCert; h != nil {
@@ -261,6 +310,9 @@ func (d *DB) ListCertItemsPage(ctx context.Context, tenantID string, f repo.Cert
 			args = append(args, c.val)
 			where += fmt.Sprintf(" AND %s=$%d", c.col, len(args))
 		}
+	}
+	if f.Active {
+		where += " AND state IN ('pending','delivered','fetched')"
 	}
 	err = d.tenant(ctx, tenantID, func(tx pgx.Tx) error {
 		if e := tx.QueryRow(ctx, "SELECT count(*) FROM inventory_cert_delivery_items WHERE "+where, args...).Scan(&total); e != nil {

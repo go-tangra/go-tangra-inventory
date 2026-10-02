@@ -238,6 +238,7 @@ type CertItemFilter struct {
 	Name          string
 	CertificateID string
 	DeliveryID    string
+	Active        bool // only pending, delivered and fetched items
 }
 
 // CertCancelScope selects the active items CancelCertItems cancels: those
@@ -261,6 +262,12 @@ type CertDeliveryStore interface {
 	CreateCertDelivery(ctx context.Context, n NewCertDelivery) (superseded []store.CertDeliveryItem, err error)
 	// GetCertDelivery returns a delivery with its items (oldest first).
 	GetCertDelivery(ctx context.Context, tenantID, id string) (store.CertDelivery, []store.CertDeliveryItem, error)
+	// ListCertDeliveriesByID returns the tenant's deliveries among ids (in
+	// no particular order; unknown and foreign ids are skipped).
+	ListCertDeliveriesByID(ctx context.Context, tenantID string, ids []string) ([]store.CertDelivery, error)
+	// HostnamesByID maps the tenant's host ids among ids to their hostnames
+	// (unknown and foreign ids are skipped).
+	HostnamesByID(ctx context.Context, tenantID string, ids []string) (map[string]string, error)
 	// GetCertDeliveryByKey finds a delivery by its idempotency key.
 	GetCertDeliveryByKey(ctx context.Context, tenantID, source, key string) (store.CertDelivery, error)
 	GetCertItem(ctx context.Context, tenantID, id string) (store.CertDeliveryItem, error)

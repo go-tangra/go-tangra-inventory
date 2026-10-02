@@ -148,6 +148,7 @@ func (s *Service) Fetch(ctx context.Context, a store.Agent, itemID string) (*Mat
 		na := m.Bundle.NotAfter
 		cur.State, cur.Fetches, cur.UpdatedAt, cur.FetchedAt = store.DeliveryFetched, cur.Fetches+1, now, &now
 		cur.Serial, cur.FingerprintSHA256, cur.NotAfter = m.Bundle.Serial, m.Bundle.Fingerprint, &na
+		cur.CommonName = commonName(m.Bundle.CommonName)
 		return repo.CertItemChange{Audit: []store.AuditRow{s.itemRow(audit.CertDeliveryFetched, agentActor(a), audit.OutcomeOK, *cur,
 			map[string]any{"has_key": m.Bundle.HasKey, "fetches": cur.Fetches, "serial": cur.Serial,
 				"fingerprint_sha256": cur.FingerprintSHA256})}}, nil
