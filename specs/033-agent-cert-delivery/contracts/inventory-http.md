@@ -15,9 +15,9 @@ No new permission (research D18). Reads: `inventory:read`. Cancel:
 
 | Method | Path | Permission | Purpose |
 |---|---|---|---|
-| GET | `/api/inventory/v1/hosts/{id}/certificates` | `inventory:read` | current certificates of a host (one row per name) |
+| GET | `/api/inventory/v1/hosts/{id}/certificates` | `inventory:read` | current certificates of a host (one row per name), paged; filters `state`, `revoked`; sort `name` (default asc), `state`, `not_after`, `last_delivered_at` |
 | GET | `/api/inventory/v1/certificate-deliveries` | `inventory:read` | delivery items, paged; filters `host_id`, `state`, `name`, `certificate_id`, `delivery_id`; sort `created_at` (default desc), `updated_at`, `state`, `name` |
-| GET | `/api/inventory/v1/certificate-deliveries/{item_id}` | `inventory:read` | one item with its delivery (configuration id, trigger, requested by) |
+| GET | `/api/inventory/v1/certificate-deliveries/{item_id}` | `inventory:read` | `{item, delivery}`: one item with its delivery (source, configuration id, target id, trigger, key policy, requested by; no host selection) |
 | POST | `/api/inventory/v1/certificate-deliveries/{item_id}/cancel` | `agents:manage` | cancel an active item (`cancelled/cancelled_by_user`) |
 
 `GET /api/inventory/v1/agents` items gain `certificate_capability`
@@ -39,11 +39,13 @@ HostCertificate:
     serial: {type: string}
     fingerprint_sha256: {type: string}
     not_after: {type: string, format: date-time, nullable: true}
-    state: {type: string, enum: [installed, unchanged, failed, hook_failed, unsupported, expired, cancelled, superseded]}
+    # a name with only a queued item carries that item's state (pending, delivered, fetched)
+    state: {type: string, enum: [installed, unchanged, failed, hook_failed, unsupported, expired, cancelled, superseded, pending, delivered, fetched]}
     reason: {type: string}
     hook_exit_code: {type: integer, nullable: true}
     last_delivered_at: {type: string, format: date-time, nullable: true}
     revoked: {type: boolean}
+    revoked_at: {type: string, format: date-time, nullable: true}
     active_item: {$ref: '#/components/schemas/CertificateDeliveryItem', nullable: true}
 CertificateDeliveryItem:
   type: object
@@ -62,7 +64,10 @@ CertificateDeliveryItem:
     attempts: {type: integer}
     serial: {type: string}
     fingerprint_sha256: {type: string}
+    common_name: {type: string}      # leaf CN served at fetch
+    not_after: {type: string, format: date-time, nullable: true}
     hook_exit_code: {type: integer, nullable: true}
+    detail: {type: string}           # sanitised agent detail, <= 256 bytes
     created_at: {type: string, format: date-time}
     updated_at: {type: string, format: date-time}
     finished_at: {type: string, format: date-time, nullable: true}

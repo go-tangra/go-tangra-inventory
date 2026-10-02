@@ -34,6 +34,7 @@ import (
 
 	"github.com/go-tangra/go-tangra/v4/authn"
 	"github.com/go-tangra/go-tangra/v4/identity"
+	"github.com/go-tangra/go-tangra/v4/listquery"
 
 	invv1 "github.com/go-tangra/go-tangra-inventory/sdk/v4/api/proto/inventory/v1"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/certdelivery"
@@ -44,6 +45,7 @@ import (
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/ingest"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/lcmclient"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/registry"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/repo"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/repo/repodb"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/sealed"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/snapshots"
@@ -307,6 +309,17 @@ func TestCertificateDeliveryEndToEnd(t *testing.T) {
 		Selector: &invv1.HostSelector{HostIds: []string{sub.GetHostId()}}, Name: "www", ExpectedFingerprintSha256: b.GetFingerprintSha256()})
 	if err != nil || v.GetMatched() != 1 {
 		t.Fatalf("verify: %v %v", v, err)
+	}
+	// The inventory UI views (US4) over the real database: the host
+	// certificate keeps the CN served at fetch; the history joins hostname
+	// and delivery.
+	hcs, err := svc.HostCertificatePage(ctx, itTenant, sub.GetHostId(), certdelivery.HostCertFilter{}, listquery.Request{})
+	if err != nil || hcs.Total != 1 || hcs.Items[0].CommonName != b.GetCommonName() || hcs.Items[0].CommonName == "" || hcs.Items[0].Active != nil {
+		t.Fatalf("host certificates: %+v %v", hcs, err)
+	}
+	hist, err := svc.History(ctx, itTenant, repo.CertItemFilter{HostID: sub.GetHostId()}, listquery.Request{})
+	if err != nil || hist.Total != 1 || hist.Items[0].Hostname != "web-1" || hist.Items[0].Delivery.ID != d.GetId() || hist.Items[0].CommonName != b.GetCommonName() {
+		t.Fatalf("history: %+v %v", hist, err)
 	}
 	// A second agent cannot fetch it (another tenant's or agent's item).
 	secret2, _, _ := enr.MintToken(ctx, itTenant, "admin", "it", time.Hour)

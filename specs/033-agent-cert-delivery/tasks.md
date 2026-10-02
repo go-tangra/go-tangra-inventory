@@ -191,15 +191,15 @@ configuration in the deployer).
 
 ### Tests for User Story 4 (MANDATORY) ⚠️
 
-- [ ] T073 [P] [US4] HTTP tests `internal/httpapi/certificates_test.go`: routes and permissions (`inventory:read` for reads, `agents:manage` for cancel; missing permission → 403); tenant isolation (404); list paging/sorting/filters per 032 (`422` on bad params); cancel terminal → 409; disabled → 503 for cancel, empty lists for reads; responses contain no `-----BEGIN`; OpenAPI contract test covers the four operations
-- [ ] T074 [P] [US4] Agent list test `internal/httpapi/api_test.go`: `certificate_capability` per data-model §1.5 for each case
-- [ ] T075 [P] [US4] UI tests `ui/tests/unit/certificates.spec.ts`: Certificates tab renders rows/badges (installed, unchanged, failed+reason, hook exit, revoked), fingerprint shortened with copy, deployer link, history paging, cancel visible only with `manage InventoryAgent`; agents column badges; strings rendered as text
+- [x] T073 [P] [US4] HTTP tests `internal/httpapi/certificates_test.go`: routes and permissions (`inventory:read` for reads, `agents:manage` for cancel; missing permission → 403); tenant isolation (404); list paging/sorting/filters per 032 (`422` on bad params); cancel terminal → 409; disabled → 503 for cancel, empty lists for reads; responses contain no `-----BEGIN`; OpenAPI contract test covers the four operations — **done 2026-10-02**: `internal/httpapi/certificates_test.go` (403 is the gateway's: the module asserts the declared `x-freya-permission` of each route, also in `api/openapi/openapi_test.go` and `pkg/inventorymanifest/manifest_test.go`); service views in `internal/certdelivery/views_test.go`
+- [x] T074 [P] [US4] Agent list test `internal/httpapi/api_test.go`: `certificate_capability` per data-model §1.5 for each case — **done 2026-10-02**: in `internal/httpapi/certificates_test.go` (`TestAgentListCertificateCapability`, list contract + legacy shape + agent detail)
+- [x] T075 [P] [US4] UI tests `ui/tests/unit/certificates.spec.ts`: Certificates tab renders rows/badges (installed, unchanged, failed+reason, hook exit, revoked), fingerprint shortened with copy, deployer link, history paging, cancel visible only with `manage InventoryAgent`; agents column badges; strings rendered as text — **done 2026-10-02**
 
 ### Implementation for User Story 4
 
-- [ ] T076 [US4] `internal/httpapi/certificates.go` (+ routes in `internal/httpapi/handlers.go`, deps in `internal/httpapi/deps.go`), list specs in `internal/store/lists.go`, `api/openapi/inventory.yaml`, manifest route check `pkg/inventorymanifest/manifest.go`
-- [ ] T077 [US4] Agent list capability in `internal/httpapi/handlers.go` (fleet view mapping)
-- [ ] T078 [P] [US4] UI: `ui/src/stores/certificates.ts`, `ui/src/api/types.ts` (+ regenerated `ui/src/api/schema.d.ts`), Certificates tab in `ui/src/views/hosts/detail.vue`, capability column in `ui/src/views/agents/index.vue`
+- [x] T076 [US4] `internal/httpapi/certificates.go` (+ routes in `internal/httpapi/handlers.go`, deps in `internal/httpapi/deps.go`), list specs in `internal/store/lists.go`, `api/openapi/inventory.yaml`, manifest route check `pkg/inventorymanifest/manifest.go` — **done 2026-10-02**: host certificate list spec `store.HostCertList` (paged in Go, one row per name, queued item attached, `state`/`revoked` filters); the item detail answers `{item, delivery}`; host certificates record the common name: items store the leaf CN at fetch (migration `0011_cert_item_common_name.sql`) and installed/unchanged reports copy it
+- [x] T077 [US4] Agent list capability in `internal/httpapi/handlers.go` (fleet view mapping) — **done 2026-10-02**: mapping in `internal/httpapi/upgrades.go` (`fleetItem`), also on `GET /agents/{id}`
+- [x] T078 [P] [US4] UI: `ui/src/stores/certificates.ts`, `ui/src/api/types.ts` (+ regenerated `ui/src/api/schema.d.ts`), Certificates tab in `ui/src/views/hosts/detail.vue`, capability column in `ui/src/views/agents/index.vue` — **done 2026-10-02**: tab in `ui/src/views/hosts/CertificatesTab.vue` (used by `detail.vue`), texts in `ui/src/views/hosts/cert-text.ts`; live `inventory.certificate.delivery` events reload the tab (debounced)
 
 ---
 
@@ -275,7 +275,7 @@ with its descriptors and a manual host-id input until US6 adds the picker.
 
 - [x] T103 [US7] `internal/certdelivery/revoke.go`, mesh handler method in `internal/grpcapi/certdelivery.go`
 - [ ] T104 [US7] `go-tangra-deployer-v4/internal/events/consumer.go` (`certificate.revoked`), audit type in `go-tangra-deployer-v4/internal/audit/audit.go`, wiring in `go-tangra-deployer-v4/internal/app/app.go`
-- [ ] T105 [P] [US7] Revoked badge and filter in `ui/src/views/hosts/detail.vue` (uses T078 store)
+- [x] T105 [P] [US7] Revoked badge and filter in `ui/src/views/hosts/detail.vue` (uses T078 store) — **done 2026-10-02**: server-side `revoked` filter of `GET /hosts/{id}/certificates`
 
 ---
 

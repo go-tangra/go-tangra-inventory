@@ -76,6 +76,7 @@ type CertDeliveryItem struct {
     RerunHook        bool       // set when re-armed from hook_failed
     Serial           string     // from lcm at fetch / agent report
     FingerprintSHA256 string    // lowercase hex of the leaf DER; reported by the agent
+    CommonName       string     // leaf subject CN served at fetch (migration 0011, <= 256 bytes)
     NotAfter         *time.Time
     HookExitCode     *int
     Detail           string     // ≤ 256 bytes, sanitised
@@ -216,6 +217,12 @@ DROP TABLE inventory_host_certificates;
 DROP TABLE inventory_cert_delivery_items;
 DROP TABLE inventory_cert_deliveries;
 ```
+
+Migration `0011_cert_item_common_name.sql` (US4) adds
+`inventory_cert_delivery_items.common_name text NOT NULL DEFAULT ''
+CHECK (octet_length(common_name) <= 256)`: the CN is recorded at fetch like
+the serial and fingerprint, and an installed/unchanged report copies it to
+`inventory_host_certificates.common_name`.
 
 Host or agent deletion: `DeleteHost`/`RevokeAgent` cancel the host's or
 agent's active items in the same transaction (`cancelled/host_deleted`,
