@@ -115,3 +115,23 @@ func TestCertItemCancelledRow(t *testing.T) {
 		}
 	}
 }
+
+func TestSafeRowDropsPEMAndGuards(t *testing.T) {
+	now := time.Date(2026, 10, 2, 9, 0, 0, 0, time.UTC)
+	i := store.CertDeliveryItem{ID: "i1", TenantID: "t1", Name: "www", State: store.DeliveryFetched}
+	r := CertItemRow(CertDeliveryFetched, ActorAgent, "a1", OutcomeOK, i, map[string]any{
+		"has_key": true, "serial": "0a", "token": "x", "leak": "-----BEGIN PRIVATE KEY-----", "long": strings.Repeat("x", 300),
+	}, now)
+	if r.Action != "cert_delivery_fetched" || r.ActorKind != ActorAgent || r.Detail["has_key"] != true || r.Detail["serial"] != "0a" {
+		t.Fatalf("row = %+v", r)
+	}
+	if _, ok := r.Detail["leak"]; ok {
+		t.Fatal("PEM value kept")
+	}
+	if _, ok := r.Detail["token"]; ok {
+		t.Fatal("forbidden key kept")
+	}
+	if len(r.Detail["long"].(string)) != 256 {
+		t.Fatal("long value not truncated")
+	}
+}
