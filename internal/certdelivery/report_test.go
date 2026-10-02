@@ -71,9 +71,19 @@ func TestReportInstalledAndRenewal(t *testing.T) {
 	if row.Action != "cert_delivery_installed" || row.Detail["is_renewal"] != false || row.Detail["hook_exit_code"] != 0 {
 		t.Fatalf("installed row = %+v", row)
 	}
-	// Reports for terminal items are ignored.
+	// Reports for terminal items are ignored; an identical repeat is accepted
+	// without a change (the agent lost the answer).
 	if accepted, err := f.svc.Report(ctx, a, Report{ItemID: it.ID, State: store.DeliveryFailed, HookExitCode: -1}); accepted || err != nil {
 		t.Fatal("terminal report accepted", err)
+	}
+	n := len(f.mem.AuditRows())
+	if accepted, err := f.svc.Report(ctx, a, Report{ItemID: it.ID, State: store.DeliveryInstalled, Fingerprint: it.FingerprintSHA256,
+		Serial: it.Serial, HookExitCode: 0}); !accepted || err != nil || len(f.mem.AuditRows()) != n {
+		t.Fatal("repeated report", accepted, err)
+	}
+	if accepted, _ := f.svc.Report(ctx, a, Report{ItemID: it.ID, State: store.DeliveryInstalled, Fingerprint: it.FingerprintSHA256,
+		Reason: store.ReasonBusy, HookExitCode: 0}); accepted {
+		t.Fatal("repeat with another reason accepted")
 	}
 	// Renewal: a different certificate under the same name.
 	f.lcm.certs["cert-2"] = bundle(t, "ecdsa.crt", "ecdsa.pkcs8.key", hc.NotAfter.AddDate(1, 0, 0))

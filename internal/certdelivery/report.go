@@ -80,14 +80,19 @@ func checkReport(r Report) error {
 	return nil
 }
 
-// errIgnored rolls back a report for an item that is no longer active.
-var errIgnored = errors.New("certdelivery: report ignored")
+// errIgnored rolls back a report for an item that is no longer active;
+// errRepeated one that repeats the report the item already holds.
+var (
+	errIgnored  = errors.New("certdelivery: report ignored")
+	errRepeated = errors.New("certdelivery: report repeated")
+)
 
 // Report records agent a's result for its own item (data-model §1.4):
 // installed and unchanged require the fingerprint served at fetch (else the
 // item fails with fingerprint_mismatch); every accepted report updates the
-// host's certificate under the name in the same transaction. Reports for
-// items that are no longer active are ignored (accepted false).
+// host's certificate under the name in the same transaction. A repeated
+// identical report is accepted without a change (idempotent); any other
+// report for an item that is no longer active is ignored (accepted false).
 func (s *Service) Report(ctx context.Context, a store.Agent, r Report) (bool, error) {
 	if !s.cfg.Enabled {
 		return false, ErrDisabled
@@ -111,6 +116,9 @@ func (s *Service) Report(ctx context.Context, a store.Agent, r Report) (bool, er
 	detail := sanitize(r.Detail)
 	_, _, err = s.update(ctx, a.TenantID, it.ID, func(cur *store.CertDeliveryItem) (repo.CertItemChange, error) {
 		if !cur.Active() {
+			if cur.State == r.State && cur.FingerprintSHA256 == r.Fingerprint && (cur.Reason == r.Reason || r.Reason == "") {
+				return repo.CertItemChange{}, errRepeated // the agent repeats a report whose answer it lost
+			}
 			return repo.CertItemChange{}, errIgnored
 		}
 		state, reason := r.State, r.Reason
@@ -151,7 +159,10 @@ func (s *Service) Report(ctx context.Context, a store.Agent, r Report) (bool, er
 		}
 		return repo.CertItemChange{HostCert: &hc, Audit: []store.AuditRow{s.itemRow(ev.t, agentActor(a), ev.outcome, *cur, extra)}}, nil
 	})
-	if errors.Is(err, errIgnored) {
+	switch {
+	case errors.Is(err, errRepeated):
+		return true, nil
+	case errors.Is(err, errIgnored):
 		return false, nil
 	}
 	return err == nil, err
