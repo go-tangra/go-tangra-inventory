@@ -8,6 +8,10 @@ syntax = "proto3";
 //     SPIFFE mTLS channel, acting for the tenant named in each request
 //     (tenant_id). The actor identity comes from the verified SPIFFE peer.
 //
+//   * CertificateDeliveryService (feature 033), the deployer's mesh entry point
+//     for relaying lcm certificates to inventory agents: references only, it
+//     never carries certificate or key material.
+//
 //   * The off-mesh ingest edge (IngestService), served on a dedicated listener
 //     network-isolated from the mesh, where endpoint agents authenticate with a
 //     per-agent sealed credential presented in call metadata.
@@ -16,6 +20,8 @@ syntax = "proto3";
 // enrollment-token secret, with the single deliberate exception of
 // EnrollResponse.agent_credential (issued exactly once at enrollment) and
 // MintEnrollmentTokenResponse.token (the mint secret, returned exactly once).
+// CertificateBundle (FetchCertificate, feature 033) is the only message that
+// carries a private key; it is never logged, stored, cached or published.
 // Snapshot and host messages exclude sealed fields and are safe to log.
 package inventory.v1;
 
@@ -54,6 +60,9 @@ enum CommandType {
   // Upgrade the agent to Command.upgrade.target_version (feature 023). Agents
   // older than 023 log and ignore it.
   COMMAND_TYPE_UPGRADE = 2;
+  // Install the certificate of delivery item Command.certificate.item_id
+  // (feature 033). Agents older than 033 log and ignore it.
+  COMMAND_TYPE_CERTIFICATE = 3;
 }
 
 // ---- Shared identity + host messages
@@ -775,6 +784,10 @@ service IngestService {
   rpc CheckAgentUpdate(CheckAgentUpdateRequest) returns (CheckAgentUpdateResponse);
   rpc DownloadAgentRelease(DownloadAgentReleaseRequest) returns (stream DownloadAgentReleaseResponse);
   rpc ReportUpgrade(ReportUpgradeRequest) returns (ReportUpgradeResponse);
+  // Certificate delivery (feature 033), authenticated like every method
+  // except Enroll; bound to the verified agent's own delivery items.
+  rpc FetchCertificate(FetchCertificateRequest) returns (CertificateBundle);
+  rpc ReportCertificate(ReportCertificateRequest) returns (ReportCertificateResponse);
 }
 
 message EnrollRequest {
@@ -836,6 +849,15 @@ message Command {
   string command_id = 1;
   CommandType type = 2;
   UpgradeCommand upgrade = 3;        // set when type = UPGRADE
+  CertificateCommand certificate = 4; // set when type = CERTIFICATE (feature 033)
+}
+
+// CertificateCommand carries only references; the agent pulls the material
+// with FetchCertificate over its authenticated connection (feature 033).
+message CertificateCommand {
+  string item_id = 1;                // uuid of the delivery item
+  string name = 2;                   // ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$, no ".."; validated again by the agent
+  uint32 attempt = 3;                // the item's attempt; a re-armed item is a new attempt the agent must not dedupe away
 }
 
 // UpgradeCommand asks the agent to upgrade to target_version. The agent
@@ -906,4 +928,186 @@ message ReportUpgradeRequest {
 
 message ReportUpgradeResponse {
   bool accepted = 1;                 // false = transition ignored (terminal/duplicate)
+}
+
+// ---- Certificate delivery on the ingest edge (feature 033)
+
+message FetchCertificateRequest {
+  string item_id = 1;                // uuid of the agent's own active delivery item
+}
+
+// CertificateBundle is the only message that carries a private key outside
+// lcm. It is never logged, stored, cached or published by the inventory.
+message CertificateBundle {
+  string item_id = 1;
+  string name = 2;
+  string certificate_id = 3;
+  string cert_pem = 4;               // leaf, <= 64 KiB
+  string chain_pem = 5;              // intermediates, <= 256 KiB, <= 10 certs
+  string key_pem = 6;                // "" when key_policy = certificate_only; <= 16 KiB
+  bool has_key = 7;
+  string serial = 8;                 // lowercase hex
+  string fingerprint_sha256 = 9;     // of the leaf DER, lowercase hex
+  string common_name = 10;
+  repeated string dns_names = 11;    // <= 100
+  repeated string ip_addresses = 12; // <= 100
+  int64 not_before = 13;             // unix seconds
+  int64 not_after = 14;              // unix seconds
+  bool is_renewal = 15;              // the host had a different certificate under name
+  bool rerun_hook = 16;              // re-armed after hook_failed: run the hook even if unchanged
+}
+
+// ReportCertificateRequest states: installed | unchanged | failed |
+// hook_failed. Reason codes (closed set): invalid_name, invalid_bundle,
+// key_mismatch, certificate_not_valid, owner_unknown, write_failed,
+// disk_full, hook_failed, hook_timeout, hook_refused, disabled_locally, busy.
+message ReportCertificateRequest {
+  string item_id = 1;
+  string state = 2;
+  string serial = 3;
+  string fingerprint_sha256 = 4;     // of the leaf as written on disk
+  string reason = 5;
+  int32 hook_exit_code = 6;          // -1 = hook not run; 0..255; 256 = timeout
+  string detail = 7;                 // <= 256 bytes, sanitised; never hook output
+}
+
+message ReportCertificateResponse {
+  bool accepted = 1;                 // false = ignored (terminal/duplicate)
+}
+
+// ---- CertificateDeliveryService (mesh only; not proxied by the gateway)
+
+// CertificateDeliveryService relays lcm certificates to inventory agents
+// (feature 033). Callers pass references only; no message of this service
+// ever carries certificate or key material. Authorized by the inbound mesh
+// policy and, in the handler, by cert_delivery.sources; every method returns
+// FailedPrecondition while cert_delivery.enabled is false.
+service CertificateDeliveryService {
+  rpc CreateCertificateDelivery(CreateCertificateDeliveryRequest) returns (CertificateDelivery);
+  rpc GetCertificateDelivery(GetCertificateDeliveryRequest) returns (CertificateDelivery);
+  rpc PreviewCertificateTargets(PreviewCertificateTargetsRequest) returns (PreviewCertificateTargetsResponse);
+  rpc VerifyHostCertificates(VerifyHostCertificatesRequest) returns (VerifyHostCertificatesResponse);
+  rpc MarkCertificateRevoked(MarkCertificateRevokedRequest) returns (MarkCertificateRevokedResponse);
+}
+
+// DeliveryState is the state of one delivery item (one host).
+enum DeliveryState {
+  DELIVERY_STATE_UNSPECIFIED = 0;
+  DELIVERY_STATE_PENDING = 1;
+  DELIVERY_STATE_DELIVERED = 2;
+  DELIVERY_STATE_FETCHED = 3;
+  DELIVERY_STATE_INSTALLED = 4;
+  DELIVERY_STATE_UNCHANGED = 5;
+  DELIVERY_STATE_FAILED = 6;
+  DELIVERY_STATE_HOOK_FAILED = 7;
+  DELIVERY_STATE_UNSUPPORTED = 8;
+  DELIVERY_STATE_SUPERSEDED = 9;
+  DELIVERY_STATE_EXPIRED = 10;
+  DELIVERY_STATE_CANCELLED = 11;
+}
+
+// HostSelector selects hosts by id and/or tags (union of both).
+message HostSelector {
+  repeated string host_ids = 1;      // <= 1000 uuids
+  repeated string host_tags = 2;     // <= 16, "key" or "key=value"; a host must match all
+}
+
+message CreateCertificateDeliveryRequest {
+  string tenant_id = 1;
+  string idempotency_key = 2;        // deployer job id, 1..128
+  string configuration_id = 3;       // <= 128
+  string target_id = 4;              // <= 128, "" for direct jobs
+  string trigger = 5;                // manual | auto_deploy | retry
+  string certificate_id = 6;         // lcm certificate id
+  string name = 7;                   // ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$, no ".."
+  string key_policy = 8;             // require | certificate_only
+  HostSelector selector = 9;         // at least one id or tag
+  bool rearm_failed = 10;            // existing delivery: re-arm failed|hook_failed|expired items
+}
+
+message GetCertificateDeliveryRequest {
+  string tenant_id = 1;
+  string id = 2;
+}
+
+message CertificateDeliveryItem {
+  string id = 1;
+  string host_id = 2;
+  string hostname = 3;
+  bool agent_online = 4;
+  DeliveryState state = 5;
+  string reason = 6;                 // closed set
+  string serial = 7;
+  string fingerprint_sha256 = 8;
+  int32 hook_exit_code = 9;          // -1 = none
+  int32 attempts = 10;
+  int64 updated_at = 11;             // unix seconds
+}
+
+message CertificateDelivery {
+  string id = 1;
+  string tenant_id = 2;
+  string certificate_id = 3;
+  string name = 4;
+  string key_policy = 5;
+  int64 created_at = 6;              // unix seconds
+  int64 expires_at = 7;              // unix seconds
+  repeated CertificateDeliveryItem items = 8;   // <= 1000
+  repeated string unknown_host_ids = 9;         // requested ids not found in the tenant (no detail)
+  bool created = 10;                            // false = idempotent replay
+}
+
+message PreviewCertificateTargetsRequest {
+  string tenant_id = 1;
+  HostSelector selector = 2;
+}
+
+message TargetHost {
+  string host_id = 1;
+  string hostname = 2;
+  string os_name = 3;
+  map<string, string> tags = 4;
+  bool agent_online = 5;
+  // enabled | disabled_on_host | upgrade_required | not_supported_platform |
+  // no_agent | disabled_on_server
+  string capability = 6;
+}
+
+message PreviewCertificateTargetsResponse {
+  repeated TargetHost hosts = 1;     // <= 1000
+  repeated string unknown_host_ids = 2;
+  bool truncated = 3;                // selection exceeded 1000 hosts
+}
+
+message VerifyHostCertificatesRequest {
+  string tenant_id = 1;
+  HostSelector selector = 2;
+  string name = 3;
+  string expected_fingerprint_sha256 = 4;   // lowercase hex
+}
+
+message HostCertificateStatus {
+  string host_id = 1;
+  string hostname = 2;
+  string status = 3;                 // match | mismatch | failed | pending | missing | revoked
+  string fingerprint_sha256 = 4;     // last reported
+  string serial = 5;
+  string reason = 6;
+  int64 last_delivered_at = 7;       // unix seconds, 0 = never
+}
+
+message VerifyHostCertificatesResponse {
+  repeated HostCertificateStatus hosts = 1;
+  int32 matched = 2;
+  int32 total = 3;
+}
+
+message MarkCertificateRevokedRequest {
+  string tenant_id = 1;
+  string certificate_id = 2;
+}
+
+message MarkCertificateRevokedResponse {
+  int32 cancelled_items = 1;
+  int32 flagged_hosts = 2;
 }

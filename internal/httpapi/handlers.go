@@ -240,13 +240,16 @@ func (s *Server) Register(d Deps) {
 
 	// ---- Agents
 	if d.Upgrades != nil {
-		s.MustHandle("GET", p+"/agents", s.listFleet(d.Upgrades))
+		s.MustHandle("GET", p+"/agents", s.listFleet(d.Upgrades, certEnabled(d)))
 		s.registerUpgrades(d, p)
 	} else {
 		s.MustHandle("GET", p+"/agents", s.listConnected(d))
 	}
 	if d.AutoEnroll != nil {
 		s.registerAutoEnroll(d.AutoEnroll, p)
+	}
+	if d.CertDelivery != nil {
+		s.registerCertificates(d, p)
 	}
 	s.MustHandle("POST", p+"/agents/enroll-token", func(w http.ResponseWriter, r *http.Request) {
 		subj, err := subjects(r)

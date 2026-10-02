@@ -70,6 +70,45 @@ If the private key may be exposed:
 4. Rotate the ingest TLS certificate and revoke/re-enroll agents if the
    investigation shows the platform itself was reached.
 
+## Delivered certificate keys (feature 033)
+
+Inventory relays lcm certificates to agents for the deployer's
+`inventory-agent` provider; a private key is the most sensitive data that
+passes through the service:
+
+- **Never stored by the platform outside lcm.** The deployer sends only
+  references (certificate id, name, host selection) and never fetches a key
+  for this provider. Inventory downloads the bundle from lcm only when the
+  item's own agent pulls it, keeps the key in memory for that one call
+  (byte copies are wiped after the response), and never writes it to the
+  database, Valkey, the connection registry, events, audit rows or logs.
+  Commands carry ids only. Tests scan database dumps, captured logs, audit
+  rows and Valkey keys/streams for `PRIVATE KEY` and the test key's bytes
+  after an end-to-end run.
+- **Only to the item's own agent.** A fetch must come from the agent the
+  item was created for (same tenant, active item, at most 5 fetches, inside
+  the delivery window); anything else is `NotFound` and audited as
+  `cert_delivery_refused`. A host claimed by more than one non-revoked agent
+  receives nothing (`ambiguous_agent`) — an agent credential cannot attract
+  another host's key by reporting that host's identity.
+- **Only over TLS.** Agent and server refuse delivery over a plaintext ingest
+  edge unless both opt out for development; the server refuses the opt-out
+  with `env: production`.
+- **On the host** the key is written only below the agent's local
+  `certificates.directory`, as `privkey.pem` with `key_mode` (0600 or 0640,
+  owner root by default) in a generation directory staged at 0700; the
+  server chooses only the certificate name (one safe path component). No
+  directory, owner, mode, command or environment comes from the server; a
+  deploy hook runs only if configured locally and owned by root along its
+  whole path.
+- **key_policy `certificate_only`** delivers no key: the agent keeps an
+  existing matching `privkey.pem` or fails with `key_mismatch`.
+
+If a host or agent credential is compromised: revoke the agent (its queued
+deliveries are cancelled), treat every key delivered to that host as
+compromised (revoke and re-issue in lcm; revocation flags the host
+certificate and cancels queued deliveries of it) and re-enroll the host.
+
 ## Other secrets
 
 Per-agent credentials, enrollment tokens and auto-enrollment key secrets are

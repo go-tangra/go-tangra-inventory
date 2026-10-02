@@ -581,7 +581,11 @@ func (a Agent) HasCapability(c string) bool {
 }
 
 // Agent capabilities.
-const CapUpgradeV1 = "upgrade.v1"
+const (
+	CapUpgradeV1 = "upgrade.v1"
+	// CapCertV1: the agent installs delivered certificates (feature 033).
+	CapCertV1 = "cert.v1"
+)
 
 // --- agent releases and upgrades (feature 023) ---
 
@@ -758,6 +762,180 @@ type AutoEnrollment struct {
 	Agent       Agent
 	Audit       AuditRow
 }
+
+// --- certificate delivery (feature 033) ---
+
+// CertDelivery is one delivery request of a mesh caller (the deployer): a
+// reference to an lcm certificate, a certificate name and a host selection.
+// No delivery, item or host certificate row ever holds certificate or key
+// material (data-model.md).
+type CertDelivery struct {
+	ID              string    `json:"id"`
+	TenantID        string    `json:"-"`
+	Source          string    `json:"source"`          // SPIFFE service name, e.g. "deployer"
+	IdempotencyKey  string    `json:"idempotency_key"` // deployer job id (unique per tenant+source)
+	ConfigurationID string    `json:"configuration_id,omitempty"`
+	TargetID        string    `json:"target_id,omitempty"` // "" for direct jobs
+	Trigger         string    `json:"trigger"`             // manual | auto_deploy | retry
+	CertificateID   string    `json:"certificate_id"`      // lcm certificate id
+	Name            string    `json:"name"`                // certmaterial.ValidName
+	KeyPolicy       string    `json:"key_policy"`          // require | certificate_only
+	HostIDs         []string  `json:"host_ids,omitempty"`  // requested explicit ids (<= MaxDeliveryHosts)
+	HostTags        []string  `json:"host_tags,omitempty"` // requested selectors (<= MaxHostTags)
+	RequestedBy     string    `json:"requested_by"`        // SPIFFE id of the caller
+	CreatedAt       time.Time `json:"created_at"`
+	ExpiresAt       time.Time `json:"expires_at"` // min(created + pending_ttl, certificate not_after)
+}
+
+// CertDeliveryItem is the delivery of a CertDelivery to one host. Its id is
+// the only identifier the agent sees.
+type CertDeliveryItem struct {
+	ID                string     `json:"id"`
+	TenantID          string     `json:"-"`
+	DeliveryID        string     `json:"delivery_id"`
+	HostID            string     `json:"host_id"`
+	AgentID           string     `json:"agent_id,omitempty"` // "" when the host has no agent
+	Name              string     `json:"name"`               // copy of the delivery name (one active item per host+name)
+	CertificateID     string     `json:"certificate_id"`
+	State             string     `json:"state"`
+	Reason            string     `json:"reason,omitempty"`
+	Attempts          int        `json:"attempts"` // 1..MaxItemAttempts (re-arms)
+	Fetches           int        `json:"fetches"`  // 0..MaxItemFetches per attempt
+	RerunHook         bool       `json:"rerun_hook,omitempty"`
+	Serial            string     `json:"serial,omitempty"`
+	FingerprintSHA256 string     `json:"fingerprint_sha256,omitempty"`
+	CommonName        string     `json:"common_name,omitempty"` // leaf subject CN served at fetch (<= MaxCommonNameBytes)
+	NotAfter          *time.Time `json:"not_after,omitempty"`
+	HookExitCode      *int       `json:"hook_exit_code,omitempty"`
+	Detail            string     `json:"detail,omitempty"` // <= MaxDetailBytes, sanitised
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
+	DeliveredAt       *time.Time `json:"delivered_at,omitempty"`
+	FetchedAt         *time.Time `json:"fetched_at,omitempty"`
+	FinishedAt        *time.Time `json:"finished_at,omitempty"`
+}
+
+// Active reports whether the item still waits for its agent (the partial
+// unique index inventory_cert_items_active_uq: one active item per host and
+// name).
+func (i CertDeliveryItem) Active() bool { return CertDeliveryActive(i.State) }
+
+// CertDeliveryActive reports whether state is pending, delivered or fetched.
+func CertDeliveryActive(state string) bool {
+	switch state {
+	case DeliveryPending, DeliveryDelivered, DeliveryFetched:
+		return true
+	}
+	return false
+}
+
+// HostCertificate is the current certificate of a host under a name (one
+// row per host and name), updated from the agents' reports.
+type HostCertificate struct {
+	TenantID          string     `json:"-"`
+	HostID            string     `json:"host_id"`
+	Name              string     `json:"name"`
+	CertificateID     string     `json:"certificate_id"`
+	ConfigurationID   string     `json:"configuration_id,omitempty"`
+	CommonName        string     `json:"common_name,omitempty"`
+	Serial            string     `json:"serial,omitempty"`
+	FingerprintSHA256 string     `json:"fingerprint_sha256,omitempty"`
+	NotAfter          *time.Time `json:"not_after,omitempty"`
+	State             string     `json:"state"` // last terminal item state
+	Reason            string     `json:"reason,omitempty"`
+	HookExitCode      *int       `json:"hook_exit_code,omitempty"`
+	LastItemID        string     `json:"last_item_id"`
+	LastDeliveredAt   *time.Time `json:"last_delivered_at,omitempty"` // last installed/unchanged
+	RevokedAt         *time.Time `json:"revoked_at,omitempty"`        // lcm revoked the certificate installed
+	UpdatedAt         time.Time  `json:"updated_at"`
+}
+
+// Delivery item states (closed set).
+const (
+	DeliveryPending     = "pending"     // created, waiting for the agent
+	DeliveryDelivered   = "delivered"   // CERTIFICATE command pushed at least once
+	DeliveryFetched     = "fetched"     // material served to the agent
+	DeliveryInstalled   = "installed"   // terminal: written (+ hook ok or no hook)
+	DeliveryUnchanged   = "unchanged"   // terminal: same fingerprint already installed
+	DeliveryFailed      = "failed"      // terminal (re-armable)
+	DeliveryHookFailed  = "hook_failed" // terminal (re-armable): files installed, hook failed
+	DeliveryUnsupported = "unsupported" // terminal: no agent / no cert.v1 / platform
+	DeliverySuperseded  = "superseded"  // terminal: newer item for the same host+name
+	DeliveryExpired     = "expired"     // terminal (re-armable)
+	DeliveryCancelled   = "cancelled"   // terminal: user, revocation, host/agent removed
+)
+
+// DeliveryStates lists every delivery item state.
+var DeliveryStates = []string{DeliveryPending, DeliveryDelivered, DeliveryFetched, DeliveryInstalled, DeliveryUnchanged,
+	DeliveryFailed, DeliveryHookFailed, DeliveryUnsupported, DeliverySuperseded, DeliveryExpired, DeliveryCancelled}
+
+// Delivery reason codes (closed set): reported by the agent ...
+const (
+	ReasonInvalidName         = "invalid_name"
+	ReasonInvalidBundle       = "invalid_bundle"
+	ReasonKeyMismatch         = "key_mismatch"
+	ReasonCertificateNotValid = "certificate_not_valid"
+	ReasonOwnerUnknown        = "owner_unknown"
+	ReasonWriteFailed         = "write_failed"
+	ReasonDiskFull            = "disk_full"
+	ReasonHookFailed          = "hook_failed"
+	ReasonHookTimeout         = "hook_timeout"
+	ReasonHookRefused         = "hook_refused"
+	ReasonDisabledLocally     = "disabled_locally"
+	ReasonBusy                = "busy"
+)
+
+// ... or set by the server.
+const (
+	ReasonKeyUnavailable      = "key_unavailable"
+	ReasonCertificateRevoked  = "certificate_revoked"
+	ReasonCertificateExpired  = "certificate_expired"
+	ReasonCertificateNotFound = "certificate_not_found"
+	ReasonLCMUnavailable      = "lcm_unavailable"
+	ReasonBundleTooLarge      = "bundle_too_large"
+	ReasonFingerprintMismatch = "fingerprint_mismatch"
+	ReasonNoAgent             = "no_agent"
+	ReasonAmbiguousAgent      = "ambiguous_agent" // more than one non-revoked agent claims the host
+	ReasonNoCapability        = "no_capability"
+	ReasonPlatform            = "platform"
+	ReasonHostRetired         = "host_retired"
+	ReasonAgentRevoked        = "agent_revoked"
+	ReasonHostDeleted         = "host_deleted"
+	ReasonNoReport            = "no_report"
+	ReasonExpired             = "expired"
+	ReasonOlderThanInstalled  = "older_than_installed"
+	ReasonCancelledByUser     = "cancelled_by_user"
+	ReasonUnknownHost         = "unknown_host"
+)
+
+// AgentDeliveryReasons are the reason codes an agent may report.
+var AgentDeliveryReasons = []string{ReasonInvalidName, ReasonInvalidBundle, ReasonKeyMismatch, ReasonCertificateNotValid,
+	ReasonOwnerUnknown, ReasonWriteFailed, ReasonDiskFull, ReasonHookFailed, ReasonHookTimeout, ReasonHookRefused,
+	ReasonDisabledLocally, ReasonBusy}
+
+// Delivery key policies.
+const (
+	KeyPolicyRequire         = "require"
+	KeyPolicyCertificateOnly = "certificate_only"
+)
+
+// Delivery triggers (from the deployer job).
+const (
+	TriggerManual     = "manual"
+	TriggerAutoDeploy = "auto_deploy"
+	TriggerRetry      = "retry"
+)
+
+// Certificate delivery bounds (research D17).
+const (
+	MaxDeliveryHosts    = 1000
+	MaxHostTags         = 16
+	MaxItemAttempts     = 5
+	MaxItemFetches      = 5
+	MaxReplayPerConnect = 50
+	MaxDetailBytes      = 256
+	MaxCommonNameBytes  = 256 // item and host certificate common_name
+)
 
 // --- audit ---
 

@@ -10,10 +10,13 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -48,6 +51,77 @@ type Config struct {
 	// AgentReleases configures the signed agent releases offered to agents
 	// for self-upgrade and the upgrade request lifecycle (feature 023).
 	AgentReleases AgentReleases `yaml:"agent_releases"`
+	// CertDelivery relays lcm certificates to inventory agents for the
+	// deployer (feature 033); off by default.
+	CertDelivery CertDelivery `yaml:"cert_delivery"`
+}
+
+// CertDelivery configures the certificate delivery relay (feature 033).
+// Sources are the mesh service names (last SPIFFE path segment) allowed to
+// create deliveries, on top of the inbound mesh policy; LCMService is the
+// discovery name of lcm for Certificates/Download. AllowPlaintextIngest lets
+// FetchCertificate serve material over a plaintext ingest edge (development
+// stack only; refused in production).
+type CertDelivery struct {
+	Enabled              bool     `yaml:"enabled"`
+	Sources              []string `yaml:"sources"`
+	LCMService           string   `yaml:"lcm_service"`
+	PendingTTLHours      int      `yaml:"pending_ttl_hours"`
+	ReportTimeoutMinutes int      `yaml:"report_timeout_minutes"`
+	MaxConcurrentFetches int      `yaml:"max_concurrent_fetches"`
+	LCMTimeoutSeconds    int      `yaml:"lcm_timeout_seconds"`
+	AllowPlaintextIngest bool     `yaml:"allow_plaintext_ingest"`
+}
+
+// IsSource reports whether the mesh service may create deliveries.
+func (d CertDelivery) IsSource(service string) bool {
+	for _, s := range d.Sources {
+		if s == service && service != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// PendingTTL bounds how long a delivery item waits for its agent.
+func (d CertDelivery) PendingTTL() time.Duration {
+	return time.Duration(d.PendingTTLHours) * time.Hour
+}
+
+// ReportTimeout fails a fetched item whose agent does not report.
+func (d CertDelivery) ReportTimeout() time.Duration {
+	return time.Duration(d.ReportTimeoutMinutes) * time.Minute
+}
+
+// LCMTimeout bounds one Certificates/Download call.
+func (d CertDelivery) LCMTimeout() time.Duration {
+	return time.Duration(d.LCMTimeoutSeconds) * time.Second
+}
+
+func (d CertDelivery) validate(prod bool) error {
+	if len(d.Sources) > 32 {
+		return errors.New("config: cert_delivery.sources allows at most 32 services")
+	}
+	for _, s := range d.Sources {
+		if !serviceNameRE.MatchString(s) {
+			return fmt.Errorf("config: cert_delivery.sources entry %q is not a service name", s)
+		}
+	}
+	switch {
+	case !serviceNameRE.MatchString(d.LCMService):
+		return errors.New("config: cert_delivery.lcm_service must be a service name")
+	case d.PendingTTLHours < 1 || d.PendingTTLHours > 720:
+		return errors.New("config: cert_delivery.pending_ttl_hours must be within [1, 720]")
+	case d.ReportTimeoutMinutes < 5 || d.ReportTimeoutMinutes > 120:
+		return errors.New("config: cert_delivery.report_timeout_minutes must be within [5, 120]")
+	case d.MaxConcurrentFetches < 1 || d.MaxConcurrentFetches > 500:
+		return errors.New("config: cert_delivery.max_concurrent_fetches must be within [1, 500]")
+	case d.LCMTimeoutSeconds < 2 || d.LCMTimeoutSeconds > 60:
+		return errors.New("config: cert_delivery.lcm_timeout_seconds must be within [2, 60]")
+	case prod && d.AllowPlaintextIngest:
+		return errors.New("config: cert_delivery.allow_plaintext_ingest is not permitted in production")
+	}
+	return nil
 }
 
 // AgentReleases configures agent self-upgrade on the server. BundleDir holds
@@ -239,6 +313,8 @@ func Default() Config {
 		HostReports: HostReports{Consumers: []string{"ipam", "asset"}, MaxPageBytes: 3 << 20},
 		AgentReleases: AgentReleases{BundleDir: "/app/agent-releases", KeepVersions: 5, MaxConcurrentDownloads: 20,
 			ChunkBytes: 1 << 20, RequestTTLHours: 168, ProgressTimeoutMinutes: 15},
+		CertDelivery: CertDelivery{Sources: []string{"deployer"}, LCMService: "lcm", PendingTTLHours: 168,
+			ReportTimeoutMinutes: 15, MaxConcurrentFetches: 50, LCMTimeoutSeconds: 10},
 	}
 }
 
@@ -330,6 +406,9 @@ func (c Config) Validate() error {
 	if err := c.HostReports.validate(); err != nil {
 		return err
 	}
+	if err := c.CertDelivery.validate(prod); err != nil {
+		return err
+	}
 	return c.AgentReleases.validate()
 }
 
@@ -375,6 +454,9 @@ func (c Config) Warnings() []string {
 	}
 	if c.Ingest.Insecure {
 		w = append(w, "ingest.insecure: off-mesh ingest listener without TLS (development only)")
+	}
+	if c.CertDelivery.AllowPlaintextIngest {
+		w = append(w, "cert_delivery.allow_plaintext_ingest: certificate material served to agents without TLS (development only)")
 	}
 	return w
 }
@@ -470,6 +552,115 @@ type AgentConfig struct {
 	// ever downloaded from the configured ingest endpoint; there is
 	// deliberately no other source setting.
 	Upgrade AgentUpgrade `yaml:"upgrade"`
+
+	// Certificates configures the certificates the platform delivers to
+	// this host (feature 033). Files go only to Directory; the server
+	// chooses only the certificate name; nothing runs unless DeployHook is
+	// set here.
+	Certificates AgentCertificates `yaml:"certificates"`
+}
+
+// AgentCertificates is the agent's certificate store configuration
+// (contracts/agent-config.md §1). Modes are octal strings ("0640").
+type AgentCertificates struct {
+	Enabled                bool   `yaml:"enabled"`
+	Directory              string `yaml:"directory"`
+	Owner                  string `yaml:"owner"`
+	Group                  string `yaml:"group"`
+	DirMode                string `yaml:"dir_mode"`
+	CertMode               string `yaml:"cert_mode"`
+	KeyMode                string `yaml:"key_mode"`
+	KeepPrevious           int    `yaml:"keep_previous"`
+	DeployHook             string `yaml:"deploy_hook"`
+	HookTimeoutSeconds     int    `yaml:"hook_timeout_seconds"`
+	AllowInsecureTransport bool   `yaml:"allow_insecure_transport"`
+}
+
+// forbiddenCertDirs are trees the certificate directory may not live in:
+// virtual filesystems, and trees systemd's ProtectHome/PrivateTmp hide from
+// the agent service.
+var forbiddenCertDirs = []string{"/proc", "/sys", "/dev", "/home", "/root", "/tmp"}
+
+var (
+	accountRE = regexp.MustCompile(`^([a-z_][a-z0-9_-]{0,31}|[0-9]{1,10})$`)
+	modeRE    = regexp.MustCompile(`^0?[0-7]{3}$`)
+)
+
+func parseMode(s string) (fs.FileMode, bool) {
+	if !modeRE.MatchString(s) {
+		return 0, false
+	}
+	v, _ := strconv.ParseUint(s, 8, 32) // cannot fail: modeRE admits 3-4 octal digits
+	return fs.FileMode(v), true         // #nosec G115 -- at most 0o7777
+}
+
+func validAccount(s string) bool {
+	if !accountRE.MatchString(s) {
+		return false
+	}
+	if s[0] >= '0' && s[0] <= '9' {
+		v, err := strconv.ParseUint(s, 10, 32)
+		return err == nil && v <= 0xFFFFFFFE
+	}
+	return true
+}
+
+// Validate checks the certificates section (also when disabled). Paths use
+// POSIX rules on every platform: the store is Linux-only (Windows agents
+// never announce cert.v1).
+func (c AgentCertificates) Validate() error {
+	d := c.Directory
+	if d == "" || !path.IsAbs(d) || path.Clean(d) != d || d == "/" {
+		return errors.New("config: agent certificates.directory must be an absolute, clean path other than /")
+	}
+	for _, p := range forbiddenCertDirs {
+		if d == p || strings.HasPrefix(d, p+"/") {
+			return fmt.Errorf("config: agent certificates.directory must not be under %s", p)
+		}
+	}
+	if !validAccount(c.Owner) || !validAccount(c.Group) {
+		return errors.New("config: agent certificates.owner and certificates.group must be a user/group name or a numeric id")
+	}
+	dm, ok := parseMode(c.DirMode)
+	if !ok || dm < 0o700 || dm > 0o755 || dm&0o022 != 0 {
+		return errors.New("config: agent certificates.dir_mode must be an octal mode within 0700-0755 without group/world write")
+	}
+	cm, ok := parseMode(c.CertMode)
+	if !ok || cm&0o022 != 0 || cm&0o400 == 0 {
+		return errors.New("config: agent certificates.cert_mode must be an octal mode readable by the owner without group/world write")
+	}
+	if km, ok := parseMode(c.KeyMode); !ok || (km != 0o600 && km != 0o640) {
+		return errors.New("config: agent certificates.key_mode must be 0600 or 0640")
+	}
+	if c.KeepPrevious < 0 || c.KeepPrevious > 5 {
+		return errors.New("config: agent certificates.keep_previous must be within [0, 5]")
+	}
+	if h := c.DeployHook; h != "" && (!path.IsAbs(h) || path.Clean(h) != h || h == "/") {
+		return errors.New("config: agent certificates.deploy_hook must be empty or an absolute, clean file path")
+	}
+	if c.HookTimeoutSeconds < 30 || c.HookTimeoutSeconds > 1800 {
+		return errors.New("config: agent certificates.hook_timeout_seconds must be within [30, 1800]")
+	}
+	return nil
+}
+
+// Modes returns the validated directory, certificate and key file modes.
+func (c AgentCertificates) Modes() (dir, cert, key fs.FileMode) {
+	dir, _ = parseMode(c.DirMode)
+	cert, _ = parseMode(c.CertMode)
+	key, _ = parseMode(c.KeyMode)
+	return dir, cert, key
+}
+
+// HookTimeout bounds one deploy hook run.
+func (c AgentCertificates) HookTimeout() time.Duration {
+	return time.Duration(c.HookTimeoutSeconds) * time.Second
+}
+
+// Announce reports whether the agent announces cert.v1: enabled, on Linux,
+// and over TLS unless the plaintext opt-out is set locally.
+func (c AgentCertificates) Announce(goos string, insecureTransport bool) bool {
+	return c.Enabled && goos == "linux" && (!insecureTransport || c.AllowInsecureTransport)
 }
 
 // AgentAutoEnroll names an auto-enrollment key: KeyID is its public id
@@ -501,21 +692,32 @@ var autoKeyIDRE = regexp.MustCompile(`^ak_[0-9a-f]{24}$`)
 // DefaultAgent returns the endpoint agent's secure defaults.
 func DefaultAgent() AgentConfig {
 	return AgentConfig{IntervalSeconds: 3600, CollectBMC: true, CollectUpdates: true, UpdateTimeoutSeconds: 120, CollectDisks: true,
-		Upgrade: AgentUpgrade{Enabled: true, ConfirmTimeoutSeconds: 300}}
+		Upgrade: AgentUpgrade{Enabled: true, ConfirmTimeoutSeconds: 300},
+		Certificates: AgentCertificates{Enabled: true, Directory: "/etc/inventory-agent/certs", Owner: "root", Group: "root",
+			DirMode: "0750", CertMode: "0644", KeyMode: "0600", KeepPrevious: 1, HookTimeoutSeconds: 300}}
 }
 
 // LoadAgent reads the endpoint agent's YAML over DefaultAgent(); unknown fields
 // are rejected.
 func LoadAgent(path string) (AgentConfig, error) {
-	cfg := DefaultAgent()
 	raw, err := os.ReadFile(path) // #nosec G304 -- operator-supplied config path
 	if err != nil {
-		return cfg, fmt.Errorf("config: %w", err)
+		return DefaultAgent(), fmt.Errorf("config: %w", err)
 	}
+	cfg, err := decodeAgent(raw)
+	if err != nil {
+		return cfg, fmt.Errorf("config: %s: %w", path, err)
+	}
+	return cfg, nil
+}
+
+// decodeAgent decodes strict YAML over DefaultAgent().
+func decodeAgent(raw []byte) (AgentConfig, error) {
+	cfg := DefaultAgent()
 	dec := yaml.NewDecoder(bytes.NewReader(raw))
 	dec.KnownFields(true)
 	if err := dec.Decode(&cfg); err != nil {
-		return cfg, fmt.Errorf("config: %s: %w", path, err)
+		return cfg, err
 	}
 	return cfg, nil
 }
@@ -559,7 +761,16 @@ func (a AgentConfig) Validate() error {
 			return err
 		}
 	}
-	return nil
+	return a.Certificates.Validate()
+}
+
+// Warnings lists accepted insecure opt-outs of the agent (logged at start).
+func (a AgentConfig) Warnings() []string {
+	var w []string
+	if a.Insecure && a.Certificates.AllowInsecureTransport {
+		w = append(w, "certificates.allow_insecure_transport: certificates and keys received over a plaintext ingest connection (development only)")
+	}
+	return w
 }
 
 // checkCABundle fails fast on an unreadable ca_file or one without a PEM

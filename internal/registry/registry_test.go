@@ -2,6 +2,9 @@ package registry
 
 import (
 	"context"
+	"encoding/json"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 )
@@ -172,5 +175,54 @@ func TestMemoryConnectedAtPreserved(t *testing.T) {
 	list, _ := r.ListConnected(ctx, "t1")
 	if len(list) != 1 || !list[0].ConnectedAt.Equal(when) {
 		t.Fatalf("ConnectedAt not preserved: %+v", list)
+	}
+}
+
+// TestCertificateCommandEncoding (feature 033): a certificate command carries
+// ids only. It round-trips through the in-process registry and through the
+// JSON the Valkey registry publishes, and that JSON has exactly the keys
+// id, type, certificate.item_id and certificate.name (no material).
+func TestCertificateCommandEncoding(t *testing.T) {
+	cmd := Command{ID: "c1", Type: CommandCertificate, Certificate: &CertificatePayload{ItemID: "item-1", Name: "www"}}
+
+	ctx := context.Background()
+	r := NewMemory()
+	ch, unregister, err := r.Register(ctx, ConnectedAgent{AgentID: "a1", TenantID: "t1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unregister()
+	if ok, err := r.Deliver(ctx, "a1", cmd); !ok || err != nil {
+		t.Fatalf("deliver: %v %v", ok, err)
+	}
+	if got := <-ch; got.Type != CommandCertificate || got.Certificate == nil || *got.Certificate != *cmd.Certificate {
+		t.Fatalf("memory round trip: %+v", got)
+	}
+
+	raw, err := json.Marshal(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back Command
+	if err := json.Unmarshal(raw, &back); err != nil || back.Certificate == nil || *back.Certificate != *cmd.Certificate || back.Upgrade != nil {
+		t.Fatalf("json round trip: %+v %v", back, err)
+	}
+	var keys map[string]any
+	if err := json.Unmarshal(raw, &keys); err != nil {
+		t.Fatal(err)
+	}
+	var flat []string
+	for k, v := range keys {
+		if m, ok := v.(map[string]any); ok {
+			for kk := range m {
+				flat = append(flat, k+"."+kk)
+			}
+			continue
+		}
+		flat = append(flat, k)
+	}
+	sort.Strings(flat)
+	if strings.Join(flat, ",") != "certificate.item_id,certificate.name,id,type" {
+		t.Fatalf("certificate command JSON keys = %v (only ids may travel through Valkey)", flat)
 	}
 }

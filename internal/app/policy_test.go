@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 
 	"google.golang.org/protobuf/reflect/protoregistry"
@@ -71,5 +72,54 @@ func TestPolicyIPAMHostSync(t *testing.T) {
 	asset := identity.ForService("example.org", "asset")
 	if pol.Authorize(context.Background(), asset, "inventory", "/inventory.v1.HostReportService/ListReportTenants").Allowed {
 		t.Error("asset may list report tenants")
+	}
+}
+
+// The deployer-cert-delivery rule (feature 033) admits svc/deployer to the
+// five CertificateDeliveryService RPCs and health, and to nothing else in
+// inventory; no other module may create deliveries.
+func TestPolicyDeployerCertDelivery(t *testing.T) {
+	f, err := os.Open("../../deploy/policy.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	pol, err := authz.Load(f)
+	if err != nil {
+		t.Fatalf("policy: %v", err)
+	}
+	deployer := identity.ForService("example.org", "deployer")
+	allowed := map[string]bool{
+		"/inventory.v1.CertificateDeliveryService/CreateCertificateDelivery": true,
+		"/inventory.v1.CertificateDeliveryService/GetCertificateDelivery":    true,
+		"/inventory.v1.CertificateDeliveryService/PreviewCertificateTargets": true,
+		"/inventory.v1.CertificateDeliveryService/VerifyHostCertificates":    true,
+		"/inventory.v1.CertificateDeliveryService/MarkCertificateRevoked":    true,
+		"/grpc.health.v1.Health/Check":                                       true,
+	}
+	ops := append(inventoryOps(t), "/grpc.health.v1.Health/Check", "/grpc.health.v1.Health/Watch")
+	seen := 0
+	for _, op := range ops {
+		d := pol.Authorize(context.Background(), deployer, "inventory", op)
+		if d.Allowed != allowed[op] {
+			t.Errorf("deployer %s: allowed=%v (rule %q)", op, d.Allowed, d.RuleID)
+		}
+		if d.Allowed {
+			seen++
+			if d.RuleID != "deployer-cert-delivery" {
+				t.Errorf("deployer %s allowed by %q", op, d.RuleID)
+			}
+		}
+	}
+	if seen != len(allowed) {
+		t.Fatalf("deployer allowed %d operations, want %d", seen, len(allowed))
+	}
+	for _, svc := range []string{"ipam", "asset", "lcm", "scheduler"} {
+		for op := range allowed {
+			if strings.HasPrefix(op, "/inventory.v1.CertificateDeliveryService/") &&
+				pol.Authorize(context.Background(), identity.ForService("example.org", svc), "inventory", op).Allowed {
+				t.Errorf("%s may call %s", svc, op)
+			}
+		}
 	}
 }

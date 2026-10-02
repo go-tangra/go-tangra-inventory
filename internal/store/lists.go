@@ -47,6 +47,28 @@ var (
 		},
 		Default: "hostname", TieBreak: "agent_id",
 	}
+	// CertItemList pages certificate delivery items (feature 033,
+	// GET /certificate-deliveries): newest first.
+	CertItemList = listquery.Spec{
+		Fields: map[string]listquery.Field{
+			"created_at": {Expr: "created_at", DefaultDir: listquery.Desc, NotNull: true},
+			"updated_at": {Expr: "updated_at", DefaultDir: listquery.Desc, NotNull: true},
+			"state":      {Expr: "state", NotNull: true},
+			"name":       {Expr: "name", Text: true, NotNull: true},
+		},
+		Default: "created_at", TieBreak: "id",
+	}
+	// HostCertList pages a host's certificates (feature 033,
+	// GET /hosts/{id}/certificates; ordered in Go, one row per name).
+	HostCertList = listquery.Spec{
+		Fields: map[string]listquery.Field{
+			"name":              {Expr: "name", Text: true, NotNull: true},
+			"state":             {Expr: "state", NotNull: true},
+			"not_after":         {Expr: "not_after"},
+			"last_delivered_at": {Expr: "last_delivered_at", DefaultDir: listquery.Desc},
+		},
+		Default: "name", TieBreak: "name",
+	}
 	// AutoEnrollKeyList pages a tenant's auto-enrollment keys (in Go).
 	AutoEnrollKeyList = listquery.Spec{
 		Fields: map[string]listquery.Field{

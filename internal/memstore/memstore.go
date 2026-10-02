@@ -34,6 +34,7 @@ type Mem struct {
 	Now      func() time.Time
 	upg      *upgradeState    // feature 023 (lazily created)
 	aes      *autoEnrollState // feature 029 (lazily created)
+	cert     *certState       // feature 033 (lazily created)
 }
 
 // New builds an empty store.
@@ -368,6 +369,13 @@ func (m *Mem) DeleteHost(_ context.Context, tenantID, id string) error {
 			m.agents[aid] = a
 		}
 	}
+	// Feature 033: its active deliveries are cancelled, its certificates forgotten.
+	m.cancelCertLocked(tenantID, repo.CertCancelScope{HostID: id}, store.ReasonHostDeleted, nil)
+	for k := range m.cs().hostCerts {
+		if k[0] == tenantID && k[1] == id {
+			delete(m.cs().hostCerts, k)
+		}
+	}
 	return nil
 }
 
@@ -664,6 +672,8 @@ func (m *Mem) RevokeAgent(_ context.Context, tenantID, id string) error {
 	}
 	a.Revoked = true
 	m.agents[id] = a
+	// Feature 033: the agent's active deliveries are cancelled.
+	m.cancelCertLocked(tenantID, repo.CertCancelScope{AgentID: id}, store.ReasonAgentRevoked, nil)
 	return nil
 }
 

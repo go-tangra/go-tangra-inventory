@@ -121,6 +121,11 @@ func commandToPB(cmd registry.Command) *inventoryv1.Command {
 		out.Type = inventoryv1.CommandType_COMMAND_TYPE_UPGRADE
 		out.Upgrade = &inventoryv1.UpgradeCommand{RequestId: u.RequestID, TargetVersion: u.TargetVersion, AllowDowngrade: u.AllowDowngrade}
 	}
+	// Certificate deliveries carry the item id and name only (feature 033).
+	if c := cmd.Certificate; c != nil {
+		out.Type = inventoryv1.CommandType_COMMAND_TYPE_CERTIFICATE
+		out.Certificate = &inventoryv1.CertificateCommand{ItemId: c.ItemID, Name: c.Name, Attempt: uint32(max(c.Attempt, 0))} // #nosec G115 -- attempts <= 5
+	}
 	return out
 }
 

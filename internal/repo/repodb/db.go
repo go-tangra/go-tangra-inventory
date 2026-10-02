@@ -380,7 +380,12 @@ func (d *DB) DeleteHost(ctx context.Context, tenantID, id string) error {
 		if ct.RowsAffected() == 0 {
 			return repo.ErrNotFound
 		}
-		return nil
+		// Feature 033: its active deliveries are cancelled, its certificates forgotten.
+		if _, e := cancelItemsTx(ctx, tx, tenantID, "host_id::text", id, store.ReasonHostDeleted, nil); e != nil {
+			return e
+		}
+		_, e = tx.Exec(ctx, "DELETE FROM inventory_host_certificates WHERE tenant_id=$1 AND host_id=$2", tenantID, id)
+		return e
 	})
 }
 
@@ -924,7 +929,9 @@ func (d *DB) RevokeAgent(ctx context.Context, tenantID, id string) error {
 		if ct.RowsAffected() == 0 {
 			return repo.ErrNotFound
 		}
-		return nil
+		// Feature 033: the agent's active deliveries are cancelled.
+		_, e = cancelItemsTx(ctx, tx, tenantID, "agent_id::text", id, store.ReasonAgentRevoked, nil)
+		return e
 	})
 }
 

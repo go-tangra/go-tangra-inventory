@@ -58,3 +58,31 @@ func TestManifestBuilds(t *testing.T) {
 		t.Fatalf("permissions = %d", len(m.Permissions))
 	}
 }
+
+// TestCertificateRoutesInManifest (feature 033 US4): the gateway enforces
+// inventory:read on the certificate reads and agents:manage on cancel; no new
+// permission is registered (research D18).
+func TestCertificateRoutesInManifest(t *testing.T) {
+	m, err := Manifest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"GET /api/inventory/v1/hosts/{id}/certificates":                  "inventory:read",
+		"GET /api/inventory/v1/certificate-deliveries":                   "inventory:read",
+		"GET /api/inventory/v1/certificate-deliveries/{item_id}":         "inventory:read",
+		"POST /api/inventory/v1/certificate-deliveries/{item_id}/cancel": "agents:manage",
+	}
+	for _, r := range m.Routes {
+		k := r.Method + " " + r.Path
+		if perm, ok := want[k]; ok {
+			if r.Public || r.Permission != perm {
+				t.Errorf("%s: permission %q public %v, want %q", k, r.Permission, r.Public, perm)
+			}
+			delete(want, k)
+		}
+	}
+	if len(want) != 0 {
+		t.Fatalf("routes missing from the manifest: %v", want)
+	}
+}

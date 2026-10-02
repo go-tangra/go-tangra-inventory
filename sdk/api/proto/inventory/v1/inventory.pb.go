@@ -12,6 +12,10 @@
 //     SPIFFE mTLS channel, acting for the tenant named in each request
 //     (tenant_id). The actor identity comes from the verified SPIFFE peer.
 //
+//   * CertificateDeliveryService (feature 033), the deployer's mesh entry point
+//     for relaying lcm certificates to inventory agents: references only, it
+//     never carries certificate or key material.
+//
 //   * The off-mesh ingest edge (IngestService), served on a dedicated listener
 //     network-isolated from the mesh, where endpoint agents authenticate with a
 //     per-agent sealed credential presented in call metadata.
@@ -20,6 +24,8 @@
 // enrollment-token secret, with the single deliberate exception of
 // EnrollResponse.agent_credential (issued exactly once at enrollment) and
 // MintEnrollmentTokenResponse.token (the mint secret, returned exactly once).
+// CertificateBundle (FetchCertificate, feature 033) is the only message that
+// carries a private key; it is never logged, stored, cached or published.
 // Snapshot and host messages exclude sealed fields and are safe to log.
 
 package inventoryv1
@@ -207,6 +213,9 @@ const (
 	// Upgrade the agent to Command.upgrade.target_version (feature 023). Agents
 	// older than 023 log and ignore it.
 	CommandType_COMMAND_TYPE_UPGRADE CommandType = 2
+	// Install the certificate of delivery item Command.certificate.item_id
+	// (feature 033). Agents older than 033 log and ignore it.
+	CommandType_COMMAND_TYPE_CERTIFICATE CommandType = 3
 )
 
 // Enum value maps for CommandType.
@@ -215,11 +224,13 @@ var (
 		0: "COMMAND_TYPE_UNSPECIFIED",
 		1: "COMMAND_TYPE_REFRESH",
 		2: "COMMAND_TYPE_UPGRADE",
+		3: "COMMAND_TYPE_CERTIFICATE",
 	}
 	CommandType_value = map[string]int32{
 		"COMMAND_TYPE_UNSPECIFIED": 0,
 		"COMMAND_TYPE_REFRESH":     1,
 		"COMMAND_TYPE_UPGRADE":     2,
+		"COMMAND_TYPE_CERTIFICATE": 3,
 	}
 )
 
@@ -298,6 +309,83 @@ func (x HostReportView) Number() protoreflect.EnumNumber {
 // Deprecated: Use HostReportView.Descriptor instead.
 func (HostReportView) EnumDescriptor() ([]byte, []int) {
 	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{4}
+}
+
+// DeliveryState is the state of one delivery item (one host).
+type DeliveryState int32
+
+const (
+	DeliveryState_DELIVERY_STATE_UNSPECIFIED DeliveryState = 0
+	DeliveryState_DELIVERY_STATE_PENDING     DeliveryState = 1
+	DeliveryState_DELIVERY_STATE_DELIVERED   DeliveryState = 2
+	DeliveryState_DELIVERY_STATE_FETCHED     DeliveryState = 3
+	DeliveryState_DELIVERY_STATE_INSTALLED   DeliveryState = 4
+	DeliveryState_DELIVERY_STATE_UNCHANGED   DeliveryState = 5
+	DeliveryState_DELIVERY_STATE_FAILED      DeliveryState = 6
+	DeliveryState_DELIVERY_STATE_HOOK_FAILED DeliveryState = 7
+	DeliveryState_DELIVERY_STATE_UNSUPPORTED DeliveryState = 8
+	DeliveryState_DELIVERY_STATE_SUPERSEDED  DeliveryState = 9
+	DeliveryState_DELIVERY_STATE_EXPIRED     DeliveryState = 10
+	DeliveryState_DELIVERY_STATE_CANCELLED   DeliveryState = 11
+)
+
+// Enum value maps for DeliveryState.
+var (
+	DeliveryState_name = map[int32]string{
+		0:  "DELIVERY_STATE_UNSPECIFIED",
+		1:  "DELIVERY_STATE_PENDING",
+		2:  "DELIVERY_STATE_DELIVERED",
+		3:  "DELIVERY_STATE_FETCHED",
+		4:  "DELIVERY_STATE_INSTALLED",
+		5:  "DELIVERY_STATE_UNCHANGED",
+		6:  "DELIVERY_STATE_FAILED",
+		7:  "DELIVERY_STATE_HOOK_FAILED",
+		8:  "DELIVERY_STATE_UNSUPPORTED",
+		9:  "DELIVERY_STATE_SUPERSEDED",
+		10: "DELIVERY_STATE_EXPIRED",
+		11: "DELIVERY_STATE_CANCELLED",
+	}
+	DeliveryState_value = map[string]int32{
+		"DELIVERY_STATE_UNSPECIFIED": 0,
+		"DELIVERY_STATE_PENDING":     1,
+		"DELIVERY_STATE_DELIVERED":   2,
+		"DELIVERY_STATE_FETCHED":     3,
+		"DELIVERY_STATE_INSTALLED":   4,
+		"DELIVERY_STATE_UNCHANGED":   5,
+		"DELIVERY_STATE_FAILED":      6,
+		"DELIVERY_STATE_HOOK_FAILED": 7,
+		"DELIVERY_STATE_UNSUPPORTED": 8,
+		"DELIVERY_STATE_SUPERSEDED":  9,
+		"DELIVERY_STATE_EXPIRED":     10,
+		"DELIVERY_STATE_CANCELLED":   11,
+	}
+)
+
+func (x DeliveryState) Enum() *DeliveryState {
+	p := new(DeliveryState)
+	*p = x
+	return p
+}
+
+func (x DeliveryState) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (DeliveryState) Descriptor() protoreflect.EnumDescriptor {
+	return file_inventory_v1_inventory_proto_enumTypes[5].Descriptor()
+}
+
+func (DeliveryState) Type() protoreflect.EnumType {
+	return &file_inventory_v1_inventory_proto_enumTypes[5]
+}
+
+func (x DeliveryState) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use DeliveryState.Descriptor instead.
+func (DeliveryState) EnumDescriptor() ([]byte, []int) {
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{5}
 }
 
 // Identity carries the fields an agent reports to resolve a stable host.
@@ -6387,7 +6475,8 @@ type Command struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	CommandId     string                 `protobuf:"bytes,1,opt,name=command_id,json=commandId,proto3" json:"command_id,omitempty"`
 	Type          CommandType            `protobuf:"varint,2,opt,name=type,proto3,enum=inventory.v1.CommandType" json:"type,omitempty"`
-	Upgrade       *UpgradeCommand        `protobuf:"bytes,3,opt,name=upgrade,proto3" json:"upgrade,omitempty"` // set when type = UPGRADE
+	Upgrade       *UpgradeCommand        `protobuf:"bytes,3,opt,name=upgrade,proto3" json:"upgrade,omitempty"`         // set when type = UPGRADE
+	Certificate   *CertificateCommand    `protobuf:"bytes,4,opt,name=certificate,proto3" json:"certificate,omitempty"` // set when type = CERTIFICATE (feature 033)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -6443,6 +6532,75 @@ func (x *Command) GetUpgrade() *UpgradeCommand {
 	return nil
 }
 
+func (x *Command) GetCertificate() *CertificateCommand {
+	if x != nil {
+		return x.Certificate
+	}
+	return nil
+}
+
+// CertificateCommand carries only references; the agent pulls the material
+// with FetchCertificate over its authenticated connection (feature 033).
+type CertificateCommand struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ItemId        string                 `protobuf:"bytes,1,opt,name=item_id,json=itemId,proto3" json:"item_id,omitempty"` // uuid of the delivery item
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`                   // ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$, no ".."; validated again by the agent
+	Attempt       uint32                 `protobuf:"varint,3,opt,name=attempt,proto3" json:"attempt,omitempty"`            // the item's attempt; a re-armed item is a new attempt the agent must not dedupe away
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CertificateCommand) Reset() {
+	*x = CertificateCommand{}
+	mi := &file_inventory_v1_inventory_proto_msgTypes[79]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CertificateCommand) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CertificateCommand) ProtoMessage() {}
+
+func (x *CertificateCommand) ProtoReflect() protoreflect.Message {
+	mi := &file_inventory_v1_inventory_proto_msgTypes[79]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CertificateCommand.ProtoReflect.Descriptor instead.
+func (*CertificateCommand) Descriptor() ([]byte, []int) {
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{79}
+}
+
+func (x *CertificateCommand) GetItemId() string {
+	if x != nil {
+		return x.ItemId
+	}
+	return ""
+}
+
+func (x *CertificateCommand) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *CertificateCommand) GetAttempt() uint32 {
+	if x != nil {
+		return x.Attempt
+	}
+	return 0
+}
+
 // UpgradeCommand asks the agent to upgrade to target_version. The agent
 // downloads the artifact over DownloadAgentRelease and verifies it against
 // its compiled keyring before installing anything.
@@ -6457,7 +6615,7 @@ type UpgradeCommand struct {
 
 func (x *UpgradeCommand) Reset() {
 	*x = UpgradeCommand{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[79]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[80]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6469,7 +6627,7 @@ func (x *UpgradeCommand) String() string {
 func (*UpgradeCommand) ProtoMessage() {}
 
 func (x *UpgradeCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[79]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[80]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6482,7 +6640,7 @@ func (x *UpgradeCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpgradeCommand.ProtoReflect.Descriptor instead.
 func (*UpgradeCommand) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{79}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{80}
 }
 
 func (x *UpgradeCommand) GetRequestId() string {
@@ -6517,7 +6675,7 @@ type CheckAgentUpdateRequest struct {
 
 func (x *CheckAgentUpdateRequest) Reset() {
 	*x = CheckAgentUpdateRequest{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[80]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[81]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6529,7 +6687,7 @@ func (x *CheckAgentUpdateRequest) String() string {
 func (*CheckAgentUpdateRequest) ProtoMessage() {}
 
 func (x *CheckAgentUpdateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[80]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[81]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6542,7 +6700,7 @@ func (x *CheckAgentUpdateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckAgentUpdateRequest.ProtoReflect.Descriptor instead.
 func (*CheckAgentUpdateRequest) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{80}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{81}
 }
 
 func (x *CheckAgentUpdateRequest) GetCurrentVersion() string {
@@ -6579,7 +6737,7 @@ type CheckAgentUpdateResponse struct {
 
 func (x *CheckAgentUpdateResponse) Reset() {
 	*x = CheckAgentUpdateResponse{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[81]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[82]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6591,7 +6749,7 @@ func (x *CheckAgentUpdateResponse) String() string {
 func (*CheckAgentUpdateResponse) ProtoMessage() {}
 
 func (x *CheckAgentUpdateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[81]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[82]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6604,7 +6762,7 @@ func (x *CheckAgentUpdateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckAgentUpdateResponse.ProtoReflect.Descriptor instead.
 func (*CheckAgentUpdateResponse) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{81}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{82}
 }
 
 func (x *CheckAgentUpdateResponse) GetAvailable() bool {
@@ -6652,7 +6810,7 @@ type DownloadAgentReleaseRequest struct {
 
 func (x *DownloadAgentReleaseRequest) Reset() {
 	*x = DownloadAgentReleaseRequest{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[82]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[83]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6664,7 +6822,7 @@ func (x *DownloadAgentReleaseRequest) String() string {
 func (*DownloadAgentReleaseRequest) ProtoMessage() {}
 
 func (x *DownloadAgentReleaseRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[82]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[83]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6677,7 +6835,7 @@ func (x *DownloadAgentReleaseRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DownloadAgentReleaseRequest.ProtoReflect.Descriptor instead.
 func (*DownloadAgentReleaseRequest) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{82}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{83}
 }
 
 func (x *DownloadAgentReleaseRequest) GetRequestId() string {
@@ -6707,7 +6865,7 @@ type DownloadAgentReleaseResponse struct {
 
 func (x *DownloadAgentReleaseResponse) Reset() {
 	*x = DownloadAgentReleaseResponse{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[83]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[84]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6719,7 +6877,7 @@ func (x *DownloadAgentReleaseResponse) String() string {
 func (*DownloadAgentReleaseResponse) ProtoMessage() {}
 
 func (x *DownloadAgentReleaseResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[83]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[84]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6732,7 +6890,7 @@ func (x *DownloadAgentReleaseResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DownloadAgentReleaseResponse.ProtoReflect.Descriptor instead.
 func (*DownloadAgentReleaseResponse) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{83}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{84}
 }
 
 func (x *DownloadAgentReleaseResponse) GetPart() isDownloadAgentReleaseResponse_Part {
@@ -6792,7 +6950,7 @@ type ReleaseHeader struct {
 
 func (x *ReleaseHeader) Reset() {
 	*x = ReleaseHeader{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[84]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[85]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6804,7 +6962,7 @@ func (x *ReleaseHeader) String() string {
 func (*ReleaseHeader) ProtoMessage() {}
 
 func (x *ReleaseHeader) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[84]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[85]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6817,7 +6975,7 @@ func (x *ReleaseHeader) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReleaseHeader.ProtoReflect.Descriptor instead.
 func (*ReleaseHeader) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{84}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{85}
 }
 
 func (x *ReleaseHeader) GetManifest() []byte {
@@ -6872,7 +7030,7 @@ type ArtifactChunk struct {
 
 func (x *ArtifactChunk) Reset() {
 	*x = ArtifactChunk{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[85]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[86]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6884,7 +7042,7 @@ func (x *ArtifactChunk) String() string {
 func (*ArtifactChunk) ProtoMessage() {}
 
 func (x *ArtifactChunk) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[85]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[86]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6897,7 +7055,7 @@ func (x *ArtifactChunk) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArtifactChunk.ProtoReflect.Descriptor instead.
 func (*ArtifactChunk) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{85}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{86}
 }
 
 func (x *ArtifactChunk) GetOffset() int64 {
@@ -6934,7 +7092,7 @@ type ReportUpgradeRequest struct {
 
 func (x *ReportUpgradeRequest) Reset() {
 	*x = ReportUpgradeRequest{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[86]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[87]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6946,7 +7104,7 @@ func (x *ReportUpgradeRequest) String() string {
 func (*ReportUpgradeRequest) ProtoMessage() {}
 
 func (x *ReportUpgradeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[86]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[87]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6959,7 +7117,7 @@ func (x *ReportUpgradeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportUpgradeRequest.ProtoReflect.Descriptor instead.
 func (*ReportUpgradeRequest) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{86}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{87}
 }
 
 func (x *ReportUpgradeRequest) GetRequestId() string {
@@ -7013,7 +7171,7 @@ type ReportUpgradeResponse struct {
 
 func (x *ReportUpgradeResponse) Reset() {
 	*x = ReportUpgradeResponse{}
-	mi := &file_inventory_v1_inventory_proto_msgTypes[87]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[88]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7025,7 +7183,7 @@ func (x *ReportUpgradeResponse) String() string {
 func (*ReportUpgradeResponse) ProtoMessage() {}
 
 func (x *ReportUpgradeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_inventory_v1_inventory_proto_msgTypes[87]
+	mi := &file_inventory_v1_inventory_proto_msgTypes[88]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7038,7 +7196,7 @@ func (x *ReportUpgradeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportUpgradeResponse.ProtoReflect.Descriptor instead.
 func (*ReportUpgradeResponse) Descriptor() ([]byte, []int) {
-	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{87}
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{88}
 }
 
 func (x *ReportUpgradeResponse) GetAccepted() bool {
@@ -7046,6 +7204,1339 @@ func (x *ReportUpgradeResponse) GetAccepted() bool {
 		return x.Accepted
 	}
 	return false
+}
+
+type FetchCertificateRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ItemId        string                 `protobuf:"bytes,1,opt,name=item_id,json=itemId,proto3" json:"item_id,omitempty"` // uuid of the agent's own active delivery item
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FetchCertificateRequest) Reset() {
+	*x = FetchCertificateRequest{}
+	mi := &file_inventory_v1_inventory_proto_msgTypes[89]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FetchCertificateRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FetchCertificateRequest) ProtoMessage() {}
+
+func (x *FetchCertificateRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_inventory_v1_inventory_proto_msgTypes[89]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FetchCertificateRequest.ProtoReflect.Descriptor instead.
+func (*FetchCertificateRequest) Descriptor() ([]byte, []int) {
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{89}
+}
+
+func (x *FetchCertificateRequest) GetItemId() string {
+	if x != nil {
+		return x.ItemId
+	}
+	return ""
+}
+
+// CertificateBundle is the only message that carries a private key outside
+// lcm. It is never logged, stored, cached or published by the inventory.
+type CertificateBundle struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	ItemId            string                 `protobuf:"bytes,1,opt,name=item_id,json=itemId,proto3" json:"item_id,omitempty"`
+	Name              string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	CertificateId     string                 `protobuf:"bytes,3,opt,name=certificate_id,json=certificateId,proto3" json:"certificate_id,omitempty"`
+	CertPem           string                 `protobuf:"bytes,4,opt,name=cert_pem,json=certPem,proto3" json:"cert_pem,omitempty"`    // leaf, <= 64 KiB
+	ChainPem          string                 `protobuf:"bytes,5,opt,name=chain_pem,json=chainPem,proto3" json:"chain_pem,omitempty"` // intermediates, <= 256 KiB, <= 10 certs
+	KeyPem            string                 `protobuf:"bytes,6,opt,name=key_pem,json=keyPem,proto3" json:"key_pem,omitempty"`       // "" when key_policy = certificate_only; <= 16 KiB
+	HasKey            bool                   `protobuf:"varint,7,opt,name=has_key,json=hasKey,proto3" json:"has_key,omitempty"`
+	Serial            string                 `protobuf:"bytes,8,opt,name=serial,proto3" json:"serial,omitempty"`                                                // lowercase hex
+	FingerprintSha256 string                 `protobuf:"bytes,9,opt,name=fingerprint_sha256,json=fingerprintSha256,proto3" json:"fingerprint_sha256,omitempty"` // of the leaf DER, lowercase hex
+	CommonName        string                 `protobuf:"bytes,10,opt,name=common_name,json=commonName,proto3" json:"common_name,omitempty"`
+	DnsNames          []string               `protobuf:"bytes,11,rep,name=dns_names,json=dnsNames,proto3" json:"dns_names,omitempty"`          // <= 100
+	IpAddresses       []string               `protobuf:"bytes,12,rep,name=ip_addresses,json=ipAddresses,proto3" json:"ip_addresses,omitempty"` // <= 100
+	NotBefore         int64                  `protobuf:"varint,13,opt,name=not_before,json=notBefore,proto3" json:"not_before,omitempty"`      // unix seconds
+	NotAfter          int64                  `protobuf:"varint,14,opt,name=not_after,json=notAfter,proto3" json:"not_after,omitempty"`         // unix seconds
+	IsRenewal         bool                   `protobuf:"varint,15,opt,name=is_renewal,json=isRenewal,proto3" json:"is_renewal,omitempty"`      // the host had a different certificate under name
+	RerunHook         bool                   `protobuf:"varint,16,opt,name=rerun_hook,json=rerunHook,proto3" json:"rerun_hook,omitempty"`      // re-armed after hook_failed: run the hook even if unchanged
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *CertificateBundle) Reset() {
+	*x = CertificateBundle{}
+	mi := &file_inventory_v1_inventory_proto_msgTypes[90]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CertificateBundle) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CertificateBundle) ProtoMessage() {}
+
+func (x *CertificateBundle) ProtoReflect() protoreflect.Message {
+	mi := &file_inventory_v1_inventory_proto_msgTypes[90]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CertificateBundle.ProtoReflect.Descriptor instead.
+func (*CertificateBundle) Descriptor() ([]byte, []int) {
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{90}
+}
+
+func (x *CertificateBundle) GetItemId() string {
+	if x != nil {
+		return x.ItemId
+	}
+	return ""
+}
+
+func (x *CertificateBundle) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *CertificateBundle) GetCertificateId() string {
+	if x != nil {
+		return x.CertificateId
+	}
+	return ""
+}
+
+func (x *CertificateBundle) GetCertPem() string {
+	if x != nil {
+		return x.CertPem
+	}
+	return ""
+}
+
+func (x *CertificateBundle) GetChainPem() string {
+	if x != nil {
+		return x.ChainPem
+	}
+	return ""
+}
+
+func (x *CertificateBundle) GetKeyPem() string {
+	if x != nil {
+		return x.KeyPem
+	}
+	return ""
+}
+
+func (x *CertificateBundle) GetHasKey() bool {
+	if x != nil {
+		return x.HasKey
+	}
+	return false
+}
+
+func (x *CertificateBundle) GetSerial() string {
+	if x != nil {
+		return x.Serial
+	}
+	return ""
+}
+
+func (x *CertificateBundle) GetFingerprintSha256() string {
+	if x != nil {
+		return x.FingerprintSha256
+	}
+	return ""
+}
+
+func (x *CertificateBundle) GetCommonName() string {
+	if x != nil {
+		return x.CommonName
+	}
+	return ""
+}
+
+func (x *CertificateBundle) GetDnsNames() []string {
+	if x != nil {
+		return x.DnsNames
+	}
+	return nil
+}
+
+func (x *CertificateBundle) GetIpAddresses() []string {
+	if x != nil {
+		return x.IpAddresses
+	}
+	return nil
+}
+
+func (x *CertificateBundle) GetNotBefore() int64 {
+	if x != nil {
+		return x.NotBefore
+	}
+	return 0
+}
+
+func (x *CertificateBundle) GetNotAfter() int64 {
+	if x != nil {
+		return x.NotAfter
+	}
+	return 0
+}
+
+func (x *CertificateBundle) GetIsRenewal() bool {
+	if x != nil {
+		return x.IsRenewal
+	}
+	return false
+}
+
+func (x *CertificateBundle) GetRerunHook() bool {
+	if x != nil {
+		return x.RerunHook
+	}
+	return false
+}
+
+// ReportCertificateRequest states: installed | unchanged | failed |
+// hook_failed. Reason codes (closed set): invalid_name, invalid_bundle,
+// key_mismatch, certificate_not_valid, owner_unknown, write_failed,
+// disk_full, hook_failed, hook_timeout, hook_refused, disabled_locally, busy.
+type ReportCertificateRequest struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	ItemId            string                 `protobuf:"bytes,1,opt,name=item_id,json=itemId,proto3" json:"item_id,omitempty"`
+	State             string                 `protobuf:"bytes,2,opt,name=state,proto3" json:"state,omitempty"`
+	Serial            string                 `protobuf:"bytes,3,opt,name=serial,proto3" json:"serial,omitempty"`
+	FingerprintSha256 string                 `protobuf:"bytes,4,opt,name=fingerprint_sha256,json=fingerprintSha256,proto3" json:"fingerprint_sha256,omitempty"` // of the leaf as written on disk
+	Reason            string                 `protobuf:"bytes,5,opt,name=reason,proto3" json:"reason,omitempty"`
+	HookExitCode      int32                  `protobuf:"varint,6,opt,name=hook_exit_code,json=hookExitCode,proto3" json:"hook_exit_code,omitempty"` // -1 = hook not run; 0..255; 256 = timeout
+	Detail            string                 `protobuf:"bytes,7,opt,name=detail,proto3" json:"detail,omitempty"`                                    // <= 256 bytes, sanitised; never hook output
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *ReportCertificateRequest) Reset() {
+	*x = ReportCertificateRequest{}
+	mi := &file_inventory_v1_inventory_proto_msgTypes[91]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReportCertificateRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReportCertificateRequest) ProtoMessage() {}
+
+func (x *ReportCertificateRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_inventory_v1_inventory_proto_msgTypes[91]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReportCertificateRequest.ProtoReflect.Descriptor instead.
+func (*ReportCertificateRequest) Descriptor() ([]byte, []int) {
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{91}
+}
+
+func (x *ReportCertificateRequest) GetItemId() string {
+	if x != nil {
+		return x.ItemId
+	}
+	return ""
+}
+
+func (x *ReportCertificateRequest) GetState() string {
+	if x != nil {
+		return x.State
+	}
+	return ""
+}
+
+func (x *ReportCertificateRequest) GetSerial() string {
+	if x != nil {
+		return x.Serial
+	}
+	return ""
+}
+
+func (x *ReportCertificateRequest) GetFingerprintSha256() string {
+	if x != nil {
+		return x.FingerprintSha256
+	}
+	return ""
+}
+
+func (x *ReportCertificateRequest) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *ReportCertificateRequest) GetHookExitCode() int32 {
+	if x != nil {
+		return x.HookExitCode
+	}
+	return 0
+}
+
+func (x *ReportCertificateRequest) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
+
+type ReportCertificateResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Accepted      bool                   `protobuf:"varint,1,opt,name=accepted,proto3" json:"accepted,omitempty"` // false = ignored (terminal/duplicate)
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReportCertificateResponse) Reset() {
+	*x = ReportCertificateResponse{}
+	mi := &file_inventory_v1_inventory_proto_msgTypes[92]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReportCertificateResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReportCertificateResponse) ProtoMessage() {}
+
+func (x *ReportCertificateResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_inventory_v1_inventory_proto_msgTypes[92]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReportCertificateResponse.ProtoReflect.Descriptor instead.
+func (*ReportCertificateResponse) Descriptor() ([]byte, []int) {
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{92}
+}
+
+func (x *ReportCertificateResponse) GetAccepted() bool {
+	if x != nil {
+		return x.Accepted
+	}
+	return false
+}
+
+// HostSelector selects hosts by id and/or tags (union of both).
+type HostSelector struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	HostIds       []string               `protobuf:"bytes,1,rep,name=host_ids,json=hostIds,proto3" json:"host_ids,omitempty"`    // <= 1000 uuids
+	HostTags      []string               `protobuf:"bytes,2,rep,name=host_tags,json=hostTags,proto3" json:"host_tags,omitempty"` // <= 16, "key" or "key=value"; a host must match all
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HostSelector) Reset() {
+	*x = HostSelector{}
+	mi := &file_inventory_v1_inventory_proto_msgTypes[93]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HostSelector) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HostSelector) ProtoMessage() {}
+
+func (x *HostSelector) ProtoReflect() protoreflect.Message {
+	mi := &file_inventory_v1_inventory_proto_msgTypes[93]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HostSelector.ProtoReflect.Descriptor instead.
+func (*HostSelector) Descriptor() ([]byte, []int) {
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{93}
+}
+
+func (x *HostSelector) GetHostIds() []string {
+	if x != nil {
+		return x.HostIds
+	}
+	return nil
+}
+
+func (x *HostSelector) GetHostTags() []string {
+	if x != nil {
+		return x.HostTags
+	}
+	return nil
+}
+
+type CreateCertificateDeliveryRequest struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	TenantId        string                 `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
+	IdempotencyKey  string                 `protobuf:"bytes,2,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`    // deployer job id, 1..128
+	ConfigurationId string                 `protobuf:"bytes,3,opt,name=configuration_id,json=configurationId,proto3" json:"configuration_id,omitempty"` // <= 128
+	TargetId        string                 `protobuf:"bytes,4,opt,name=target_id,json=targetId,proto3" json:"target_id,omitempty"`                      // <= 128, "" for direct jobs
+	Trigger         string                 `protobuf:"bytes,5,opt,name=trigger,proto3" json:"trigger,omitempty"`                                        // manual | auto_deploy | retry
+	CertificateId   string                 `protobuf:"bytes,6,opt,name=certificate_id,json=certificateId,proto3" json:"certificate_id,omitempty"`       // lcm certificate id
+	Name            string                 `protobuf:"bytes,7,opt,name=name,proto3" json:"name,omitempty"`                                              // ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$, no ".."
+	KeyPolicy       string                 `protobuf:"bytes,8,opt,name=key_policy,json=keyPolicy,proto3" json:"key_policy,omitempty"`                   // require | certificate_only
+	Selector        *HostSelector          `protobuf:"bytes,9,opt,name=selector,proto3" json:"selector,omitempty"`                                      // at least one id or tag
+	RearmFailed     bool                   `protobuf:"varint,10,opt,name=rearm_failed,json=rearmFailed,proto3" json:"rearm_failed,omitempty"`           // existing delivery: re-arm failed|hook_failed|expired items
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *CreateCertificateDeliveryRequest) Reset() {
+	*x = CreateCertificateDeliveryRequest{}
+	mi := &file_inventory_v1_inventory_proto_msgTypes[94]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateCertificateDeliveryRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateCertificateDeliveryRequest) ProtoMessage() {}
+
+func (x *CreateCertificateDeliveryRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_inventory_v1_inventory_proto_msgTypes[94]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateCertificateDeliveryRequest.ProtoReflect.Descriptor instead.
+func (*CreateCertificateDeliveryRequest) Descriptor() ([]byte, []int) {
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{94}
+}
+
+func (x *CreateCertificateDeliveryRequest) GetTenantId() string {
+	if x != nil {
+		return x.TenantId
+	}
+	return ""
+}
+
+func (x *CreateCertificateDeliveryRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *CreateCertificateDeliveryRequest) GetConfigurationId() string {
+	if x != nil {
+		return x.ConfigurationId
+	}
+	return ""
+}
+
+func (x *CreateCertificateDeliveryRequest) GetTargetId() string {
+	if x != nil {
+		return x.TargetId
+	}
+	return ""
+}
+
+func (x *CreateCertificateDeliveryRequest) GetTrigger() string {
+	if x != nil {
+		return x.Trigger
+	}
+	return ""
+}
+
+func (x *CreateCertificateDeliveryRequest) GetCertificateId() string {
+	if x != nil {
+		return x.CertificateId
+	}
+	return ""
+}
+
+func (x *CreateCertificateDeliveryRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *CreateCertificateDeliveryRequest) GetKeyPolicy() string {
+	if x != nil {
+		return x.KeyPolicy
+	}
+	return ""
+}
+
+func (x *CreateCertificateDeliveryRequest) GetSelector() *HostSelector {
+	if x != nil {
+		return x.Selector
+	}
+	return nil
+}
+
+func (x *CreateCertificateDeliveryRequest) GetRearmFailed() bool {
+	if x != nil {
+		return x.RearmFailed
+	}
+	return false
+}
+
+type GetCertificateDeliveryRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TenantId      string                 `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
+	Id            string                 `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetCertificateDeliveryRequest) Reset() {
+	*x = GetCertificateDeliveryRequest{}
+	mi := &file_inventory_v1_inventory_proto_msgTypes[95]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetCertificateDeliveryRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetCertificateDeliveryRequest) ProtoMessage() {}
+
+func (x *GetCertificateDeliveryRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_inventory_v1_inventory_proto_msgTypes[95]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetCertificateDeliveryRequest.ProtoReflect.Descriptor instead.
+func (*GetCertificateDeliveryRequest) Descriptor() ([]byte, []int) {
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{95}
+}
+
+func (x *GetCertificateDeliveryRequest) GetTenantId() string {
+	if x != nil {
+		return x.TenantId
+	}
+	return ""
+}
+
+func (x *GetCertificateDeliveryRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+type CertificateDeliveryItem struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Id                string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	HostId            string                 `protobuf:"bytes,2,opt,name=host_id,json=hostId,proto3" json:"host_id,omitempty"`
+	Hostname          string                 `protobuf:"bytes,3,opt,name=hostname,proto3" json:"hostname,omitempty"`
+	AgentOnline       bool                   `protobuf:"varint,4,opt,name=agent_online,json=agentOnline,proto3" json:"agent_online,omitempty"`
+	State             DeliveryState          `protobuf:"varint,5,opt,name=state,proto3,enum=inventory.v1.DeliveryState" json:"state,omitempty"`
+	Reason            string                 `protobuf:"bytes,6,opt,name=reason,proto3" json:"reason,omitempty"` // closed set
+	Serial            string                 `protobuf:"bytes,7,opt,name=serial,proto3" json:"serial,omitempty"`
+	FingerprintSha256 string                 `protobuf:"bytes,8,opt,name=fingerprint_sha256,json=fingerprintSha256,proto3" json:"fingerprint_sha256,omitempty"`
+	HookExitCode      int32                  `protobuf:"varint,9,opt,name=hook_exit_code,json=hookExitCode,proto3" json:"hook_exit_code,omitempty"` // -1 = none
+	Attempts          int32                  `protobuf:"varint,10,opt,name=attempts,proto3" json:"attempts,omitempty"`
+	UpdatedAt         int64                  `protobuf:"varint,11,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"` // unix seconds
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *CertificateDeliveryItem) Reset() {
+	*x = CertificateDeliveryItem{}
+	mi := &file_inventory_v1_inventory_proto_msgTypes[96]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CertificateDeliveryItem) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CertificateDeliveryItem) ProtoMessage() {}
+
+func (x *CertificateDeliveryItem) ProtoReflect() protoreflect.Message {
+	mi := &file_inventory_v1_inventory_proto_msgTypes[96]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CertificateDeliveryItem.ProtoReflect.Descriptor instead.
+func (*CertificateDeliveryItem) Descriptor() ([]byte, []int) {
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{96}
+}
+
+func (x *CertificateDeliveryItem) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *CertificateDeliveryItem) GetHostId() string {
+	if x != nil {
+		return x.HostId
+	}
+	return ""
+}
+
+func (x *CertificateDeliveryItem) GetHostname() string {
+	if x != nil {
+		return x.Hostname
+	}
+	return ""
+}
+
+func (x *CertificateDeliveryItem) GetAgentOnline() bool {
+	if x != nil {
+		return x.AgentOnline
+	}
+	return false
+}
+
+func (x *CertificateDeliveryItem) GetState() DeliveryState {
+	if x != nil {
+		return x.State
+	}
+	return DeliveryState_DELIVERY_STATE_UNSPECIFIED
+}
+
+func (x *CertificateDeliveryItem) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *CertificateDeliveryItem) GetSerial() string {
+	if x != nil {
+		return x.Serial
+	}
+	return ""
+}
+
+func (x *CertificateDeliveryItem) GetFingerprintSha256() string {
+	if x != nil {
+		return x.FingerprintSha256
+	}
+	return ""
+}
+
+func (x *CertificateDeliveryItem) GetHookExitCode() int32 {
+	if x != nil {
+		return x.HookExitCode
+	}
+	return 0
+}
+
+func (x *CertificateDeliveryItem) GetAttempts() int32 {
+	if x != nil {
+		return x.Attempts
+	}
+	return 0
+}
+
+func (x *CertificateDeliveryItem) GetUpdatedAt() int64 {
+	if x != nil {
+		return x.UpdatedAt
+	}
+	return 0
+}
+
+type CertificateDelivery struct {
+	state          protoimpl.MessageState     `protogen:"open.v1"`
+	Id             string                     `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	TenantId       string                     `protobuf:"bytes,2,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
+	CertificateId  string                     `protobuf:"bytes,3,opt,name=certificate_id,json=certificateId,proto3" json:"certificate_id,omitempty"`
+	Name           string                     `protobuf:"bytes,4,opt,name=name,proto3" json:"name,omitempty"`
+	KeyPolicy      string                     `protobuf:"bytes,5,opt,name=key_policy,json=keyPolicy,proto3" json:"key_policy,omitempty"`
+	CreatedAt      int64                      `protobuf:"varint,6,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`                 // unix seconds
+	ExpiresAt      int64                      `protobuf:"varint,7,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`                 // unix seconds
+	Items          []*CertificateDeliveryItem `protobuf:"bytes,8,rep,name=items,proto3" json:"items,omitempty"`                                           // <= 1000
+	UnknownHostIds []string                   `protobuf:"bytes,9,rep,name=unknown_host_ids,json=unknownHostIds,proto3" json:"unknown_host_ids,omitempty"` // requested ids not found in the tenant (no detail)
+	Created        bool                       `protobuf:"varint,10,opt,name=created,proto3" json:"created,omitempty"`                                     // false = idempotent replay
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *CertificateDelivery) Reset() {
+	*x = CertificateDelivery{}
+	mi := &file_inventory_v1_inventory_proto_msgTypes[97]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CertificateDelivery) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CertificateDelivery) ProtoMessage() {}
+
+func (x *CertificateDelivery) ProtoReflect() protoreflect.Message {
+	mi := &file_inventory_v1_inventory_proto_msgTypes[97]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CertificateDelivery.ProtoReflect.Descriptor instead.
+func (*CertificateDelivery) Descriptor() ([]byte, []int) {
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{97}
+}
+
+func (x *CertificateDelivery) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *CertificateDelivery) GetTenantId() string {
+	if x != nil {
+		return x.TenantId
+	}
+	return ""
+}
+
+func (x *CertificateDelivery) GetCertificateId() string {
+	if x != nil {
+		return x.CertificateId
+	}
+	return ""
+}
+
+func (x *CertificateDelivery) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *CertificateDelivery) GetKeyPolicy() string {
+	if x != nil {
+		return x.KeyPolicy
+	}
+	return ""
+}
+
+func (x *CertificateDelivery) GetCreatedAt() int64 {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return 0
+}
+
+func (x *CertificateDelivery) GetExpiresAt() int64 {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return 0
+}
+
+func (x *CertificateDelivery) GetItems() []*CertificateDeliveryItem {
+	if x != nil {
+		return x.Items
+	}
+	return nil
+}
+
+func (x *CertificateDelivery) GetUnknownHostIds() []string {
+	if x != nil {
+		return x.UnknownHostIds
+	}
+	return nil
+}
+
+func (x *CertificateDelivery) GetCreated() bool {
+	if x != nil {
+		return x.Created
+	}
+	return false
+}
+
+type PreviewCertificateTargetsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TenantId      string                 `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
+	Selector      *HostSelector          `protobuf:"bytes,2,opt,name=selector,proto3" json:"selector,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PreviewCertificateTargetsRequest) Reset() {
+	*x = PreviewCertificateTargetsRequest{}
+	mi := &file_inventory_v1_inventory_proto_msgTypes[98]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PreviewCertificateTargetsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PreviewCertificateTargetsRequest) ProtoMessage() {}
+
+func (x *PreviewCertificateTargetsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_inventory_v1_inventory_proto_msgTypes[98]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PreviewCertificateTargetsRequest.ProtoReflect.Descriptor instead.
+func (*PreviewCertificateTargetsRequest) Descriptor() ([]byte, []int) {
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{98}
+}
+
+func (x *PreviewCertificateTargetsRequest) GetTenantId() string {
+	if x != nil {
+		return x.TenantId
+	}
+	return ""
+}
+
+func (x *PreviewCertificateTargetsRequest) GetSelector() *HostSelector {
+	if x != nil {
+		return x.Selector
+	}
+	return nil
+}
+
+type TargetHost struct {
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	HostId      string                 `protobuf:"bytes,1,opt,name=host_id,json=hostId,proto3" json:"host_id,omitempty"`
+	Hostname    string                 `protobuf:"bytes,2,opt,name=hostname,proto3" json:"hostname,omitempty"`
+	OsName      string                 `protobuf:"bytes,3,opt,name=os_name,json=osName,proto3" json:"os_name,omitempty"`
+	Tags        map[string]string      `protobuf:"bytes,4,rep,name=tags,proto3" json:"tags,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	AgentOnline bool                   `protobuf:"varint,5,opt,name=agent_online,json=agentOnline,proto3" json:"agent_online,omitempty"`
+	// enabled | disabled_on_host | upgrade_required | not_supported_platform |
+	// no_agent | disabled_on_server
+	Capability    string `protobuf:"bytes,6,opt,name=capability,proto3" json:"capability,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TargetHost) Reset() {
+	*x = TargetHost{}
+	mi := &file_inventory_v1_inventory_proto_msgTypes[99]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TargetHost) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TargetHost) ProtoMessage() {}
+
+func (x *TargetHost) ProtoReflect() protoreflect.Message {
+	mi := &file_inventory_v1_inventory_proto_msgTypes[99]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TargetHost.ProtoReflect.Descriptor instead.
+func (*TargetHost) Descriptor() ([]byte, []int) {
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{99}
+}
+
+func (x *TargetHost) GetHostId() string {
+	if x != nil {
+		return x.HostId
+	}
+	return ""
+}
+
+func (x *TargetHost) GetHostname() string {
+	if x != nil {
+		return x.Hostname
+	}
+	return ""
+}
+
+func (x *TargetHost) GetOsName() string {
+	if x != nil {
+		return x.OsName
+	}
+	return ""
+}
+
+func (x *TargetHost) GetTags() map[string]string {
+	if x != nil {
+		return x.Tags
+	}
+	return nil
+}
+
+func (x *TargetHost) GetAgentOnline() bool {
+	if x != nil {
+		return x.AgentOnline
+	}
+	return false
+}
+
+func (x *TargetHost) GetCapability() string {
+	if x != nil {
+		return x.Capability
+	}
+	return ""
+}
+
+type PreviewCertificateTargetsResponse struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Hosts          []*TargetHost          `protobuf:"bytes,1,rep,name=hosts,proto3" json:"hosts,omitempty"` // <= 1000
+	UnknownHostIds []string               `protobuf:"bytes,2,rep,name=unknown_host_ids,json=unknownHostIds,proto3" json:"unknown_host_ids,omitempty"`
+	Truncated      bool                   `protobuf:"varint,3,opt,name=truncated,proto3" json:"truncated,omitempty"` // selection exceeded 1000 hosts
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *PreviewCertificateTargetsResponse) Reset() {
+	*x = PreviewCertificateTargetsResponse{}
+	mi := &file_inventory_v1_inventory_proto_msgTypes[100]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PreviewCertificateTargetsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PreviewCertificateTargetsResponse) ProtoMessage() {}
+
+func (x *PreviewCertificateTargetsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_inventory_v1_inventory_proto_msgTypes[100]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PreviewCertificateTargetsResponse.ProtoReflect.Descriptor instead.
+func (*PreviewCertificateTargetsResponse) Descriptor() ([]byte, []int) {
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{100}
+}
+
+func (x *PreviewCertificateTargetsResponse) GetHosts() []*TargetHost {
+	if x != nil {
+		return x.Hosts
+	}
+	return nil
+}
+
+func (x *PreviewCertificateTargetsResponse) GetUnknownHostIds() []string {
+	if x != nil {
+		return x.UnknownHostIds
+	}
+	return nil
+}
+
+func (x *PreviewCertificateTargetsResponse) GetTruncated() bool {
+	if x != nil {
+		return x.Truncated
+	}
+	return false
+}
+
+type VerifyHostCertificatesRequest struct {
+	state                     protoimpl.MessageState `protogen:"open.v1"`
+	TenantId                  string                 `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
+	Selector                  *HostSelector          `protobuf:"bytes,2,opt,name=selector,proto3" json:"selector,omitempty"`
+	Name                      string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	ExpectedFingerprintSha256 string                 `protobuf:"bytes,4,opt,name=expected_fingerprint_sha256,json=expectedFingerprintSha256,proto3" json:"expected_fingerprint_sha256,omitempty"` // lowercase hex
+	unknownFields             protoimpl.UnknownFields
+	sizeCache                 protoimpl.SizeCache
+}
+
+func (x *VerifyHostCertificatesRequest) Reset() {
+	*x = VerifyHostCertificatesRequest{}
+	mi := &file_inventory_v1_inventory_proto_msgTypes[101]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *VerifyHostCertificatesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*VerifyHostCertificatesRequest) ProtoMessage() {}
+
+func (x *VerifyHostCertificatesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_inventory_v1_inventory_proto_msgTypes[101]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use VerifyHostCertificatesRequest.ProtoReflect.Descriptor instead.
+func (*VerifyHostCertificatesRequest) Descriptor() ([]byte, []int) {
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{101}
+}
+
+func (x *VerifyHostCertificatesRequest) GetTenantId() string {
+	if x != nil {
+		return x.TenantId
+	}
+	return ""
+}
+
+func (x *VerifyHostCertificatesRequest) GetSelector() *HostSelector {
+	if x != nil {
+		return x.Selector
+	}
+	return nil
+}
+
+func (x *VerifyHostCertificatesRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *VerifyHostCertificatesRequest) GetExpectedFingerprintSha256() string {
+	if x != nil {
+		return x.ExpectedFingerprintSha256
+	}
+	return ""
+}
+
+type HostCertificateStatus struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	HostId            string                 `protobuf:"bytes,1,opt,name=host_id,json=hostId,proto3" json:"host_id,omitempty"`
+	Hostname          string                 `protobuf:"bytes,2,opt,name=hostname,proto3" json:"hostname,omitempty"`
+	Status            string                 `protobuf:"bytes,3,opt,name=status,proto3" json:"status,omitempty"`                                                // match | mismatch | failed | pending | missing | revoked
+	FingerprintSha256 string                 `protobuf:"bytes,4,opt,name=fingerprint_sha256,json=fingerprintSha256,proto3" json:"fingerprint_sha256,omitempty"` // last reported
+	Serial            string                 `protobuf:"bytes,5,opt,name=serial,proto3" json:"serial,omitempty"`
+	Reason            string                 `protobuf:"bytes,6,opt,name=reason,proto3" json:"reason,omitempty"`
+	LastDeliveredAt   int64                  `protobuf:"varint,7,opt,name=last_delivered_at,json=lastDeliveredAt,proto3" json:"last_delivered_at,omitempty"` // unix seconds, 0 = never
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *HostCertificateStatus) Reset() {
+	*x = HostCertificateStatus{}
+	mi := &file_inventory_v1_inventory_proto_msgTypes[102]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HostCertificateStatus) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HostCertificateStatus) ProtoMessage() {}
+
+func (x *HostCertificateStatus) ProtoReflect() protoreflect.Message {
+	mi := &file_inventory_v1_inventory_proto_msgTypes[102]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HostCertificateStatus.ProtoReflect.Descriptor instead.
+func (*HostCertificateStatus) Descriptor() ([]byte, []int) {
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{102}
+}
+
+func (x *HostCertificateStatus) GetHostId() string {
+	if x != nil {
+		return x.HostId
+	}
+	return ""
+}
+
+func (x *HostCertificateStatus) GetHostname() string {
+	if x != nil {
+		return x.Hostname
+	}
+	return ""
+}
+
+func (x *HostCertificateStatus) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *HostCertificateStatus) GetFingerprintSha256() string {
+	if x != nil {
+		return x.FingerprintSha256
+	}
+	return ""
+}
+
+func (x *HostCertificateStatus) GetSerial() string {
+	if x != nil {
+		return x.Serial
+	}
+	return ""
+}
+
+func (x *HostCertificateStatus) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *HostCertificateStatus) GetLastDeliveredAt() int64 {
+	if x != nil {
+		return x.LastDeliveredAt
+	}
+	return 0
+}
+
+type VerifyHostCertificatesResponse struct {
+	state         protoimpl.MessageState   `protogen:"open.v1"`
+	Hosts         []*HostCertificateStatus `protobuf:"bytes,1,rep,name=hosts,proto3" json:"hosts,omitempty"`
+	Matched       int32                    `protobuf:"varint,2,opt,name=matched,proto3" json:"matched,omitempty"`
+	Total         int32                    `protobuf:"varint,3,opt,name=total,proto3" json:"total,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *VerifyHostCertificatesResponse) Reset() {
+	*x = VerifyHostCertificatesResponse{}
+	mi := &file_inventory_v1_inventory_proto_msgTypes[103]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *VerifyHostCertificatesResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*VerifyHostCertificatesResponse) ProtoMessage() {}
+
+func (x *VerifyHostCertificatesResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_inventory_v1_inventory_proto_msgTypes[103]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use VerifyHostCertificatesResponse.ProtoReflect.Descriptor instead.
+func (*VerifyHostCertificatesResponse) Descriptor() ([]byte, []int) {
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{103}
+}
+
+func (x *VerifyHostCertificatesResponse) GetHosts() []*HostCertificateStatus {
+	if x != nil {
+		return x.Hosts
+	}
+	return nil
+}
+
+func (x *VerifyHostCertificatesResponse) GetMatched() int32 {
+	if x != nil {
+		return x.Matched
+	}
+	return 0
+}
+
+func (x *VerifyHostCertificatesResponse) GetTotal() int32 {
+	if x != nil {
+		return x.Total
+	}
+	return 0
+}
+
+type MarkCertificateRevokedRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TenantId      string                 `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
+	CertificateId string                 `protobuf:"bytes,2,opt,name=certificate_id,json=certificateId,proto3" json:"certificate_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MarkCertificateRevokedRequest) Reset() {
+	*x = MarkCertificateRevokedRequest{}
+	mi := &file_inventory_v1_inventory_proto_msgTypes[104]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MarkCertificateRevokedRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MarkCertificateRevokedRequest) ProtoMessage() {}
+
+func (x *MarkCertificateRevokedRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_inventory_v1_inventory_proto_msgTypes[104]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MarkCertificateRevokedRequest.ProtoReflect.Descriptor instead.
+func (*MarkCertificateRevokedRequest) Descriptor() ([]byte, []int) {
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{104}
+}
+
+func (x *MarkCertificateRevokedRequest) GetTenantId() string {
+	if x != nil {
+		return x.TenantId
+	}
+	return ""
+}
+
+func (x *MarkCertificateRevokedRequest) GetCertificateId() string {
+	if x != nil {
+		return x.CertificateId
+	}
+	return ""
+}
+
+type MarkCertificateRevokedResponse struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	CancelledItems int32                  `protobuf:"varint,1,opt,name=cancelled_items,json=cancelledItems,proto3" json:"cancelled_items,omitempty"`
+	FlaggedHosts   int32                  `protobuf:"varint,2,opt,name=flagged_hosts,json=flaggedHosts,proto3" json:"flagged_hosts,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *MarkCertificateRevokedResponse) Reset() {
+	*x = MarkCertificateRevokedResponse{}
+	mi := &file_inventory_v1_inventory_proto_msgTypes[105]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MarkCertificateRevokedResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MarkCertificateRevokedResponse) ProtoMessage() {}
+
+func (x *MarkCertificateRevokedResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_inventory_v1_inventory_proto_msgTypes[105]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MarkCertificateRevokedResponse.ProtoReflect.Descriptor instead.
+func (*MarkCertificateRevokedResponse) Descriptor() ([]byte, []int) {
+	return file_inventory_v1_inventory_proto_rawDescGZIP(), []int{105}
+}
+
+func (x *MarkCertificateRevokedResponse) GetCancelledItems() int32 {
+	if x != nil {
+		return x.CancelledItems
+	}
+	return 0
+}
+
+func (x *MarkCertificateRevokedResponse) GetFlaggedHosts() int32 {
+	if x != nil {
+		return x.FlaggedHosts
+	}
+	return 0
 }
 
 var File_inventory_v1_inventory_proto protoreflect.FileDescriptor
@@ -7631,12 +9122,17 @@ const file_inventory_v1_inventory_proto_rawDesc = "" +
 	"\rAgentPlatform\x12\x0e\n" +
 	"\x02os\x18\x01 \x01(\tR\x02os\x12\x12\n" +
 	"\x04arch\x18\x02 \x01(\tR\x04arch\x12!\n" +
-	"\finstall_type\x18\x03 \x01(\tR\vinstallType\"\x8f\x01\n" +
+	"\finstall_type\x18\x03 \x01(\tR\vinstallType\"\xd3\x01\n" +
 	"\aCommand\x12\x1d\n" +
 	"\n" +
 	"command_id\x18\x01 \x01(\tR\tcommandId\x12-\n" +
 	"\x04type\x18\x02 \x01(\x0e2\x19.inventory.v1.CommandTypeR\x04type\x126\n" +
-	"\aupgrade\x18\x03 \x01(\v2\x1c.inventory.v1.UpgradeCommandR\aupgrade\"\x7f\n" +
+	"\aupgrade\x18\x03 \x01(\v2\x1c.inventory.v1.UpgradeCommandR\aupgrade\x12B\n" +
+	"\vcertificate\x18\x04 \x01(\v2 .inventory.v1.CertificateCommandR\vcertificate\"[\n" +
+	"\x12CertificateCommand\x12\x17\n" +
+	"\aitem_id\x18\x01 \x01(\tR\x06itemId\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
+	"\aattempt\x18\x03 \x01(\rR\aattempt\"\x7f\n" +
 	"\x0eUpgradeCommand\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12%\n" +
@@ -7681,7 +9177,132 @@ const file_inventory_v1_inventory_proto_rawDesc = "" +
 	"\x06reason\x18\x05 \x01(\tR\x06reason\x12\x16\n" +
 	"\x06detail\x18\x06 \x01(\tR\x06detail\"3\n" +
 	"\x15ReportUpgradeResponse\x12\x1a\n" +
-	"\baccepted\x18\x01 \x01(\bR\baccepted*q\n" +
+	"\baccepted\x18\x01 \x01(\bR\baccepted\"2\n" +
+	"\x17FetchCertificateRequest\x12\x17\n" +
+	"\aitem_id\x18\x01 \x01(\tR\x06itemId\"\xf3\x03\n" +
+	"\x11CertificateBundle\x12\x17\n" +
+	"\aitem_id\x18\x01 \x01(\tR\x06itemId\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12%\n" +
+	"\x0ecertificate_id\x18\x03 \x01(\tR\rcertificateId\x12\x19\n" +
+	"\bcert_pem\x18\x04 \x01(\tR\acertPem\x12\x1b\n" +
+	"\tchain_pem\x18\x05 \x01(\tR\bchainPem\x12\x17\n" +
+	"\akey_pem\x18\x06 \x01(\tR\x06keyPem\x12\x17\n" +
+	"\ahas_key\x18\a \x01(\bR\x06hasKey\x12\x16\n" +
+	"\x06serial\x18\b \x01(\tR\x06serial\x12-\n" +
+	"\x12fingerprint_sha256\x18\t \x01(\tR\x11fingerprintSha256\x12\x1f\n" +
+	"\vcommon_name\x18\n" +
+	" \x01(\tR\n" +
+	"commonName\x12\x1b\n" +
+	"\tdns_names\x18\v \x03(\tR\bdnsNames\x12!\n" +
+	"\fip_addresses\x18\f \x03(\tR\vipAddresses\x12\x1d\n" +
+	"\n" +
+	"not_before\x18\r \x01(\x03R\tnotBefore\x12\x1b\n" +
+	"\tnot_after\x18\x0e \x01(\x03R\bnotAfter\x12\x1d\n" +
+	"\n" +
+	"is_renewal\x18\x0f \x01(\bR\tisRenewal\x12\x1d\n" +
+	"\n" +
+	"rerun_hook\x18\x10 \x01(\bR\trerunHook\"\xe6\x01\n" +
+	"\x18ReportCertificateRequest\x12\x17\n" +
+	"\aitem_id\x18\x01 \x01(\tR\x06itemId\x12\x14\n" +
+	"\x05state\x18\x02 \x01(\tR\x05state\x12\x16\n" +
+	"\x06serial\x18\x03 \x01(\tR\x06serial\x12-\n" +
+	"\x12fingerprint_sha256\x18\x04 \x01(\tR\x11fingerprintSha256\x12\x16\n" +
+	"\x06reason\x18\x05 \x01(\tR\x06reason\x12$\n" +
+	"\x0ehook_exit_code\x18\x06 \x01(\x05R\fhookExitCode\x12\x16\n" +
+	"\x06detail\x18\a \x01(\tR\x06detail\"7\n" +
+	"\x19ReportCertificateResponse\x12\x1a\n" +
+	"\baccepted\x18\x01 \x01(\bR\baccepted\"F\n" +
+	"\fHostSelector\x12\x19\n" +
+	"\bhost_ids\x18\x01 \x03(\tR\ahostIds\x12\x1b\n" +
+	"\thost_tags\x18\x02 \x03(\tR\bhostTags\"\xff\x02\n" +
+	" CreateCertificateDeliveryRequest\x12\x1b\n" +
+	"\ttenant_id\x18\x01 \x01(\tR\btenantId\x12'\n" +
+	"\x0fidempotency_key\x18\x02 \x01(\tR\x0eidempotencyKey\x12)\n" +
+	"\x10configuration_id\x18\x03 \x01(\tR\x0fconfigurationId\x12\x1b\n" +
+	"\ttarget_id\x18\x04 \x01(\tR\btargetId\x12\x18\n" +
+	"\atrigger\x18\x05 \x01(\tR\atrigger\x12%\n" +
+	"\x0ecertificate_id\x18\x06 \x01(\tR\rcertificateId\x12\x12\n" +
+	"\x04name\x18\a \x01(\tR\x04name\x12\x1d\n" +
+	"\n" +
+	"key_policy\x18\b \x01(\tR\tkeyPolicy\x126\n" +
+	"\bselector\x18\t \x01(\v2\x1a.inventory.v1.HostSelectorR\bselector\x12!\n" +
+	"\frearm_failed\x18\n" +
+	" \x01(\bR\vrearmFailed\"L\n" +
+	"\x1dGetCertificateDeliveryRequest\x12\x1b\n" +
+	"\ttenant_id\x18\x01 \x01(\tR\btenantId\x12\x0e\n" +
+	"\x02id\x18\x02 \x01(\tR\x02id\"\xf4\x02\n" +
+	"\x17CertificateDeliveryItem\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x17\n" +
+	"\ahost_id\x18\x02 \x01(\tR\x06hostId\x12\x1a\n" +
+	"\bhostname\x18\x03 \x01(\tR\bhostname\x12!\n" +
+	"\fagent_online\x18\x04 \x01(\bR\vagentOnline\x121\n" +
+	"\x05state\x18\x05 \x01(\x0e2\x1b.inventory.v1.DeliveryStateR\x05state\x12\x16\n" +
+	"\x06reason\x18\x06 \x01(\tR\x06reason\x12\x16\n" +
+	"\x06serial\x18\a \x01(\tR\x06serial\x12-\n" +
+	"\x12fingerprint_sha256\x18\b \x01(\tR\x11fingerprintSha256\x12$\n" +
+	"\x0ehook_exit_code\x18\t \x01(\x05R\fhookExitCode\x12\x1a\n" +
+	"\battempts\x18\n" +
+	" \x01(\x05R\battempts\x12\x1d\n" +
+	"\n" +
+	"updated_at\x18\v \x01(\x03R\tupdatedAt\"\xdb\x02\n" +
+	"\x13CertificateDelivery\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1b\n" +
+	"\ttenant_id\x18\x02 \x01(\tR\btenantId\x12%\n" +
+	"\x0ecertificate_id\x18\x03 \x01(\tR\rcertificateId\x12\x12\n" +
+	"\x04name\x18\x04 \x01(\tR\x04name\x12\x1d\n" +
+	"\n" +
+	"key_policy\x18\x05 \x01(\tR\tkeyPolicy\x12\x1d\n" +
+	"\n" +
+	"created_at\x18\x06 \x01(\x03R\tcreatedAt\x12\x1d\n" +
+	"\n" +
+	"expires_at\x18\a \x01(\x03R\texpiresAt\x12;\n" +
+	"\x05items\x18\b \x03(\v2%.inventory.v1.CertificateDeliveryItemR\x05items\x12(\n" +
+	"\x10unknown_host_ids\x18\t \x03(\tR\x0eunknownHostIds\x12\x18\n" +
+	"\acreated\x18\n" +
+	" \x01(\bR\acreated\"w\n" +
+	" PreviewCertificateTargetsRequest\x12\x1b\n" +
+	"\ttenant_id\x18\x01 \x01(\tR\btenantId\x126\n" +
+	"\bselector\x18\x02 \x01(\v2\x1a.inventory.v1.HostSelectorR\bselector\"\x8e\x02\n" +
+	"\n" +
+	"TargetHost\x12\x17\n" +
+	"\ahost_id\x18\x01 \x01(\tR\x06hostId\x12\x1a\n" +
+	"\bhostname\x18\x02 \x01(\tR\bhostname\x12\x17\n" +
+	"\aos_name\x18\x03 \x01(\tR\x06osName\x126\n" +
+	"\x04tags\x18\x04 \x03(\v2\".inventory.v1.TargetHost.TagsEntryR\x04tags\x12!\n" +
+	"\fagent_online\x18\x05 \x01(\bR\vagentOnline\x12\x1e\n" +
+	"\n" +
+	"capability\x18\x06 \x01(\tR\n" +
+	"capability\x1a7\n" +
+	"\tTagsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x9b\x01\n" +
+	"!PreviewCertificateTargetsResponse\x12.\n" +
+	"\x05hosts\x18\x01 \x03(\v2\x18.inventory.v1.TargetHostR\x05hosts\x12(\n" +
+	"\x10unknown_host_ids\x18\x02 \x03(\tR\x0eunknownHostIds\x12\x1c\n" +
+	"\ttruncated\x18\x03 \x01(\bR\ttruncated\"\xc8\x01\n" +
+	"\x1dVerifyHostCertificatesRequest\x12\x1b\n" +
+	"\ttenant_id\x18\x01 \x01(\tR\btenantId\x126\n" +
+	"\bselector\x18\x02 \x01(\v2\x1a.inventory.v1.HostSelectorR\bselector\x12\x12\n" +
+	"\x04name\x18\x03 \x01(\tR\x04name\x12>\n" +
+	"\x1bexpected_fingerprint_sha256\x18\x04 \x01(\tR\x19expectedFingerprintSha256\"\xef\x01\n" +
+	"\x15HostCertificateStatus\x12\x17\n" +
+	"\ahost_id\x18\x01 \x01(\tR\x06hostId\x12\x1a\n" +
+	"\bhostname\x18\x02 \x01(\tR\bhostname\x12\x16\n" +
+	"\x06status\x18\x03 \x01(\tR\x06status\x12-\n" +
+	"\x12fingerprint_sha256\x18\x04 \x01(\tR\x11fingerprintSha256\x12\x16\n" +
+	"\x06serial\x18\x05 \x01(\tR\x06serial\x12\x16\n" +
+	"\x06reason\x18\x06 \x01(\tR\x06reason\x12*\n" +
+	"\x11last_delivered_at\x18\a \x01(\x03R\x0flastDeliveredAt\"\x8b\x01\n" +
+	"\x1eVerifyHostCertificatesResponse\x129\n" +
+	"\x05hosts\x18\x01 \x03(\v2#.inventory.v1.HostCertificateStatusR\x05hosts\x12\x18\n" +
+	"\amatched\x18\x02 \x01(\x05R\amatched\x12\x14\n" +
+	"\x05total\x18\x03 \x01(\x05R\x05total\"c\n" +
+	"\x1dMarkCertificateRevokedRequest\x12\x1b\n" +
+	"\ttenant_id\x18\x01 \x01(\tR\btenantId\x12%\n" +
+	"\x0ecertificate_id\x18\x02 \x01(\tR\rcertificateId\"n\n" +
+	"\x1eMarkCertificateRevokedResponse\x12'\n" +
+	"\x0fcancelled_items\x18\x01 \x01(\x05R\x0ecancelledItems\x12#\n" +
+	"\rflagged_hosts\x18\x02 \x01(\x05R\fflaggedHosts*q\n" +
 	"\n" +
 	"HostStatus\x12\x1b\n" +
 	"\x17HOST_STATUS_UNSPECIFIED\x10\x00\x12\x16\n" +
@@ -7698,15 +9319,30 @@ const file_inventory_v1_inventory_proto_rawDesc = "" +
 	"\x17CHANGE_TYPE_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11CHANGE_TYPE_ADDED\x10\x01\x12\x17\n" +
 	"\x13CHANGE_TYPE_REMOVED\x10\x02\x12\x18\n" +
-	"\x14CHANGE_TYPE_MODIFIED\x10\x03*_\n" +
+	"\x14CHANGE_TYPE_MODIFIED\x10\x03*}\n" +
 	"\vCommandType\x12\x1c\n" +
 	"\x18COMMAND_TYPE_UNSPECIFIED\x10\x00\x12\x18\n" +
 	"\x14COMMAND_TYPE_REFRESH\x10\x01\x12\x18\n" +
-	"\x14COMMAND_TYPE_UPGRADE\x10\x02*j\n" +
+	"\x14COMMAND_TYPE_UPGRADE\x10\x02\x12\x1c\n" +
+	"\x18COMMAND_TYPE_CERTIFICATE\x10\x03*j\n" +
 	"\x0eHostReportView\x12 \n" +
 	"\x1cHOST_REPORT_VIEW_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15HOST_REPORT_VIEW_FULL\x10\x01\x12\x1b\n" +
-	"\x17HOST_REPORT_VIEW_DIGEST\x10\x022\xc3\x03\n" +
+	"\x17HOST_REPORT_VIEW_DIGEST\x10\x02*\xf5\x02\n" +
+	"\rDeliveryState\x12\x1e\n" +
+	"\x1aDELIVERY_STATE_UNSPECIFIED\x10\x00\x12\x1a\n" +
+	"\x16DELIVERY_STATE_PENDING\x10\x01\x12\x1c\n" +
+	"\x18DELIVERY_STATE_DELIVERED\x10\x02\x12\x1a\n" +
+	"\x16DELIVERY_STATE_FETCHED\x10\x03\x12\x1c\n" +
+	"\x18DELIVERY_STATE_INSTALLED\x10\x04\x12\x1c\n" +
+	"\x18DELIVERY_STATE_UNCHANGED\x10\x05\x12\x19\n" +
+	"\x15DELIVERY_STATE_FAILED\x10\x06\x12\x1e\n" +
+	"\x1aDELIVERY_STATE_HOOK_FAILED\x10\a\x12\x1e\n" +
+	"\x1aDELIVERY_STATE_UNSUPPORTED\x10\b\x12\x1d\n" +
+	"\x19DELIVERY_STATE_SUPERSEDED\x10\t\x12\x1a\n" +
+	"\x16DELIVERY_STATE_EXPIRED\x10\n" +
+	"\x12\x1c\n" +
+	"\x18DELIVERY_STATE_CANCELLED\x10\v2\xc3\x03\n" +
 	"\x14InventoryHostService\x12L\n" +
 	"\tListHosts\x12\x1e.inventory.v1.ListHostsRequest\x1a\x1f.inventory.v1.ListHostsResponse\x12;\n" +
 	"\aGetHost\x12\x1c.inventory.v1.GetHostRequest\x1a\x12.inventory.v1.Host\x12O\n" +
@@ -7733,14 +9369,22 @@ const file_inventory_v1_inventory_proto_rawDesc = "" +
 	"\x11HostReportService\x12d\n" +
 	"\x11ListReportTenants\x12&.inventory.v1.ListReportTenantsRequest\x1a'.inventory.v1.ListReportTenantsResponse\x12^\n" +
 	"\x0fListHostReports\x12$.inventory.v1.ListHostReportsRequest\x1a%.inventory.v1.ListHostReportsResponse\x12M\n" +
-	"\rGetHostReport\x12\".inventory.v1.GetHostReportRequest\x1a\x18.inventory.v1.HostReport2\x98\x04\n" +
+	"\rGetHostReport\x12\".inventory.v1.GetHostReportRequest\x1a\x18.inventory.v1.HostReport2\xda\x05\n" +
 	"\rIngestService\x12C\n" +
 	"\x06Enroll\x12\x1b.inventory.v1.EnrollRequest\x1a\x1c.inventory.v1.EnrollResponse\x12L\n" +
 	"\x0fSubmitInventory\x12\x1b.inventory.v1.SubmitRequest\x1a\x1c.inventory.v1.SubmitResponse\x12F\n" +
 	"\x0eStreamCommands\x12\x1b.inventory.v1.StreamRequest\x1a\x15.inventory.v1.Command0\x01\x12a\n" +
 	"\x10CheckAgentUpdate\x12%.inventory.v1.CheckAgentUpdateRequest\x1a&.inventory.v1.CheckAgentUpdateResponse\x12o\n" +
 	"\x14DownloadAgentRelease\x12).inventory.v1.DownloadAgentReleaseRequest\x1a*.inventory.v1.DownloadAgentReleaseResponse0\x01\x12X\n" +
-	"\rReportUpgrade\x12\".inventory.v1.ReportUpgradeRequest\x1a#.inventory.v1.ReportUpgradeResponseBTZRgithub.com/go-tangra/go-tangra-inventory/sdk/v4/api/proto/inventory/v1;inventoryv1b\x06proto3"
+	"\rReportUpgrade\x12\".inventory.v1.ReportUpgradeRequest\x1a#.inventory.v1.ReportUpgradeResponse\x12Z\n" +
+	"\x10FetchCertificate\x12%.inventory.v1.FetchCertificateRequest\x1a\x1f.inventory.v1.CertificateBundle\x12d\n" +
+	"\x11ReportCertificate\x12&.inventory.v1.ReportCertificateRequest\x1a'.inventory.v1.ReportCertificateResponse2\xde\x04\n" +
+	"\x1aCertificateDeliveryService\x12n\n" +
+	"\x19CreateCertificateDelivery\x12..inventory.v1.CreateCertificateDeliveryRequest\x1a!.inventory.v1.CertificateDelivery\x12h\n" +
+	"\x16GetCertificateDelivery\x12+.inventory.v1.GetCertificateDeliveryRequest\x1a!.inventory.v1.CertificateDelivery\x12|\n" +
+	"\x19PreviewCertificateTargets\x12..inventory.v1.PreviewCertificateTargetsRequest\x1a/.inventory.v1.PreviewCertificateTargetsResponse\x12s\n" +
+	"\x16VerifyHostCertificates\x12+.inventory.v1.VerifyHostCertificatesRequest\x1a,.inventory.v1.VerifyHostCertificatesResponse\x12s\n" +
+	"\x16MarkCertificateRevoked\x12+.inventory.v1.MarkCertificateRevokedRequest\x1a,.inventory.v1.MarkCertificateRevokedResponseBTZRgithub.com/go-tangra/go-tangra-inventory/sdk/v4/api/proto/inventory/v1;inventoryv1b\x06proto3"
 
 var (
 	file_inventory_v1_inventory_proto_rawDescOnce sync.Once
@@ -7754,246 +9398,289 @@ func file_inventory_v1_inventory_proto_rawDescGZIP() []byte {
 	return file_inventory_v1_inventory_proto_rawDescData
 }
 
-var file_inventory_v1_inventory_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
-var file_inventory_v1_inventory_proto_msgTypes = make([]protoimpl.MessageInfo, 95)
+var file_inventory_v1_inventory_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
+var file_inventory_v1_inventory_proto_msgTypes = make([]protoimpl.MessageInfo, 114)
 var file_inventory_v1_inventory_proto_goTypes = []any{
-	(HostStatus)(0),                      // 0: inventory.v1.HostStatus
-	(SnapshotSource)(0),                  // 1: inventory.v1.SnapshotSource
-	(ChangeType)(0),                      // 2: inventory.v1.ChangeType
-	(CommandType)(0),                     // 3: inventory.v1.CommandType
-	(HostReportView)(0),                  // 4: inventory.v1.HostReportView
-	(*Identity)(nil),                     // 5: inventory.v1.Identity
-	(*Host)(nil),                         // 6: inventory.v1.Host
-	(*SnapshotSummary)(nil),              // 7: inventory.v1.SnapshotSummary
-	(*Snapshot)(nil),                     // 8: inventory.v1.Snapshot
-	(*Inventory)(nil),                    // 9: inventory.v1.Inventory
-	(*BIOSInfo)(nil),                     // 10: inventory.v1.BIOSInfo
-	(*SystemInfo)(nil),                   // 11: inventory.v1.SystemInfo
-	(*BaseboardInfo)(nil),                // 12: inventory.v1.BaseboardInfo
-	(*ChassisInfo)(nil),                  // 13: inventory.v1.ChassisInfo
-	(*Processor)(nil),                    // 14: inventory.v1.Processor
-	(*CacheInfo)(nil),                    // 15: inventory.v1.CacheInfo
-	(*MemoryInfo)(nil),                   // 16: inventory.v1.MemoryInfo
-	(*MemoryArray)(nil),                  // 17: inventory.v1.MemoryArray
-	(*MemoryModule)(nil),                 // 18: inventory.v1.MemoryModule
-	(*Monitor)(nil),                      // 19: inventory.v1.Monitor
-	(*OSInfo)(nil),                       // 20: inventory.v1.OSInfo
-	(*Program)(nil),                      // 21: inventory.v1.Program
-	(*Service)(nil),                      // 22: inventory.v1.Service
-	(*UserAccount)(nil),                  // 23: inventory.v1.UserAccount
-	(*Patch)(nil),                        // 24: inventory.v1.Patch
-	(*Environment)(nil),                  // 25: inventory.v1.Environment
-	(*NetworkInterface)(nil),             // 26: inventory.v1.NetworkInterface
-	(*InterfaceAddress)(nil),             // 27: inventory.v1.InterfaceAddress
-	(*Virtualization)(nil),               // 28: inventory.v1.Virtualization
-	(*Bmc)(nil),                          // 29: inventory.v1.Bmc
-	(*BmcPort)(nil),                      // 30: inventory.v1.BmcPort
-	(*HypervisorGuest)(nil),              // 31: inventory.v1.HypervisorGuest
-	(*UpdateState)(nil),                  // 32: inventory.v1.UpdateState
-	(*CollectionLimits)(nil),             // 33: inventory.v1.CollectionLimits
-	(*Disk)(nil),                         // 34: inventory.v1.Disk
-	(*Filesystem)(nil),                   // 35: inventory.v1.Filesystem
-	(*HardwareAvailability)(nil),         // 36: inventory.v1.HardwareAvailability
-	(*Partition)(nil),                    // 37: inventory.v1.Partition
-	(*Change)(nil),                       // 38: inventory.v1.Change
-	(*Stats)(nil),                        // 39: inventory.v1.Stats
-	(*ConnectedAgent)(nil),               // 40: inventory.v1.ConnectedAgent
-	(*ListHostsRequest)(nil),             // 41: inventory.v1.ListHostsRequest
-	(*ListHostsResponse)(nil),            // 42: inventory.v1.ListHostsResponse
-	(*GetHostRequest)(nil),               // 43: inventory.v1.GetHostRequest
-	(*GetHostByIdentityRequest)(nil),     // 44: inventory.v1.GetHostByIdentityRequest
-	(*TagHostRequest)(nil),               // 45: inventory.v1.TagHostRequest
-	(*RetireHostRequest)(nil),            // 46: inventory.v1.RetireHostRequest
-	(*DeleteHostRequest)(nil),            // 47: inventory.v1.DeleteHostRequest
-	(*DeleteHostResponse)(nil),           // 48: inventory.v1.DeleteHostResponse
-	(*GetSnapshotRequest)(nil),           // 49: inventory.v1.GetSnapshotRequest
-	(*ListSnapshotsRequest)(nil),         // 50: inventory.v1.ListSnapshotsRequest
-	(*ListSnapshotsResponse)(nil),        // 51: inventory.v1.ListSnapshotsResponse
-	(*GetLatestByHostRequest)(nil),       // 52: inventory.v1.GetLatestByHostRequest
-	(*DiffSnapshotsRequest)(nil),         // 53: inventory.v1.DiffSnapshotsRequest
-	(*DiffSnapshotsResponse)(nil),        // 54: inventory.v1.DiffSnapshotsResponse
-	(*ListChangesRequest)(nil),           // 55: inventory.v1.ListChangesRequest
-	(*ListChangesResponse)(nil),          // 56: inventory.v1.ListChangesResponse
-	(*DeleteSnapshotRequest)(nil),        // 57: inventory.v1.DeleteSnapshotRequest
-	(*DeleteSnapshotResponse)(nil),       // 58: inventory.v1.DeleteSnapshotResponse
-	(*GetStatisticsRequest)(nil),         // 59: inventory.v1.GetStatisticsRequest
-	(*ListConnectedAgentsRequest)(nil),   // 60: inventory.v1.ListConnectedAgentsRequest
-	(*ListConnectedAgentsResponse)(nil),  // 61: inventory.v1.ListConnectedAgentsResponse
-	(*RefreshInventoryRequest)(nil),      // 62: inventory.v1.RefreshInventoryRequest
-	(*RefreshInventoryResponse)(nil),     // 63: inventory.v1.RefreshInventoryResponse
-	(*MintEnrollmentTokenRequest)(nil),   // 64: inventory.v1.MintEnrollmentTokenRequest
-	(*MintEnrollmentTokenResponse)(nil),  // 65: inventory.v1.MintEnrollmentTokenResponse
-	(*RevokeAgentRequest)(nil),           // 66: inventory.v1.RevokeAgentRequest
-	(*RevokeAgentResponse)(nil),          // 67: inventory.v1.RevokeAgentResponse
-	(*ListReportTenantsRequest)(nil),     // 68: inventory.v1.ListReportTenantsRequest
-	(*ListReportTenantsResponse)(nil),    // 69: inventory.v1.ListReportTenantsResponse
-	(*ListHostReportsRequest)(nil),       // 70: inventory.v1.ListHostReportsRequest
-	(*ListHostReportsResponse)(nil),      // 71: inventory.v1.ListHostReportsResponse
-	(*GetHostReportRequest)(nil),         // 72: inventory.v1.GetHostReportRequest
-	(*HostReport)(nil),                   // 73: inventory.v1.HostReport
-	(*HardwareProfile)(nil),              // 74: inventory.v1.HardwareProfile
-	(*PendingUpdate)(nil),                // 75: inventory.v1.PendingUpdate
-	(*EnrollRequest)(nil),                // 76: inventory.v1.EnrollRequest
-	(*AutoEnrollProof)(nil),              // 77: inventory.v1.AutoEnrollProof
-	(*EnrollResponse)(nil),               // 78: inventory.v1.EnrollResponse
-	(*SubmitRequest)(nil),                // 79: inventory.v1.SubmitRequest
-	(*SubmitResponse)(nil),               // 80: inventory.v1.SubmitResponse
-	(*StreamRequest)(nil),                // 81: inventory.v1.StreamRequest
-	(*AgentPlatform)(nil),                // 82: inventory.v1.AgentPlatform
-	(*Command)(nil),                      // 83: inventory.v1.Command
-	(*UpgradeCommand)(nil),               // 84: inventory.v1.UpgradeCommand
-	(*CheckAgentUpdateRequest)(nil),      // 85: inventory.v1.CheckAgentUpdateRequest
-	(*CheckAgentUpdateResponse)(nil),     // 86: inventory.v1.CheckAgentUpdateResponse
-	(*DownloadAgentReleaseRequest)(nil),  // 87: inventory.v1.DownloadAgentReleaseRequest
-	(*DownloadAgentReleaseResponse)(nil), // 88: inventory.v1.DownloadAgentReleaseResponse
-	(*ReleaseHeader)(nil),                // 89: inventory.v1.ReleaseHeader
-	(*ArtifactChunk)(nil),                // 90: inventory.v1.ArtifactChunk
-	(*ReportUpgradeRequest)(nil),         // 91: inventory.v1.ReportUpgradeRequest
-	(*ReportUpgradeResponse)(nil),        // 92: inventory.v1.ReportUpgradeResponse
-	nil,                                  // 93: inventory.v1.Host.TagsEntry
-	nil,                                  // 94: inventory.v1.Stats.HostsByStatusEntry
-	nil,                                  // 95: inventory.v1.Stats.HostsByOsEntry
-	nil,                                  // 96: inventory.v1.Stats.HostsByManufacturerEntry
-	nil,                                  // 97: inventory.v1.Stats.TopProgramsEntry
-	nil,                                  // 98: inventory.v1.Stats.OsVersionsEntry
-	nil,                                  // 99: inventory.v1.TagHostRequest.TagsEntry
+	(HostStatus)(0),                           // 0: inventory.v1.HostStatus
+	(SnapshotSource)(0),                       // 1: inventory.v1.SnapshotSource
+	(ChangeType)(0),                           // 2: inventory.v1.ChangeType
+	(CommandType)(0),                          // 3: inventory.v1.CommandType
+	(HostReportView)(0),                       // 4: inventory.v1.HostReportView
+	(DeliveryState)(0),                        // 5: inventory.v1.DeliveryState
+	(*Identity)(nil),                          // 6: inventory.v1.Identity
+	(*Host)(nil),                              // 7: inventory.v1.Host
+	(*SnapshotSummary)(nil),                   // 8: inventory.v1.SnapshotSummary
+	(*Snapshot)(nil),                          // 9: inventory.v1.Snapshot
+	(*Inventory)(nil),                         // 10: inventory.v1.Inventory
+	(*BIOSInfo)(nil),                          // 11: inventory.v1.BIOSInfo
+	(*SystemInfo)(nil),                        // 12: inventory.v1.SystemInfo
+	(*BaseboardInfo)(nil),                     // 13: inventory.v1.BaseboardInfo
+	(*ChassisInfo)(nil),                       // 14: inventory.v1.ChassisInfo
+	(*Processor)(nil),                         // 15: inventory.v1.Processor
+	(*CacheInfo)(nil),                         // 16: inventory.v1.CacheInfo
+	(*MemoryInfo)(nil),                        // 17: inventory.v1.MemoryInfo
+	(*MemoryArray)(nil),                       // 18: inventory.v1.MemoryArray
+	(*MemoryModule)(nil),                      // 19: inventory.v1.MemoryModule
+	(*Monitor)(nil),                           // 20: inventory.v1.Monitor
+	(*OSInfo)(nil),                            // 21: inventory.v1.OSInfo
+	(*Program)(nil),                           // 22: inventory.v1.Program
+	(*Service)(nil),                           // 23: inventory.v1.Service
+	(*UserAccount)(nil),                       // 24: inventory.v1.UserAccount
+	(*Patch)(nil),                             // 25: inventory.v1.Patch
+	(*Environment)(nil),                       // 26: inventory.v1.Environment
+	(*NetworkInterface)(nil),                  // 27: inventory.v1.NetworkInterface
+	(*InterfaceAddress)(nil),                  // 28: inventory.v1.InterfaceAddress
+	(*Virtualization)(nil),                    // 29: inventory.v1.Virtualization
+	(*Bmc)(nil),                               // 30: inventory.v1.Bmc
+	(*BmcPort)(nil),                           // 31: inventory.v1.BmcPort
+	(*HypervisorGuest)(nil),                   // 32: inventory.v1.HypervisorGuest
+	(*UpdateState)(nil),                       // 33: inventory.v1.UpdateState
+	(*CollectionLimits)(nil),                  // 34: inventory.v1.CollectionLimits
+	(*Disk)(nil),                              // 35: inventory.v1.Disk
+	(*Filesystem)(nil),                        // 36: inventory.v1.Filesystem
+	(*HardwareAvailability)(nil),              // 37: inventory.v1.HardwareAvailability
+	(*Partition)(nil),                         // 38: inventory.v1.Partition
+	(*Change)(nil),                            // 39: inventory.v1.Change
+	(*Stats)(nil),                             // 40: inventory.v1.Stats
+	(*ConnectedAgent)(nil),                    // 41: inventory.v1.ConnectedAgent
+	(*ListHostsRequest)(nil),                  // 42: inventory.v1.ListHostsRequest
+	(*ListHostsResponse)(nil),                 // 43: inventory.v1.ListHostsResponse
+	(*GetHostRequest)(nil),                    // 44: inventory.v1.GetHostRequest
+	(*GetHostByIdentityRequest)(nil),          // 45: inventory.v1.GetHostByIdentityRequest
+	(*TagHostRequest)(nil),                    // 46: inventory.v1.TagHostRequest
+	(*RetireHostRequest)(nil),                 // 47: inventory.v1.RetireHostRequest
+	(*DeleteHostRequest)(nil),                 // 48: inventory.v1.DeleteHostRequest
+	(*DeleteHostResponse)(nil),                // 49: inventory.v1.DeleteHostResponse
+	(*GetSnapshotRequest)(nil),                // 50: inventory.v1.GetSnapshotRequest
+	(*ListSnapshotsRequest)(nil),              // 51: inventory.v1.ListSnapshotsRequest
+	(*ListSnapshotsResponse)(nil),             // 52: inventory.v1.ListSnapshotsResponse
+	(*GetLatestByHostRequest)(nil),            // 53: inventory.v1.GetLatestByHostRequest
+	(*DiffSnapshotsRequest)(nil),              // 54: inventory.v1.DiffSnapshotsRequest
+	(*DiffSnapshotsResponse)(nil),             // 55: inventory.v1.DiffSnapshotsResponse
+	(*ListChangesRequest)(nil),                // 56: inventory.v1.ListChangesRequest
+	(*ListChangesResponse)(nil),               // 57: inventory.v1.ListChangesResponse
+	(*DeleteSnapshotRequest)(nil),             // 58: inventory.v1.DeleteSnapshotRequest
+	(*DeleteSnapshotResponse)(nil),            // 59: inventory.v1.DeleteSnapshotResponse
+	(*GetStatisticsRequest)(nil),              // 60: inventory.v1.GetStatisticsRequest
+	(*ListConnectedAgentsRequest)(nil),        // 61: inventory.v1.ListConnectedAgentsRequest
+	(*ListConnectedAgentsResponse)(nil),       // 62: inventory.v1.ListConnectedAgentsResponse
+	(*RefreshInventoryRequest)(nil),           // 63: inventory.v1.RefreshInventoryRequest
+	(*RefreshInventoryResponse)(nil),          // 64: inventory.v1.RefreshInventoryResponse
+	(*MintEnrollmentTokenRequest)(nil),        // 65: inventory.v1.MintEnrollmentTokenRequest
+	(*MintEnrollmentTokenResponse)(nil),       // 66: inventory.v1.MintEnrollmentTokenResponse
+	(*RevokeAgentRequest)(nil),                // 67: inventory.v1.RevokeAgentRequest
+	(*RevokeAgentResponse)(nil),               // 68: inventory.v1.RevokeAgentResponse
+	(*ListReportTenantsRequest)(nil),          // 69: inventory.v1.ListReportTenantsRequest
+	(*ListReportTenantsResponse)(nil),         // 70: inventory.v1.ListReportTenantsResponse
+	(*ListHostReportsRequest)(nil),            // 71: inventory.v1.ListHostReportsRequest
+	(*ListHostReportsResponse)(nil),           // 72: inventory.v1.ListHostReportsResponse
+	(*GetHostReportRequest)(nil),              // 73: inventory.v1.GetHostReportRequest
+	(*HostReport)(nil),                        // 74: inventory.v1.HostReport
+	(*HardwareProfile)(nil),                   // 75: inventory.v1.HardwareProfile
+	(*PendingUpdate)(nil),                     // 76: inventory.v1.PendingUpdate
+	(*EnrollRequest)(nil),                     // 77: inventory.v1.EnrollRequest
+	(*AutoEnrollProof)(nil),                   // 78: inventory.v1.AutoEnrollProof
+	(*EnrollResponse)(nil),                    // 79: inventory.v1.EnrollResponse
+	(*SubmitRequest)(nil),                     // 80: inventory.v1.SubmitRequest
+	(*SubmitResponse)(nil),                    // 81: inventory.v1.SubmitResponse
+	(*StreamRequest)(nil),                     // 82: inventory.v1.StreamRequest
+	(*AgentPlatform)(nil),                     // 83: inventory.v1.AgentPlatform
+	(*Command)(nil),                           // 84: inventory.v1.Command
+	(*CertificateCommand)(nil),                // 85: inventory.v1.CertificateCommand
+	(*UpgradeCommand)(nil),                    // 86: inventory.v1.UpgradeCommand
+	(*CheckAgentUpdateRequest)(nil),           // 87: inventory.v1.CheckAgentUpdateRequest
+	(*CheckAgentUpdateResponse)(nil),          // 88: inventory.v1.CheckAgentUpdateResponse
+	(*DownloadAgentReleaseRequest)(nil),       // 89: inventory.v1.DownloadAgentReleaseRequest
+	(*DownloadAgentReleaseResponse)(nil),      // 90: inventory.v1.DownloadAgentReleaseResponse
+	(*ReleaseHeader)(nil),                     // 91: inventory.v1.ReleaseHeader
+	(*ArtifactChunk)(nil),                     // 92: inventory.v1.ArtifactChunk
+	(*ReportUpgradeRequest)(nil),              // 93: inventory.v1.ReportUpgradeRequest
+	(*ReportUpgradeResponse)(nil),             // 94: inventory.v1.ReportUpgradeResponse
+	(*FetchCertificateRequest)(nil),           // 95: inventory.v1.FetchCertificateRequest
+	(*CertificateBundle)(nil),                 // 96: inventory.v1.CertificateBundle
+	(*ReportCertificateRequest)(nil),          // 97: inventory.v1.ReportCertificateRequest
+	(*ReportCertificateResponse)(nil),         // 98: inventory.v1.ReportCertificateResponse
+	(*HostSelector)(nil),                      // 99: inventory.v1.HostSelector
+	(*CreateCertificateDeliveryRequest)(nil),  // 100: inventory.v1.CreateCertificateDeliveryRequest
+	(*GetCertificateDeliveryRequest)(nil),     // 101: inventory.v1.GetCertificateDeliveryRequest
+	(*CertificateDeliveryItem)(nil),           // 102: inventory.v1.CertificateDeliveryItem
+	(*CertificateDelivery)(nil),               // 103: inventory.v1.CertificateDelivery
+	(*PreviewCertificateTargetsRequest)(nil),  // 104: inventory.v1.PreviewCertificateTargetsRequest
+	(*TargetHost)(nil),                        // 105: inventory.v1.TargetHost
+	(*PreviewCertificateTargetsResponse)(nil), // 106: inventory.v1.PreviewCertificateTargetsResponse
+	(*VerifyHostCertificatesRequest)(nil),     // 107: inventory.v1.VerifyHostCertificatesRequest
+	(*HostCertificateStatus)(nil),             // 108: inventory.v1.HostCertificateStatus
+	(*VerifyHostCertificatesResponse)(nil),    // 109: inventory.v1.VerifyHostCertificatesResponse
+	(*MarkCertificateRevokedRequest)(nil),     // 110: inventory.v1.MarkCertificateRevokedRequest
+	(*MarkCertificateRevokedResponse)(nil),    // 111: inventory.v1.MarkCertificateRevokedResponse
+	nil,                                       // 112: inventory.v1.Host.TagsEntry
+	nil,                                       // 113: inventory.v1.Stats.HostsByStatusEntry
+	nil,                                       // 114: inventory.v1.Stats.HostsByOsEntry
+	nil,                                       // 115: inventory.v1.Stats.HostsByManufacturerEntry
+	nil,                                       // 116: inventory.v1.Stats.TopProgramsEntry
+	nil,                                       // 117: inventory.v1.Stats.OsVersionsEntry
+	nil,                                       // 118: inventory.v1.TagHostRequest.TagsEntry
+	nil,                                       // 119: inventory.v1.TargetHost.TagsEntry
 }
 var file_inventory_v1_inventory_proto_depIdxs = []int32{
 	0,   // 0: inventory.v1.Host.status:type_name -> inventory.v1.HostStatus
-	93,  // 1: inventory.v1.Host.tags:type_name -> inventory.v1.Host.TagsEntry
+	112, // 1: inventory.v1.Host.tags:type_name -> inventory.v1.Host.TagsEntry
 	1,   // 2: inventory.v1.SnapshotSummary.source:type_name -> inventory.v1.SnapshotSource
-	7,   // 3: inventory.v1.Snapshot.summary:type_name -> inventory.v1.SnapshotSummary
-	9,   // 4: inventory.v1.Snapshot.payload:type_name -> inventory.v1.Inventory
-	5,   // 5: inventory.v1.Inventory.identity:type_name -> inventory.v1.Identity
-	20,  // 6: inventory.v1.Inventory.os:type_name -> inventory.v1.OSInfo
-	10,  // 7: inventory.v1.Inventory.bios:type_name -> inventory.v1.BIOSInfo
-	11,  // 8: inventory.v1.Inventory.system:type_name -> inventory.v1.SystemInfo
-	12,  // 9: inventory.v1.Inventory.baseboard:type_name -> inventory.v1.BaseboardInfo
-	13,  // 10: inventory.v1.Inventory.chassis:type_name -> inventory.v1.ChassisInfo
-	14,  // 11: inventory.v1.Inventory.processors:type_name -> inventory.v1.Processor
-	15,  // 12: inventory.v1.Inventory.cache:type_name -> inventory.v1.CacheInfo
-	16,  // 13: inventory.v1.Inventory.memory:type_name -> inventory.v1.MemoryInfo
-	19,  // 14: inventory.v1.Inventory.monitors:type_name -> inventory.v1.Monitor
-	21,  // 15: inventory.v1.Inventory.installed_programs:type_name -> inventory.v1.Program
-	22,  // 16: inventory.v1.Inventory.services:type_name -> inventory.v1.Service
-	23,  // 17: inventory.v1.Inventory.users:type_name -> inventory.v1.UserAccount
-	24,  // 18: inventory.v1.Inventory.patches:type_name -> inventory.v1.Patch
-	25,  // 19: inventory.v1.Inventory.environment:type_name -> inventory.v1.Environment
-	26,  // 20: inventory.v1.Inventory.network_interfaces:type_name -> inventory.v1.NetworkInterface
-	34,  // 21: inventory.v1.Inventory.disks:type_name -> inventory.v1.Disk
-	28,  // 22: inventory.v1.Inventory.virtualization:type_name -> inventory.v1.Virtualization
-	29,  // 23: inventory.v1.Inventory.bmc:type_name -> inventory.v1.Bmc
-	31,  // 24: inventory.v1.Inventory.hypervisor_guests:type_name -> inventory.v1.HypervisorGuest
-	32,  // 25: inventory.v1.Inventory.update_state:type_name -> inventory.v1.UpdateState
-	33,  // 26: inventory.v1.Inventory.truncated:type_name -> inventory.v1.CollectionLimits
-	35,  // 27: inventory.v1.Inventory.filesystems:type_name -> inventory.v1.Filesystem
-	36,  // 28: inventory.v1.Inventory.hardware_availability:type_name -> inventory.v1.HardwareAvailability
-	17,  // 29: inventory.v1.MemoryInfo.array:type_name -> inventory.v1.MemoryArray
-	18,  // 30: inventory.v1.MemoryInfo.modules:type_name -> inventory.v1.MemoryModule
-	17,  // 31: inventory.v1.MemoryInfo.arrays:type_name -> inventory.v1.MemoryArray
-	27,  // 32: inventory.v1.NetworkInterface.addresses:type_name -> inventory.v1.InterfaceAddress
-	30,  // 33: inventory.v1.Bmc.ports:type_name -> inventory.v1.BmcPort
-	37,  // 34: inventory.v1.Disk.partitions:type_name -> inventory.v1.Partition
+	8,   // 3: inventory.v1.Snapshot.summary:type_name -> inventory.v1.SnapshotSummary
+	10,  // 4: inventory.v1.Snapshot.payload:type_name -> inventory.v1.Inventory
+	6,   // 5: inventory.v1.Inventory.identity:type_name -> inventory.v1.Identity
+	21,  // 6: inventory.v1.Inventory.os:type_name -> inventory.v1.OSInfo
+	11,  // 7: inventory.v1.Inventory.bios:type_name -> inventory.v1.BIOSInfo
+	12,  // 8: inventory.v1.Inventory.system:type_name -> inventory.v1.SystemInfo
+	13,  // 9: inventory.v1.Inventory.baseboard:type_name -> inventory.v1.BaseboardInfo
+	14,  // 10: inventory.v1.Inventory.chassis:type_name -> inventory.v1.ChassisInfo
+	15,  // 11: inventory.v1.Inventory.processors:type_name -> inventory.v1.Processor
+	16,  // 12: inventory.v1.Inventory.cache:type_name -> inventory.v1.CacheInfo
+	17,  // 13: inventory.v1.Inventory.memory:type_name -> inventory.v1.MemoryInfo
+	20,  // 14: inventory.v1.Inventory.monitors:type_name -> inventory.v1.Monitor
+	22,  // 15: inventory.v1.Inventory.installed_programs:type_name -> inventory.v1.Program
+	23,  // 16: inventory.v1.Inventory.services:type_name -> inventory.v1.Service
+	24,  // 17: inventory.v1.Inventory.users:type_name -> inventory.v1.UserAccount
+	25,  // 18: inventory.v1.Inventory.patches:type_name -> inventory.v1.Patch
+	26,  // 19: inventory.v1.Inventory.environment:type_name -> inventory.v1.Environment
+	27,  // 20: inventory.v1.Inventory.network_interfaces:type_name -> inventory.v1.NetworkInterface
+	35,  // 21: inventory.v1.Inventory.disks:type_name -> inventory.v1.Disk
+	29,  // 22: inventory.v1.Inventory.virtualization:type_name -> inventory.v1.Virtualization
+	30,  // 23: inventory.v1.Inventory.bmc:type_name -> inventory.v1.Bmc
+	32,  // 24: inventory.v1.Inventory.hypervisor_guests:type_name -> inventory.v1.HypervisorGuest
+	33,  // 25: inventory.v1.Inventory.update_state:type_name -> inventory.v1.UpdateState
+	34,  // 26: inventory.v1.Inventory.truncated:type_name -> inventory.v1.CollectionLimits
+	36,  // 27: inventory.v1.Inventory.filesystems:type_name -> inventory.v1.Filesystem
+	37,  // 28: inventory.v1.Inventory.hardware_availability:type_name -> inventory.v1.HardwareAvailability
+	18,  // 29: inventory.v1.MemoryInfo.array:type_name -> inventory.v1.MemoryArray
+	19,  // 30: inventory.v1.MemoryInfo.modules:type_name -> inventory.v1.MemoryModule
+	18,  // 31: inventory.v1.MemoryInfo.arrays:type_name -> inventory.v1.MemoryArray
+	28,  // 32: inventory.v1.NetworkInterface.addresses:type_name -> inventory.v1.InterfaceAddress
+	31,  // 33: inventory.v1.Bmc.ports:type_name -> inventory.v1.BmcPort
+	38,  // 34: inventory.v1.Disk.partitions:type_name -> inventory.v1.Partition
 	2,   // 35: inventory.v1.Change.change_type:type_name -> inventory.v1.ChangeType
-	94,  // 36: inventory.v1.Stats.hosts_by_status:type_name -> inventory.v1.Stats.HostsByStatusEntry
-	95,  // 37: inventory.v1.Stats.hosts_by_os:type_name -> inventory.v1.Stats.HostsByOsEntry
-	96,  // 38: inventory.v1.Stats.hosts_by_manufacturer:type_name -> inventory.v1.Stats.HostsByManufacturerEntry
-	97,  // 39: inventory.v1.Stats.top_programs:type_name -> inventory.v1.Stats.TopProgramsEntry
-	98,  // 40: inventory.v1.Stats.os_versions:type_name -> inventory.v1.Stats.OsVersionsEntry
+	113, // 36: inventory.v1.Stats.hosts_by_status:type_name -> inventory.v1.Stats.HostsByStatusEntry
+	114, // 37: inventory.v1.Stats.hosts_by_os:type_name -> inventory.v1.Stats.HostsByOsEntry
+	115, // 38: inventory.v1.Stats.hosts_by_manufacturer:type_name -> inventory.v1.Stats.HostsByManufacturerEntry
+	116, // 39: inventory.v1.Stats.top_programs:type_name -> inventory.v1.Stats.TopProgramsEntry
+	117, // 40: inventory.v1.Stats.os_versions:type_name -> inventory.v1.Stats.OsVersionsEntry
 	0,   // 41: inventory.v1.ListHostsRequest.status:type_name -> inventory.v1.HostStatus
-	6,   // 42: inventory.v1.ListHostsResponse.hosts:type_name -> inventory.v1.Host
-	5,   // 43: inventory.v1.GetHostByIdentityRequest.identity:type_name -> inventory.v1.Identity
-	99,  // 44: inventory.v1.TagHostRequest.tags:type_name -> inventory.v1.TagHostRequest.TagsEntry
-	7,   // 45: inventory.v1.ListSnapshotsResponse.snapshots:type_name -> inventory.v1.SnapshotSummary
-	38,  // 46: inventory.v1.DiffSnapshotsResponse.changes:type_name -> inventory.v1.Change
-	38,  // 47: inventory.v1.ListChangesResponse.changes:type_name -> inventory.v1.Change
-	40,  // 48: inventory.v1.ListConnectedAgentsResponse.agents:type_name -> inventory.v1.ConnectedAgent
+	7,   // 42: inventory.v1.ListHostsResponse.hosts:type_name -> inventory.v1.Host
+	6,   // 43: inventory.v1.GetHostByIdentityRequest.identity:type_name -> inventory.v1.Identity
+	118, // 44: inventory.v1.TagHostRequest.tags:type_name -> inventory.v1.TagHostRequest.TagsEntry
+	8,   // 45: inventory.v1.ListSnapshotsResponse.snapshots:type_name -> inventory.v1.SnapshotSummary
+	39,  // 46: inventory.v1.DiffSnapshotsResponse.changes:type_name -> inventory.v1.Change
+	39,  // 47: inventory.v1.ListChangesResponse.changes:type_name -> inventory.v1.Change
+	41,  // 48: inventory.v1.ListConnectedAgentsResponse.agents:type_name -> inventory.v1.ConnectedAgent
 	4,   // 49: inventory.v1.ListHostReportsRequest.view:type_name -> inventory.v1.HostReportView
-	73,  // 50: inventory.v1.ListHostReportsResponse.reports:type_name -> inventory.v1.HostReport
-	6,   // 51: inventory.v1.HostReport.host:type_name -> inventory.v1.Host
-	26,  // 52: inventory.v1.HostReport.network_interfaces:type_name -> inventory.v1.NetworkInterface
-	28,  // 53: inventory.v1.HostReport.virtualization:type_name -> inventory.v1.Virtualization
-	29,  // 54: inventory.v1.HostReport.bmc:type_name -> inventory.v1.Bmc
-	31,  // 55: inventory.v1.HostReport.hypervisor_guests:type_name -> inventory.v1.HypervisorGuest
-	32,  // 56: inventory.v1.HostReport.update_state:type_name -> inventory.v1.UpdateState
-	75,  // 57: inventory.v1.HostReport.pending_updates:type_name -> inventory.v1.PendingUpdate
-	33,  // 58: inventory.v1.HostReport.truncated:type_name -> inventory.v1.CollectionLimits
-	74,  // 59: inventory.v1.HostReport.hardware:type_name -> inventory.v1.HardwareProfile
-	10,  // 60: inventory.v1.HardwareProfile.bios:type_name -> inventory.v1.BIOSInfo
-	11,  // 61: inventory.v1.HardwareProfile.system:type_name -> inventory.v1.SystemInfo
-	12,  // 62: inventory.v1.HardwareProfile.baseboard:type_name -> inventory.v1.BaseboardInfo
-	13,  // 63: inventory.v1.HardwareProfile.chassis:type_name -> inventory.v1.ChassisInfo
-	14,  // 64: inventory.v1.HardwareProfile.processors:type_name -> inventory.v1.Processor
-	16,  // 65: inventory.v1.HardwareProfile.memory:type_name -> inventory.v1.MemoryInfo
-	34,  // 66: inventory.v1.HardwareProfile.disks:type_name -> inventory.v1.Disk
-	35,  // 67: inventory.v1.HardwareProfile.filesystems:type_name -> inventory.v1.Filesystem
-	36,  // 68: inventory.v1.HardwareProfile.availability:type_name -> inventory.v1.HardwareAvailability
-	5,   // 69: inventory.v1.EnrollRequest.identity:type_name -> inventory.v1.Identity
-	77,  // 70: inventory.v1.EnrollRequest.auto_enroll:type_name -> inventory.v1.AutoEnrollProof
-	9,   // 71: inventory.v1.SubmitRequest.inventory:type_name -> inventory.v1.Inventory
-	82,  // 72: inventory.v1.StreamRequest.platform:type_name -> inventory.v1.AgentPlatform
+	74,  // 50: inventory.v1.ListHostReportsResponse.reports:type_name -> inventory.v1.HostReport
+	7,   // 51: inventory.v1.HostReport.host:type_name -> inventory.v1.Host
+	27,  // 52: inventory.v1.HostReport.network_interfaces:type_name -> inventory.v1.NetworkInterface
+	29,  // 53: inventory.v1.HostReport.virtualization:type_name -> inventory.v1.Virtualization
+	30,  // 54: inventory.v1.HostReport.bmc:type_name -> inventory.v1.Bmc
+	32,  // 55: inventory.v1.HostReport.hypervisor_guests:type_name -> inventory.v1.HypervisorGuest
+	33,  // 56: inventory.v1.HostReport.update_state:type_name -> inventory.v1.UpdateState
+	76,  // 57: inventory.v1.HostReport.pending_updates:type_name -> inventory.v1.PendingUpdate
+	34,  // 58: inventory.v1.HostReport.truncated:type_name -> inventory.v1.CollectionLimits
+	75,  // 59: inventory.v1.HostReport.hardware:type_name -> inventory.v1.HardwareProfile
+	11,  // 60: inventory.v1.HardwareProfile.bios:type_name -> inventory.v1.BIOSInfo
+	12,  // 61: inventory.v1.HardwareProfile.system:type_name -> inventory.v1.SystemInfo
+	13,  // 62: inventory.v1.HardwareProfile.baseboard:type_name -> inventory.v1.BaseboardInfo
+	14,  // 63: inventory.v1.HardwareProfile.chassis:type_name -> inventory.v1.ChassisInfo
+	15,  // 64: inventory.v1.HardwareProfile.processors:type_name -> inventory.v1.Processor
+	17,  // 65: inventory.v1.HardwareProfile.memory:type_name -> inventory.v1.MemoryInfo
+	35,  // 66: inventory.v1.HardwareProfile.disks:type_name -> inventory.v1.Disk
+	36,  // 67: inventory.v1.HardwareProfile.filesystems:type_name -> inventory.v1.Filesystem
+	37,  // 68: inventory.v1.HardwareProfile.availability:type_name -> inventory.v1.HardwareAvailability
+	6,   // 69: inventory.v1.EnrollRequest.identity:type_name -> inventory.v1.Identity
+	78,  // 70: inventory.v1.EnrollRequest.auto_enroll:type_name -> inventory.v1.AutoEnrollProof
+	10,  // 71: inventory.v1.SubmitRequest.inventory:type_name -> inventory.v1.Inventory
+	83,  // 72: inventory.v1.StreamRequest.platform:type_name -> inventory.v1.AgentPlatform
 	3,   // 73: inventory.v1.Command.type:type_name -> inventory.v1.CommandType
-	84,  // 74: inventory.v1.Command.upgrade:type_name -> inventory.v1.UpgradeCommand
-	82,  // 75: inventory.v1.CheckAgentUpdateRequest.platform:type_name -> inventory.v1.AgentPlatform
-	89,  // 76: inventory.v1.DownloadAgentReleaseResponse.header:type_name -> inventory.v1.ReleaseHeader
-	90,  // 77: inventory.v1.DownloadAgentReleaseResponse.chunk:type_name -> inventory.v1.ArtifactChunk
-	41,  // 78: inventory.v1.InventoryHostService.ListHosts:input_type -> inventory.v1.ListHostsRequest
-	43,  // 79: inventory.v1.InventoryHostService.GetHost:input_type -> inventory.v1.GetHostRequest
-	44,  // 80: inventory.v1.InventoryHostService.GetHostByIdentity:input_type -> inventory.v1.GetHostByIdentityRequest
-	45,  // 81: inventory.v1.InventoryHostService.TagHost:input_type -> inventory.v1.TagHostRequest
-	46,  // 82: inventory.v1.InventoryHostService.RetireHost:input_type -> inventory.v1.RetireHostRequest
-	47,  // 83: inventory.v1.InventoryHostService.DeleteHost:input_type -> inventory.v1.DeleteHostRequest
-	49,  // 84: inventory.v1.InventorySnapshotService.GetSnapshot:input_type -> inventory.v1.GetSnapshotRequest
-	50,  // 85: inventory.v1.InventorySnapshotService.ListSnapshots:input_type -> inventory.v1.ListSnapshotsRequest
-	52,  // 86: inventory.v1.InventorySnapshotService.GetLatestByHost:input_type -> inventory.v1.GetLatestByHostRequest
-	53,  // 87: inventory.v1.InventorySnapshotService.DiffSnapshots:input_type -> inventory.v1.DiffSnapshotsRequest
-	55,  // 88: inventory.v1.InventorySnapshotService.ListChanges:input_type -> inventory.v1.ListChangesRequest
-	57,  // 89: inventory.v1.InventorySnapshotService.DeleteSnapshot:input_type -> inventory.v1.DeleteSnapshotRequest
-	59,  // 90: inventory.v1.InventoryStatisticsService.GetStatistics:input_type -> inventory.v1.GetStatisticsRequest
-	60,  // 91: inventory.v1.InventoryAgentService.ListConnectedAgents:input_type -> inventory.v1.ListConnectedAgentsRequest
-	62,  // 92: inventory.v1.InventoryAgentService.RefreshInventory:input_type -> inventory.v1.RefreshInventoryRequest
-	64,  // 93: inventory.v1.InventoryAgentService.MintEnrollmentToken:input_type -> inventory.v1.MintEnrollmentTokenRequest
-	66,  // 94: inventory.v1.InventoryAgentService.RevokeAgent:input_type -> inventory.v1.RevokeAgentRequest
-	68,  // 95: inventory.v1.HostReportService.ListReportTenants:input_type -> inventory.v1.ListReportTenantsRequest
-	70,  // 96: inventory.v1.HostReportService.ListHostReports:input_type -> inventory.v1.ListHostReportsRequest
-	72,  // 97: inventory.v1.HostReportService.GetHostReport:input_type -> inventory.v1.GetHostReportRequest
-	76,  // 98: inventory.v1.IngestService.Enroll:input_type -> inventory.v1.EnrollRequest
-	79,  // 99: inventory.v1.IngestService.SubmitInventory:input_type -> inventory.v1.SubmitRequest
-	81,  // 100: inventory.v1.IngestService.StreamCommands:input_type -> inventory.v1.StreamRequest
-	85,  // 101: inventory.v1.IngestService.CheckAgentUpdate:input_type -> inventory.v1.CheckAgentUpdateRequest
-	87,  // 102: inventory.v1.IngestService.DownloadAgentRelease:input_type -> inventory.v1.DownloadAgentReleaseRequest
-	91,  // 103: inventory.v1.IngestService.ReportUpgrade:input_type -> inventory.v1.ReportUpgradeRequest
-	42,  // 104: inventory.v1.InventoryHostService.ListHosts:output_type -> inventory.v1.ListHostsResponse
-	6,   // 105: inventory.v1.InventoryHostService.GetHost:output_type -> inventory.v1.Host
-	6,   // 106: inventory.v1.InventoryHostService.GetHostByIdentity:output_type -> inventory.v1.Host
-	6,   // 107: inventory.v1.InventoryHostService.TagHost:output_type -> inventory.v1.Host
-	6,   // 108: inventory.v1.InventoryHostService.RetireHost:output_type -> inventory.v1.Host
-	48,  // 109: inventory.v1.InventoryHostService.DeleteHost:output_type -> inventory.v1.DeleteHostResponse
-	8,   // 110: inventory.v1.InventorySnapshotService.GetSnapshot:output_type -> inventory.v1.Snapshot
-	51,  // 111: inventory.v1.InventorySnapshotService.ListSnapshots:output_type -> inventory.v1.ListSnapshotsResponse
-	8,   // 112: inventory.v1.InventorySnapshotService.GetLatestByHost:output_type -> inventory.v1.Snapshot
-	54,  // 113: inventory.v1.InventorySnapshotService.DiffSnapshots:output_type -> inventory.v1.DiffSnapshotsResponse
-	56,  // 114: inventory.v1.InventorySnapshotService.ListChanges:output_type -> inventory.v1.ListChangesResponse
-	58,  // 115: inventory.v1.InventorySnapshotService.DeleteSnapshot:output_type -> inventory.v1.DeleteSnapshotResponse
-	39,  // 116: inventory.v1.InventoryStatisticsService.GetStatistics:output_type -> inventory.v1.Stats
-	61,  // 117: inventory.v1.InventoryAgentService.ListConnectedAgents:output_type -> inventory.v1.ListConnectedAgentsResponse
-	63,  // 118: inventory.v1.InventoryAgentService.RefreshInventory:output_type -> inventory.v1.RefreshInventoryResponse
-	65,  // 119: inventory.v1.InventoryAgentService.MintEnrollmentToken:output_type -> inventory.v1.MintEnrollmentTokenResponse
-	67,  // 120: inventory.v1.InventoryAgentService.RevokeAgent:output_type -> inventory.v1.RevokeAgentResponse
-	69,  // 121: inventory.v1.HostReportService.ListReportTenants:output_type -> inventory.v1.ListReportTenantsResponse
-	71,  // 122: inventory.v1.HostReportService.ListHostReports:output_type -> inventory.v1.ListHostReportsResponse
-	73,  // 123: inventory.v1.HostReportService.GetHostReport:output_type -> inventory.v1.HostReport
-	78,  // 124: inventory.v1.IngestService.Enroll:output_type -> inventory.v1.EnrollResponse
-	80,  // 125: inventory.v1.IngestService.SubmitInventory:output_type -> inventory.v1.SubmitResponse
-	83,  // 126: inventory.v1.IngestService.StreamCommands:output_type -> inventory.v1.Command
-	86,  // 127: inventory.v1.IngestService.CheckAgentUpdate:output_type -> inventory.v1.CheckAgentUpdateResponse
-	88,  // 128: inventory.v1.IngestService.DownloadAgentRelease:output_type -> inventory.v1.DownloadAgentReleaseResponse
-	92,  // 129: inventory.v1.IngestService.ReportUpgrade:output_type -> inventory.v1.ReportUpgradeResponse
-	104, // [104:130] is the sub-list for method output_type
-	78,  // [78:104] is the sub-list for method input_type
-	78,  // [78:78] is the sub-list for extension type_name
-	78,  // [78:78] is the sub-list for extension extendee
-	0,   // [0:78] is the sub-list for field type_name
+	86,  // 74: inventory.v1.Command.upgrade:type_name -> inventory.v1.UpgradeCommand
+	85,  // 75: inventory.v1.Command.certificate:type_name -> inventory.v1.CertificateCommand
+	83,  // 76: inventory.v1.CheckAgentUpdateRequest.platform:type_name -> inventory.v1.AgentPlatform
+	91,  // 77: inventory.v1.DownloadAgentReleaseResponse.header:type_name -> inventory.v1.ReleaseHeader
+	92,  // 78: inventory.v1.DownloadAgentReleaseResponse.chunk:type_name -> inventory.v1.ArtifactChunk
+	99,  // 79: inventory.v1.CreateCertificateDeliveryRequest.selector:type_name -> inventory.v1.HostSelector
+	5,   // 80: inventory.v1.CertificateDeliveryItem.state:type_name -> inventory.v1.DeliveryState
+	102, // 81: inventory.v1.CertificateDelivery.items:type_name -> inventory.v1.CertificateDeliveryItem
+	99,  // 82: inventory.v1.PreviewCertificateTargetsRequest.selector:type_name -> inventory.v1.HostSelector
+	119, // 83: inventory.v1.TargetHost.tags:type_name -> inventory.v1.TargetHost.TagsEntry
+	105, // 84: inventory.v1.PreviewCertificateTargetsResponse.hosts:type_name -> inventory.v1.TargetHost
+	99,  // 85: inventory.v1.VerifyHostCertificatesRequest.selector:type_name -> inventory.v1.HostSelector
+	108, // 86: inventory.v1.VerifyHostCertificatesResponse.hosts:type_name -> inventory.v1.HostCertificateStatus
+	42,  // 87: inventory.v1.InventoryHostService.ListHosts:input_type -> inventory.v1.ListHostsRequest
+	44,  // 88: inventory.v1.InventoryHostService.GetHost:input_type -> inventory.v1.GetHostRequest
+	45,  // 89: inventory.v1.InventoryHostService.GetHostByIdentity:input_type -> inventory.v1.GetHostByIdentityRequest
+	46,  // 90: inventory.v1.InventoryHostService.TagHost:input_type -> inventory.v1.TagHostRequest
+	47,  // 91: inventory.v1.InventoryHostService.RetireHost:input_type -> inventory.v1.RetireHostRequest
+	48,  // 92: inventory.v1.InventoryHostService.DeleteHost:input_type -> inventory.v1.DeleteHostRequest
+	50,  // 93: inventory.v1.InventorySnapshotService.GetSnapshot:input_type -> inventory.v1.GetSnapshotRequest
+	51,  // 94: inventory.v1.InventorySnapshotService.ListSnapshots:input_type -> inventory.v1.ListSnapshotsRequest
+	53,  // 95: inventory.v1.InventorySnapshotService.GetLatestByHost:input_type -> inventory.v1.GetLatestByHostRequest
+	54,  // 96: inventory.v1.InventorySnapshotService.DiffSnapshots:input_type -> inventory.v1.DiffSnapshotsRequest
+	56,  // 97: inventory.v1.InventorySnapshotService.ListChanges:input_type -> inventory.v1.ListChangesRequest
+	58,  // 98: inventory.v1.InventorySnapshotService.DeleteSnapshot:input_type -> inventory.v1.DeleteSnapshotRequest
+	60,  // 99: inventory.v1.InventoryStatisticsService.GetStatistics:input_type -> inventory.v1.GetStatisticsRequest
+	61,  // 100: inventory.v1.InventoryAgentService.ListConnectedAgents:input_type -> inventory.v1.ListConnectedAgentsRequest
+	63,  // 101: inventory.v1.InventoryAgentService.RefreshInventory:input_type -> inventory.v1.RefreshInventoryRequest
+	65,  // 102: inventory.v1.InventoryAgentService.MintEnrollmentToken:input_type -> inventory.v1.MintEnrollmentTokenRequest
+	67,  // 103: inventory.v1.InventoryAgentService.RevokeAgent:input_type -> inventory.v1.RevokeAgentRequest
+	69,  // 104: inventory.v1.HostReportService.ListReportTenants:input_type -> inventory.v1.ListReportTenantsRequest
+	71,  // 105: inventory.v1.HostReportService.ListHostReports:input_type -> inventory.v1.ListHostReportsRequest
+	73,  // 106: inventory.v1.HostReportService.GetHostReport:input_type -> inventory.v1.GetHostReportRequest
+	77,  // 107: inventory.v1.IngestService.Enroll:input_type -> inventory.v1.EnrollRequest
+	80,  // 108: inventory.v1.IngestService.SubmitInventory:input_type -> inventory.v1.SubmitRequest
+	82,  // 109: inventory.v1.IngestService.StreamCommands:input_type -> inventory.v1.StreamRequest
+	87,  // 110: inventory.v1.IngestService.CheckAgentUpdate:input_type -> inventory.v1.CheckAgentUpdateRequest
+	89,  // 111: inventory.v1.IngestService.DownloadAgentRelease:input_type -> inventory.v1.DownloadAgentReleaseRequest
+	93,  // 112: inventory.v1.IngestService.ReportUpgrade:input_type -> inventory.v1.ReportUpgradeRequest
+	95,  // 113: inventory.v1.IngestService.FetchCertificate:input_type -> inventory.v1.FetchCertificateRequest
+	97,  // 114: inventory.v1.IngestService.ReportCertificate:input_type -> inventory.v1.ReportCertificateRequest
+	100, // 115: inventory.v1.CertificateDeliveryService.CreateCertificateDelivery:input_type -> inventory.v1.CreateCertificateDeliveryRequest
+	101, // 116: inventory.v1.CertificateDeliveryService.GetCertificateDelivery:input_type -> inventory.v1.GetCertificateDeliveryRequest
+	104, // 117: inventory.v1.CertificateDeliveryService.PreviewCertificateTargets:input_type -> inventory.v1.PreviewCertificateTargetsRequest
+	107, // 118: inventory.v1.CertificateDeliveryService.VerifyHostCertificates:input_type -> inventory.v1.VerifyHostCertificatesRequest
+	110, // 119: inventory.v1.CertificateDeliveryService.MarkCertificateRevoked:input_type -> inventory.v1.MarkCertificateRevokedRequest
+	43,  // 120: inventory.v1.InventoryHostService.ListHosts:output_type -> inventory.v1.ListHostsResponse
+	7,   // 121: inventory.v1.InventoryHostService.GetHost:output_type -> inventory.v1.Host
+	7,   // 122: inventory.v1.InventoryHostService.GetHostByIdentity:output_type -> inventory.v1.Host
+	7,   // 123: inventory.v1.InventoryHostService.TagHost:output_type -> inventory.v1.Host
+	7,   // 124: inventory.v1.InventoryHostService.RetireHost:output_type -> inventory.v1.Host
+	49,  // 125: inventory.v1.InventoryHostService.DeleteHost:output_type -> inventory.v1.DeleteHostResponse
+	9,   // 126: inventory.v1.InventorySnapshotService.GetSnapshot:output_type -> inventory.v1.Snapshot
+	52,  // 127: inventory.v1.InventorySnapshotService.ListSnapshots:output_type -> inventory.v1.ListSnapshotsResponse
+	9,   // 128: inventory.v1.InventorySnapshotService.GetLatestByHost:output_type -> inventory.v1.Snapshot
+	55,  // 129: inventory.v1.InventorySnapshotService.DiffSnapshots:output_type -> inventory.v1.DiffSnapshotsResponse
+	57,  // 130: inventory.v1.InventorySnapshotService.ListChanges:output_type -> inventory.v1.ListChangesResponse
+	59,  // 131: inventory.v1.InventorySnapshotService.DeleteSnapshot:output_type -> inventory.v1.DeleteSnapshotResponse
+	40,  // 132: inventory.v1.InventoryStatisticsService.GetStatistics:output_type -> inventory.v1.Stats
+	62,  // 133: inventory.v1.InventoryAgentService.ListConnectedAgents:output_type -> inventory.v1.ListConnectedAgentsResponse
+	64,  // 134: inventory.v1.InventoryAgentService.RefreshInventory:output_type -> inventory.v1.RefreshInventoryResponse
+	66,  // 135: inventory.v1.InventoryAgentService.MintEnrollmentToken:output_type -> inventory.v1.MintEnrollmentTokenResponse
+	68,  // 136: inventory.v1.InventoryAgentService.RevokeAgent:output_type -> inventory.v1.RevokeAgentResponse
+	70,  // 137: inventory.v1.HostReportService.ListReportTenants:output_type -> inventory.v1.ListReportTenantsResponse
+	72,  // 138: inventory.v1.HostReportService.ListHostReports:output_type -> inventory.v1.ListHostReportsResponse
+	74,  // 139: inventory.v1.HostReportService.GetHostReport:output_type -> inventory.v1.HostReport
+	79,  // 140: inventory.v1.IngestService.Enroll:output_type -> inventory.v1.EnrollResponse
+	81,  // 141: inventory.v1.IngestService.SubmitInventory:output_type -> inventory.v1.SubmitResponse
+	84,  // 142: inventory.v1.IngestService.StreamCommands:output_type -> inventory.v1.Command
+	88,  // 143: inventory.v1.IngestService.CheckAgentUpdate:output_type -> inventory.v1.CheckAgentUpdateResponse
+	90,  // 144: inventory.v1.IngestService.DownloadAgentRelease:output_type -> inventory.v1.DownloadAgentReleaseResponse
+	94,  // 145: inventory.v1.IngestService.ReportUpgrade:output_type -> inventory.v1.ReportUpgradeResponse
+	96,  // 146: inventory.v1.IngestService.FetchCertificate:output_type -> inventory.v1.CertificateBundle
+	98,  // 147: inventory.v1.IngestService.ReportCertificate:output_type -> inventory.v1.ReportCertificateResponse
+	103, // 148: inventory.v1.CertificateDeliveryService.CreateCertificateDelivery:output_type -> inventory.v1.CertificateDelivery
+	103, // 149: inventory.v1.CertificateDeliveryService.GetCertificateDelivery:output_type -> inventory.v1.CertificateDelivery
+	106, // 150: inventory.v1.CertificateDeliveryService.PreviewCertificateTargets:output_type -> inventory.v1.PreviewCertificateTargetsResponse
+	109, // 151: inventory.v1.CertificateDeliveryService.VerifyHostCertificates:output_type -> inventory.v1.VerifyHostCertificatesResponse
+	111, // 152: inventory.v1.CertificateDeliveryService.MarkCertificateRevoked:output_type -> inventory.v1.MarkCertificateRevokedResponse
+	120, // [120:153] is the sub-list for method output_type
+	87,  // [87:120] is the sub-list for method input_type
+	87,  // [87:87] is the sub-list for extension type_name
+	87,  // [87:87] is the sub-list for extension extendee
+	0,   // [0:87] is the sub-list for field type_name
 }
 
 func init() { file_inventory_v1_inventory_proto_init() }
@@ -8001,7 +9688,7 @@ func file_inventory_v1_inventory_proto_init() {
 	if File_inventory_v1_inventory_proto != nil {
 		return
 	}
-	file_inventory_v1_inventory_proto_msgTypes[83].OneofWrappers = []any{
+	file_inventory_v1_inventory_proto_msgTypes[84].OneofWrappers = []any{
 		(*DownloadAgentReleaseResponse_Header)(nil),
 		(*DownloadAgentReleaseResponse_Chunk)(nil),
 	}
@@ -8010,10 +9697,10 @@ func file_inventory_v1_inventory_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_inventory_v1_inventory_proto_rawDesc), len(file_inventory_v1_inventory_proto_rawDesc)),
-			NumEnums:      5,
-			NumMessages:   95,
+			NumEnums:      6,
+			NumMessages:   114,
 			NumExtensions: 0,
-			NumServices:   6,
+			NumServices:   7,
 		},
 		GoTypes:           file_inventory_v1_inventory_proto_goTypes,
 		DependencyIndexes: file_inventory_v1_inventory_proto_depIdxs,

@@ -12,6 +12,17 @@ export/import over the gateway and service-to-service gRPC, plus a federated UI
 remote. Agent and enrollment credentials are sealed with envelope encryption, and
 every tenant is isolated by PostgreSQL row-level security.
 
+Since 4.7.0 the service also relays lcm certificates to Linux agents for the
+deployer's `inventory-agent` provider (feature 033): the deployer asks for a
+delivery by reference, inventory pushes an item id to the agent, the agent
+pulls the certificate (and, by policy, the private key) over its
+authenticated ingest connection and installs it under a certbot-style
+directory, optionally running a locally configured deploy hook. Inventory
+never stores certificate material; renewals and offline hosts are delivered
+automatically, and every transition is audited
+([Certificates on the host](#certificates-on-the-host-feature-033),
+[deploy/README.md](deploy/README.md#certificate-delivery-deployer-feature-033)).
+
 Operations: [`deploy/README.md`](deploy/README.md).
 Design history: `specs/010-inventory-service`.
 
@@ -67,6 +78,10 @@ SDK's published `sdk/vX.Y.Z` tag.
 | `internal/...` | hosts, snapshots, diff, enrollment, ingest, registry, streams, sealing, authz, audit, events, stats, backup and their SQL bindings; agent-side collector, sender, daemon and Windows service |
 | `internal/agentfacts` | pure, fuzzed parsers behind the agent's host report collection (netlink, sysfs, Windows adapters, virtualization, Proxmox, package managers, BMC LAN parameters) |
 | `internal/hostreport` | the host report projection and digest served to IPAM |
+| `internal/certmaterial` | pure, fuzzed certificate rules shared by server and agent: names, host tags, certificate ids, PEM bundle parsing and limits, key ↔ certificate match |
+| `internal/certdelivery` | the certificate delivery relay (feature 033): create/replay/supersede, fetch from lcm, report, sweep, re-arm, revoke, verify, views |
+| `internal/lcmclient` | mesh client of `lcm.v1.Certificates/Download` with a closed error mapping |
+| `internal/agentcerts` | agent certificate store: `live/`→`archive/` symlink layout, atomic switch, crash recovery, pruning, deploy hook |
 | `ui` | Vue 3 + FlyonUI federated remote on `@go-tangra/ui` |
 | `api/openapi`, `sdk/api/proto` | contracts (`inventory.yaml`, `inventory.v1`) |
 | `deploy` | operations guide, service policy and the development KEK (never copied into the image) |
@@ -233,6 +248,80 @@ end-to-end test (Debian 12, Rocky 9) with its own throwaway key.
 
 CI cross-compiles the agent for every supported platform on each change and
 builds the signed release only on tags.
+
+### Certificates on the host (feature 033)
+
+Linux agents receive certificates that the deployer's `inventory-agent`
+provider delivers (server side: [deploy/README.md](deploy/README.md#certificate-delivery-deployer-feature-033)).
+The agent announces the `cert.v1` capability when `certificates.enabled`
+(default true) and the ingest connection uses TLS (or
+`certificates.allow_insecure_transport`, development only); Windows agents
+never announce it. A `CERTIFICATE` command carries only an item id and a
+name; the agent pulls the bundle over its authenticated connection,
+validates it again (name, PEM, key ↔ certificate, validity, sizes) and
+writes it only below `certificates.directory` (default
+`/etc/inventory-agent/certs`). Configuration (`agent.yaml`, all keys
+optional, defaults shown; invalid values refuse to start):
+
+```yaml
+certificates:
+  enabled: true                       # false: deliveries are answered disabled_locally
+  directory: /etc/inventory-agent/certs   # absolute; not under /proc /sys /dev /home /root /tmp
+  owner: root                         # file owner (directories stay root-owned)
+  group: root                         # e.g. nginx, so a service reads its key via the group
+  dir_mode: "0750"                    # 0700-0755, no world write
+  cert_mode: "0644"
+  key_mode: "0600"                    # 0600 or 0640
+  keep_previous: 1                    # 0-5 older generations kept
+  deploy_hook: ""                     # absolute path; empty = nothing ever runs
+  hook_timeout_seconds: 300           # 30-1800; keep below the server's report_timeout_minutes
+  allow_insecure_transport: false     # development only (plaintext ingest edge)
+```
+
+```text
+live/<name> -> ../archive/<name>/<generation>   symlink, switched with one rename(2)
+archive/<name>/<generation>/{cert,chain,fullchain,privkey}.pem
+renewal/<name>.json                             v3 metadata + certificate/item ids
+```
+
+Consumers use `live/<name>/fullchain.pem` and `live/<name>/privkey.pem`
+(certbot paths); a reader never sees a certificate with the wrong key.
+Directories are `root:<group>`, files `<owner>:<group>` with the configured
+modes; `keep_previous` (default 1) older generations stay for a manual
+restore (`ln -sfn ../archive/<name>/<previous> live/<name>`). The same
+certificate again is reported `unchanged` without writing anything;
+`certificate_only` deliveries keep an existing matching `privkey.pem` and
+fail with `key_mismatch` otherwise.
+
+**Deploy hook** (off by default, never sent by the platform): set
+`certificates.deploy_hook` to an absolute path. It runs after a new or
+renewed installation (and when the platform retries a failed hook), only if
+the file is a regular, root-owned file, executable and not writable by group
+or others, and its directory and every ancestor up to `/` are root-owned
+and not writable by group or others (so no hook under `/tmp` or a user's
+tree) — otherwise `hook_refused`. It is executed directly (no shell, no arguments)
+in `live/<name>`, in its own process group, with stdin from `/dev/null` and
+exactly this environment: `PATH`, `LANG=C.UTF-8`, `LCM_CERT_NAME`,
+`LCM_CERT_DIR`, `LCM_CERT_PATH`, `LCM_KEY_PATH` (empty without a key),
+`LCM_CHAIN_PATH`, `LCM_FULLCHAIN_PATH`, `LCM_COMMON_NAME`, `LCM_DNS_NAMES`,
+`LCM_IP_ADDRESSES`, `LCM_SERIAL_NUMBER`, `LCM_EXPIRES_AT`, `LCM_IS_RENEWAL`,
+`LCM_CERTIFICATE_ID` (validated `[A-Za-z0-9._:-]{1,128}`). Control
+characters are stripped, but `LCM_COMMON_NAME` and `LCM_DNS_NAMES` come from
+the certificate, so a hook must quote them (`"$LCM_DNS_NAMES"`) and never
+`eval` them. After `hook_timeout_seconds` (default 300) the group
+gets SIGTERM and 5 s later SIGKILL (`hook_timeout`, exit 256). A non-zero
+exit is reported as `hook_failed` with the exit code; the files stay
+installed. Hook output (first 4 KiB) goes to the agent log only. The systemd
+unit sets `ProtectHome`, `PrivateTmp` and `NoNewPrivileges`, so a hook sees
+no `/home` and a private `/tmp`; `systemctl reload nginx` works. Example:
+
+```sh
+#!/bin/sh
+# /usr/local/sbin/reload-nginx.sh  (root:root 0755)
+nginx -t && systemctl reload nginx
+```
+
+`make test-agent-certs` runs the store and hook tests as root in a container.
 
 ## Host reports for IPAM
 

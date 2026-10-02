@@ -4,7 +4,9 @@
 # edge authenticates agents by per-agent credential (not mesh policy) on a
 # separate listener. Inventory itself calls auth/lcm as a client. IPAM pulls
 # host reports (HostReportService, feature 020) and nothing else; the handler
-# additionally checks host_reports.consumers.
+# additionally checks host_reports.consumers. The deployer requests
+# certificate deliveries to agents (CertificateDeliveryService, feature 033);
+# the handler additionally checks cert_delivery.sources.
 version: inventory-dev-1
 rules:
   - id: gateway-forwards
@@ -29,5 +31,18 @@ rules:
     operations: ["/inventory.v1.HostReportService/ListReportTenants",
                  "/inventory.v1.HostReportService/ListHostReports",
                  "/inventory.v1.HostReportService/GetHostReport",
+                 "/grpc.health.v1.Health/Check"]
+    effect: allow
+  - id: deployer-cert-delivery
+    # the deployer's inventory-agent provider requests deliveries and reads
+    # their state (feature 033); references only, never material. The
+    # handler additionally checks cert_delivery.sources.
+    from: ["spiffe://example.org/svc/deployer"]
+    to: ["inventory"]
+    operations: ["/inventory.v1.CertificateDeliveryService/CreateCertificateDelivery",
+                 "/inventory.v1.CertificateDeliveryService/GetCertificateDelivery",
+                 "/inventory.v1.CertificateDeliveryService/PreviewCertificateTargets",
+                 "/inventory.v1.CertificateDeliveryService/VerifyHostCertificates",
+                 "/inventory.v1.CertificateDeliveryService/MarkCertificateRevoked",
                  "/grpc.health.v1.Health/Check"]
     effect: allow

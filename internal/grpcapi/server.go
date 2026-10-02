@@ -18,6 +18,7 @@ import (
 	invv1 "github.com/go-tangra/go-tangra-inventory/sdk/v4/api/proto/inventory/v1"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/authz"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/backup"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/certdelivery"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/enroll"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/hosts"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/registry"
@@ -83,6 +84,11 @@ type Deps struct {
 	Reports            repo.Store
 	ReportConsumers    []string
 	MaxReportPageBytes int
+	// CertDelivery serves CertificateDeliveryService (feature 033) when
+	// set; CertSources are the mesh services allowed to call it
+	// (cert_delivery.sources). A disabled relay answers FailedPrecondition.
+	CertDelivery *certdelivery.Service
+	CertSources  []string
 }
 
 // Register registers the inventory.v1 mesh servers on the gRPC server. Callers
@@ -99,6 +105,9 @@ func Register(gs grpc.ServiceRegistrar, d Deps) {
 	}
 	if d.Enroll != nil || d.Registry != nil {
 		invv1.RegisterInventoryAgentServiceServer(gs, &AgentServer{Enroll: d.Enroll, Registry: d.Registry})
+	}
+	if d.CertDelivery != nil {
+		invv1.RegisterCertificateDeliveryServiceServer(gs, &CertDeliveryServer{Svc: d.CertDelivery, Sources: d.CertSources})
 	}
 	if d.Reports != nil {
 		invv1.RegisterHostReportServiceServer(gs, &HostReportServer{

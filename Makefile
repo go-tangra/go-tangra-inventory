@@ -2,7 +2,7 @@ GO        ?= go
 PKGS      := $(shell $(GO) list ./... | grep -v /ui/)
 COVER_OUT := coverage.out
 
-.PHONY: lint vuln test test-integration cover fuzz proto-check generate ui-build build build-ui image agent-windows agent-linux agent packages agent-release agent-release-dev release-check e2e-upgrade
+.PHONY: lint vuln test test-integration cover fuzz proto-check generate ui-build build build-ui image agent-windows agent-linux agent packages agent-release agent-release-dev release-check e2e-upgrade test-agent-certs
 
 lint:
 	$(GO) vet ./...
@@ -23,7 +23,9 @@ test-integration:
 
 # Generated protobuf, SQL bindings (internal/store, */*db), wiring (internal/app,
 # cmd) and test packages are exercised by the tagged integration suite and are
-# excluded from the unit gate on purpose.
+# excluded from the unit gate on purpose. The OS glue of the agent certificate
+# store (internal/agentcerts/*_linux.go) is skipped by scripts/coverage-gate.sh
+# for the 100 % gate of internal/agentcerts and covered by test-agent-certs.
 COVERPKG := $(shell $(GO) list ./... | grep -v -E '/api/|/internal/store$$|db$$|/internal/app$$|/valkeykv$$|/cmd/|/tests/|/ui|/internal/collector|/internal/upgrader|/internal/sender|/internal/daemon|/internal/winsvc|/internal/stream' | paste -sd, -)
 
 cover:
@@ -34,8 +36,10 @@ cover:
 # facts, the ingest mapper, the host report projection, enrollment tokens, diff).
 # Feature 023 adds FuzzSMBIOSStructures, FuzzSysBlock, FuzzWindowsDisks
 # (internal/agentfacts), FuzzManifest, FuzzVersion (internal/agentrelease) and
-# extends FuzzSubmitMapper, FuzzHostReport and FuzzDiff; the loop below picks up
-# every target automatically.
+# extends FuzzSubmitMapper, FuzzHostReport and FuzzDiff. Feature 033 adds
+# FuzzValidName, FuzzParseBundle, FuzzHostTag (internal/certmaterial),
+# FuzzReportCertificate (internal/ingest) and FuzzAgentCertsConfig
+# (internal/config); the loop below picks up every target automatically.
 FUZZTIME ?= 10s
 fuzz:
 	@set -e; for pkg in $$($(GO) list ./... | grep -v /ui/); do \
@@ -50,7 +54,7 @@ generate:
 
 # Proto contract: lint and stay wire-compatible with the released SDK.
 proto-check:
-	cd sdk && buf lint && buf breaking --against '../.git#tag=sdk/v4.1.0,subdir=sdk'
+	cd sdk && buf lint && buf breaking --against '../.git#tag=sdk/v4.3.0,subdir=sdk'
 
 # Build the federated UI remote (produces ui/dist consumed by the -tags ui build).
 ui-build:
@@ -147,6 +151,16 @@ release-check:
 	./scripts/check-release-binary.sh -keys "$(AGENT_RELEASE_KEYS)" -version "$(AGENT_VERSION)" \
 		$(AGENT_DIST)/inventory-agent-linux-amd64 $(AGENT_DIST)/inventory-agent-linux-arm64 \
 		$(AGENT_DIST)/inventory-agent-windows-amd64.exe $(AGENT_DIST)/inventory-agent-windows-arm64.exe
+
+# Agent certificate store on a real filesystem (feature 033): file ownership
+# and modes, the live/<name> generation swap and deploy hook execution as root
+# in a container (Docker; //go:build agentcerts_e2e). The test binary runs
+# as root with --init, so killed hook children are reaped.
+AGENTCERTS_E2E_IMAGE ?= alpine:3.20
+test-agent-certs:
+	CGO_ENABLED=0 $(GO) test -c -tags agentcerts_e2e -o bin/agentcerts-e2e.test ./internal/agentcerts
+	docker run --rm --init -v "$(CURDIR)/bin/agentcerts-e2e.test:/agentcerts.test:ro" $(AGENTCERTS_E2E_IMAGE) \
+		/agentcerts.test -test.count=1 -test.v
 
 # Package upgrade and rollback in Debian 12 and Rocky 9 containers with
 # systemd (Docker, privileged containers; CI job e2e-upgrade).
