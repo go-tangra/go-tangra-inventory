@@ -507,6 +507,11 @@ func TestRecoverEdgeCases(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Unsafe store directories are refused.
+	h.fs.nodes["."].uid = 1000
+	if err := h.st.Recover(); !errors.Is(err, errUnsafe) {
+		t.Fatalf("root owner: %v", err)
+	}
+	h.fs.nodes["."].uid = 0
 	h.fs.nodes["live"] = &memNode{mode: fs.ModeSymlink, target: "/etc"}
 	if err := h.st.Recover(); !errors.Is(err, errUnsafe) {
 		t.Fatalf("live symlink: %v", err)

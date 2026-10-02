@@ -49,11 +49,14 @@ func (s *Store) prune(name, live string) {
 // install): leftover live/.<name>.tmp links and renewal/.<name>.json.tmp
 // files are removed, and generations newer than the one live/<name> points
 // to (staged but never switched to) are discarded. A missing store is
-// nothing to recover; store directories that are symlinks or not owned by
-// root are refused.
+// nothing to recover; the store directory and its subdirectories must be
+// real directories owned by root.
 func (s *Store) Recover() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if _, err := s.listDir("."); err != nil {
+		return err
+	}
 	for _, dir := range []string{dirLive, dirRenewal} {
 		if err := s.removeTemps(dir); err != nil {
 			return err
