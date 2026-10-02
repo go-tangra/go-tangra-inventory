@@ -210,6 +210,12 @@ func Build(ctx context.Context, cfg config.Config, o Options) (a *App, err error
 		upgSvc.SetMetrics(um)
 	}
 
+	// Certificate delivery relay (feature 033): off unless cert_delivery.enabled.
+	certSvc, err := a.buildCertDelivery(ctx, pub, instanceID)
+	if err != nil {
+		return nil, err
+	}
+
 	// Mesh HTTP surface (reached only through the gateway).
 	hopts := []httpapi.Option{httpapi.WithVerifier(a.Verifier)}
 	if o.Remote != nil {
@@ -231,6 +237,9 @@ func Build(ctx context.Context, cfg config.Config, o Options) (a *App, err error
 		// HostReportService (IPAM host sync): mesh only; the inbound policy
 		// and host_reports.consumers both have to admit the caller.
 		Reports: a.Repo, ReportConsumers: cfg.HostReports.Consumers, MaxReportPageBytes: cfg.HostReports.MaxPageBytes,
+		// CertificateDeliveryService (deployer): the inbound policy and
+		// cert_delivery.sources both have to admit the caller.
+		CertDelivery: certSvc, CertSources: cfg.CertDelivery.Sources,
 	})
 
 	// Off-mesh INGEST EDGE: a separate, network-isolated gRPC listener that
@@ -240,7 +249,10 @@ func Build(ctx context.Context, cfg config.Config, o Options) (a *App, err error
 	// unloadable certificate refuses start.
 	ingestSrv := ingest.New(a.Enroll, snapsSvc, a.Registry, a.Repo, cfg.Limits.MaxSnapshotBytes, instanceID).
 		WithUpgrades(upgSvc, relSvc, cfg.AgentReleases.MaxConcurrentDownloads, 10*time.Minute).
-		WithAutoEnroll(autoSvc)
+		WithAutoEnroll(autoSvc).
+		// Certificate material only over TLS unless the development opt-out
+		// cert_delivery.allow_plaintext_ingest is set.
+		WithCertDelivery(certSvc, cfg.CertDelivery.MaxConcurrentFetches, cfg.Ingest.Insecure && !cfg.CertDelivery.AllowPlaintextIngest)
 	var ingestTLS *ingest.CertLoader
 	if !cfg.Ingest.Insecure {
 		if ingestTLS, err = ingest.NewCertLoader(cfg.Ingest.TLSCertFile, cfg.Ingest.TLSKeyFile); err != nil {
@@ -251,7 +263,7 @@ func Build(ctx context.Context, cfg config.Config, o Options) (a *App, err error
 
 	// Maintenance: mark stale hosts + purge old snapshots on an interval;
 	// seed releases, sweep upgrade requests, apply release retention.
-	a.workers = append(a.workers, a.maintenance, a.upgradeWorker(relSvc, upgSvc))
+	a.workers = append(a.workers, a.maintenance, a.upgradeWorker(relSvc, upgSvc), a.certWorker(certSvc))
 	return a, nil
 }
 
