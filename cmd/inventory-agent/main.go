@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/agentcerts"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/collector"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/config"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/daemon"
@@ -171,7 +172,15 @@ func runDaemon(cfg config.AgentConfig, configPath string) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
+	for _, w := range cfg.Warnings() {
+		log.Printf("warning: %s", w)
+	}
 	d := daemon.New(cfg, version)
+	// Certificate delivery (feature 033, Linux): files only below the local
+	// certificates.directory, a hook only from the local configuration.
+	if st := certificateStore(cfg.Certificates, agentcerts.Deps{}); st != nil {
+		d.WithCertificates(st)
+	}
 	// Self-upgrade (feature 023): announce the platform, confirm or report an
 	// upgrade in flight, act on upgrade commands when enabled.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

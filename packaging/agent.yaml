@@ -32,3 +32,33 @@ upgrade:
   enabled: true                    # act on upgrade requests from the platform (false: only `inventory-agent update`)
   confirm_timeout_seconds: 300     # 60-1800
   # staging_dir: /var/lib/inventory-agent/upgrade
+
+# Certificates delivered by the platform (deployer provider "Inventory
+# agent", Linux only). Files go only to `directory` in the certbot layout
+# (live/<name>/{cert,chain,fullchain,privkey}.pem, a symlink switched
+# atomically to archive/<name>/<generation>/, metadata in
+# renewal/<name>.json); the platform chooses only <name>. Directories are
+# root:<group>, files <owner>:<group>. Nothing is executed unless
+# deploy_hook is set here: the hook must be a root-owned file, not writable
+# by group or others, in a root-owned directory not writable by group or
+# others. It is run directly (no shell, no arguments) after a new or renewed
+# certificate, with only PATH, LANG and the LCM_* variables (LCM_CERT_NAME,
+# LCM_CERT_DIR, LCM_CERT_PATH, LCM_KEY_PATH, LCM_CHAIN_PATH,
+# LCM_FULLCHAIN_PATH, LCM_COMMON_NAME, LCM_DNS_NAMES, LCM_IP_ADDRESSES,
+# LCM_SERIAL_NUMBER, LCM_EXPIRES_AT, LCM_IS_RENEWAL, LCM_CERTIFICATE_ID);
+# its output stays in the agent log. The agent unit has ProtectHome and
+# PrivateTmp: a hook cannot use /home or the host's /tmp, `systemctl reload
+# nginx` works. /etc/inventory-agent is 0750 root:root, so a non-root
+# service that reads its files itself needs a directory outside it.
+# certificates:
+#   enabled: true                      # false: refuse deliveries ("disabled locally")
+#   directory: /etc/inventory-agent/certs
+#   owner: root                        # user owning the files (name or uid)
+#   group: root                        # group of files and directories, e.g. www-data with key_mode 0640
+#   dir_mode: "0750"                   # 0700-0755
+#   cert_mode: "0644"
+#   key_mode: "0600"                   # 0600 or 0640
+#   keep_previous: 1                   # previous generations kept for a manual restore (0-5)
+#   deploy_hook: ""                    # e.g. /usr/local/sbin/reload-nginx.sh
+#   hook_timeout_seconds: 300          # 30-1800; the hook's process group is killed after it
+#   allow_insecure_transport: false    # development only: accept certificates over a plaintext ingest connection

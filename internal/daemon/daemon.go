@@ -5,6 +5,9 @@
 // starts a self-upgrade on an upgrade command (feature 023; the agent
 // announces its platform and the upgrade.v1 capability on the stream and
 // confirms or reports a finished upgrade after its first connect and submit).
+// With a local certificate store (feature 033, Linux) it announces cert.v1
+// and installs certificates named by CERTIFICATE commands: it fetches the
+// bundle by item id, installs it and reports the outcome.
 package daemon
 
 import (
@@ -67,6 +70,12 @@ type Daemon struct {
 	connected   atomic.Bool
 	submitted   atomic.Bool
 	resumed     atomic.Bool
+
+	// Certificate delivery (feature 033).
+	certStore     CertInstaller
+	newCertClient func(agentID, credential string) CertClient
+	certs         *certState
+	goos          string
 }
 
 // New builds a Daemon for the given agent configuration and version.
@@ -77,8 +86,11 @@ func New(cfg config.AgentConfig, version string) *Daemon {
 			Insecure: cfg.Insecure, CAFile: cfg.CAFile, ServerName: cfg.ServerName,
 		}),
 		version: version,
+		certs:   newCertState(),
+		goos:    runtime.GOOS,
 	}
 	d.refresh = d.collectAndSubmit
+	d.newCertClient = func(agentID, credential string) CertClient { return d.sender.CertClient(agentID, credential) }
 	return d
 }
 
@@ -92,15 +104,20 @@ func (d *Daemon) WithUpgrades(p agentrelease.Platform, factory UpgraderFactory) 
 	return d
 }
 
-// streamRequest is the StreamCommands request: version, platform and — when
-// server-pushed upgrades are enabled and possible — the upgrade.v1 capability.
+// streamRequest is the StreamCommands request: version, platform and the
+// capabilities: upgrade.v1 when server-pushed upgrades are enabled and
+// possible, cert.v1 when certificate delivery is enabled locally, the
+// platform has a store (Linux) and the transport allows it.
 func (d *Daemon) streamRequest() *invv1.StreamRequest {
 	req := &invv1.StreamRequest{AgentId: d.agentID, AgentVersion: d.version}
 	if d.platform.OS != "" {
 		req.Platform = &invv1.AgentPlatform{Os: d.platform.OS, Arch: d.platform.Arch, InstallType: d.platform.InstallType}
 	}
 	if d.upg != nil && d.cfg.Upgrade.Enabled && d.platform.Valid() {
-		req.Capabilities = []string{store.CapUpgradeV1}
+		req.Capabilities = append(req.Capabilities, store.CapUpgradeV1)
+	}
+	if d.certsActive() {
+		req.Capabilities = append(req.Capabilities, store.CapCertV1)
 	}
 	return req
 }
@@ -128,6 +145,8 @@ func (d *Daemon) handleCommand(ctx context.Context, cmd *invv1.Command) {
 				log.Printf("daemon: upgrade %s refused: %v", u.GetRequestId(), err)
 			}
 		}()
+	case invv1.CommandType_COMMAND_TYPE_CERTIFICATE:
+		d.enqueueCertificate(ctx, cmd)
 	default:
 		log.Printf("daemon: ignoring unknown command type %d (id %s)", cmd.GetType(), cmd.GetCommandId())
 	}
@@ -166,6 +185,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}
 
 	go d.periodicLoop(ctx)
+	go d.certLoop(ctx)
 	d.reconnectLoop(ctx)
 	return nil
 }
@@ -270,6 +290,10 @@ func (d *Daemon) streamLoop(ctx context.Context) error {
 	}
 	defer conn.Close()
 
+	// Certificate fetches are bounded by this stream: the server replays
+	// active items on the next connect.
+	sctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	authCtx := sender.AuthContext(ctx, d.agentID, d.credential)
 	stream, err := client.StreamCommands(authCtx, d.streamRequest())
 	if err != nil {
@@ -287,6 +311,10 @@ func (d *Daemon) streamLoop(ctx context.Context) error {
 				return errors.New("stream closed by server")
 			}
 			return fmt.Errorf("recv: %w", err)
+		}
+		if cmd.GetType() == invv1.CommandType_COMMAND_TYPE_CERTIFICATE {
+			d.enqueueCertificate(sctx, cmd)
+			continue
 		}
 		d.handleCommand(ctx, cmd)
 	}

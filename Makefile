@@ -154,9 +154,13 @@ release-check:
 
 # Agent certificate store on a real filesystem (feature 033): file ownership
 # and modes, the live/<name> generation swap and deploy hook execution as root
-# in a privileged container (Docker; //go:build agentcerts_e2e).
+# in a container (Docker; //go:build agentcerts_e2e). The test binary runs
+# as root with --init, so killed hook children are reaped.
+AGENTCERTS_E2E_IMAGE ?= alpine:3.20
 test-agent-certs:
-	$(GO) test -tags agentcerts_e2e -count=1 -v ./internal/agentcerts/...
+	CGO_ENABLED=0 $(GO) test -c -tags agentcerts_e2e -o bin/agentcerts-e2e.test ./internal/agentcerts
+	docker run --rm --init -v "$(CURDIR)/bin/agentcerts-e2e.test:/agentcerts.test:ro" $(AGENTCERTS_E2E_IMAGE) \
+		/agentcerts.test -test.count=1 -test.v
 
 # Package upgrade and rollback in Debian 12 and Rocky 9 containers with
 # systemd (Docker, privileged containers; CI job e2e-upgrade).

@@ -234,6 +234,60 @@ end-to-end test (Debian 12, Rocky 9) with its own throwaway key.
 CI cross-compiles the agent for every supported platform on each change and
 builds the signed release only on tags.
 
+### Certificates on the host (feature 033)
+
+Linux agents receive certificates that the deployer's `inventory-agent`
+provider delivers (server side: [deploy/README.md](deploy/README.md#certificate-delivery-deployer-feature-033)).
+The agent announces the `cert.v1` capability when `certificates.enabled`
+(default true) and the ingest connection uses TLS (or
+`certificates.allow_insecure_transport`, development only); Windows agents
+never announce it. A `CERTIFICATE` command carries only an item id and a
+name; the agent pulls the bundle over its authenticated connection,
+validates it again (name, PEM, key ↔ certificate, validity, sizes) and
+writes it only below `certificates.directory` (default
+`/etc/inventory-agent/certs`):
+
+```text
+live/<name> -> ../archive/<name>/<generation>   symlink, switched with one rename(2)
+archive/<name>/<generation>/{cert,chain,fullchain,privkey}.pem
+renewal/<name>.json                             v3 metadata + certificate/item ids
+```
+
+Consumers use `live/<name>/fullchain.pem` and `live/<name>/privkey.pem`
+(certbot paths); a reader never sees a certificate with the wrong key.
+Directories are `root:<group>`, files `<owner>:<group>` with the configured
+modes; `keep_previous` (default 1) older generations stay for a manual
+restore (`ln -sfn ../archive/<name>/<previous> live/<name>`). The same
+certificate again is reported `unchanged` without writing anything;
+`certificate_only` deliveries keep an existing matching `privkey.pem` and
+fail with `key_mismatch` otherwise.
+
+**Deploy hook** (off by default, never sent by the platform): set
+`certificates.deploy_hook` to an absolute path. It runs after a new or
+renewed installation (and when the platform retries a failed hook), only if
+the file is a regular, root-owned file, executable and not writable by group
+or others, in a root-owned directory not writable by group or others —
+otherwise `hook_refused`. It is executed directly (no shell, no arguments)
+in `live/<name>`, in its own process group, with stdin from `/dev/null` and
+exactly this environment: `PATH`, `LANG=C.UTF-8`, `LCM_CERT_NAME`,
+`LCM_CERT_DIR`, `LCM_CERT_PATH`, `LCM_KEY_PATH` (empty without a key),
+`LCM_CHAIN_PATH`, `LCM_FULLCHAIN_PATH`, `LCM_COMMON_NAME`, `LCM_DNS_NAMES`,
+`LCM_IP_ADDRESSES`, `LCM_SERIAL_NUMBER`, `LCM_EXPIRES_AT`, `LCM_IS_RENEWAL`,
+`LCM_CERTIFICATE_ID`. After `hook_timeout_seconds` (default 300) the group
+gets SIGTERM and 5 s later SIGKILL (`hook_timeout`, exit 256). A non-zero
+exit is reported as `hook_failed` with the exit code; the files stay
+installed. Hook output (first 4 KiB) goes to the agent log only. The systemd
+unit sets `ProtectHome`, `PrivateTmp` and `NoNewPrivileges`, so a hook sees
+no `/home` and a private `/tmp`; `systemctl reload nginx` works. Example:
+
+```sh
+#!/bin/sh
+# /usr/local/sbin/reload-nginx.sh  (root:root 0755)
+nginx -t && systemctl reload nginx
+```
+
+`make test-agent-certs` runs the store and hook tests as root in a container.
+
 ## Host reports for IPAM
 
 `inventory.v1.HostReportService` (mesh only, not proxied by the gateway) serves a
