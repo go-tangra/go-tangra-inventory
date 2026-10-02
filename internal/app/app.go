@@ -227,6 +227,9 @@ func Build(ctx context.Context, cfg config.Config, o Options) (a *App, err error
 	a.HTTP.Register(httpapi.Deps{
 		Hosts: hostsSvc, Snapshots: snapsSvc, Stats: statsSvc, Backup: backupSvc,
 		Enroll: a.Enroll, Registry: a.Registry, Hub: a.Hub, Upgrades: upgSvc, Releases: relSvc, AutoEnroll: autoSvc,
+		// Host certificates and delivery history (feature 033 US4): reads work
+		// while cert_delivery.enabled is false.
+		CertDelivery: certSvc,
 	})
 	a.Freya.HTTP().HandlePrefix("/", a.HTTP.Handler())
 

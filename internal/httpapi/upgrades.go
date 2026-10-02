@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-tangra/go-tangra/v4/listquery"
 
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/certdelivery"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/repo"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/store"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/upgrades"
@@ -86,9 +87,9 @@ func (s *Server) registerUpgrades(d Deps, p string) {
 			recent = []store.AgentUpgrade{}
 		}
 		WriteJSON(w, http.StatusOK, struct {
-			upgrades.FleetEntry
+			fleetItem
 			RecentUpgrades []store.AgentUpgrade `json:"recent_upgrades"`
-		}{e, recent})
+		}{newFleetItem(e, certEnabled(d)), recent})
 	})
 	s.MustHandle("GET", p+"/agents/upgrades", func(w http.ResponseWriter, r *http.Request) {
 		_, tenant, err := userActor(r)
@@ -239,8 +240,9 @@ func (s *Server) registerUpgrades(d Deps, p string) {
 	})
 }
 
-// listFleet serves GET /agents from the fleet view.
-func (s *Server) listFleet(u *upgrades.Service) func(http.ResponseWriter, *http.Request) {
+// listFleet serves GET /agents from the fleet view; every entry carries its
+// certificate capability (certEnabled: the cert_delivery switch).
+func (s *Server) listFleet(u *upgrades.Service, certEnabled bool) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		_, tenant, err := userActor(r)
 		if err != nil {
@@ -267,7 +269,7 @@ func (s *Server) listFleet(u *upgrades.Service) func(http.ResponseWriter, *http.
 				failUpgrade(w, err)
 				return
 			}
-			WriteJSON(w, http.StatusOK, map[string]any{"items": items, "current_version": current, "total": count.Total})
+			WriteJSON(w, http.StatusOK, map[string]any{"items": fleetItems(items, certEnabled), "current_version": current, "total": count.Total})
 			return
 		}
 		req, ok := parseList(w, r, store.FleetList)
@@ -279,16 +281,41 @@ func (s *Server) listFleet(u *upgrades.Service) func(http.ResponseWriter, *http.
 			failUpgrade(w, err)
 			return
 		}
-		WriteJSON(w, http.StatusOK, fleetPage{Page: page, CurrentVersion: current})
+		items := listquery.Page[fleetItem]{Items: fleetItems(page.Items, certEnabled), Total: page.Total, Page: page.Page,
+			PageSize: page.PageSize, Sort: page.Sort, Order: page.Order}
+		WriteJSON(w, http.StatusOK, fleetPage{Page: items, CurrentVersion: current})
 	}
 }
 
 // fleetPage is the GET /agents response: a list contract page plus the
 // tenant target version.
 type fleetPage struct {
-	listquery.Page[upgrades.FleetEntry]
+	listquery.Page[fleetItem]
 	CurrentVersion string `json:"current_version"`
 }
+
+// fleetItem is a fleet entry with its certificate capability (feature 033,
+// data-model §1.5).
+type fleetItem struct {
+	upgrades.FleetEntry
+	CertificateCapability string `json:"certificate_capability"`
+}
+
+func newFleetItem(e upgrades.FleetEntry, certEnabled bool) fleetItem {
+	a := store.Agent{OS: e.OS, AgentVersion: e.Version, Capabilities: e.Capabilities}
+	return fleetItem{FleetEntry: e, CertificateCapability: certdelivery.Capability(certEnabled, &a)}
+}
+
+func fleetItems(entries []upgrades.FleetEntry, certEnabled bool) []fleetItem {
+	out := make([]fleetItem, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, newFleetItem(e, certEnabled))
+	}
+	return out
+}
+
+// certEnabled reports whether certificate delivery is switched on.
+func certEnabled(d Deps) bool { return d.CertDelivery != nil && d.CertDelivery.Enabled() }
 
 func uniqueCount(ids []string) int {
 	seen := map[string]bool{}

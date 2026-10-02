@@ -79,6 +79,12 @@ components:
       in: query
       required: false
       schema: { type: boolean }
+    itemId:
+      name: item_id
+      in: path
+      required: true
+      schema: { type: string, maxLength: 64 }
+      example: '018f3a2b-0000-7000-8000-0000000000c1'
     agentIdQuery:
       name: agent_id
       in: query
@@ -116,6 +122,10 @@ components:
         upgrade_reason: { type: string, description: 'reason code only' }
         upgrade_id: { type: string, format: uuid }
         state_changed_at: { type: string, format: date-time }
+        certificate_capability:
+          type: string
+          enum: [enabled, disabled_on_host, upgrade_required, not_supported_platform, disabled_on_server]
+          description: 'whether the agent can receive certificates (feature 033, first match: server switch, platform, cert.v1 announced, version >= 4.7.0)'
     AgentFleet:
       type: object
       description: 'a list contract page (legacy cursor/limit requests: items, current_version and total only)'
@@ -352,6 +362,100 @@ components:
               arch: { type: string }
               install_type: { type: string }
               size: { type: integer }
+    # --- Certificate delivery (feature 033, US4): identity only, never material ---
+    CertificateDeliveryItem:
+      type: object
+      additionalProperties: false
+      description: 'one delivery of a certificate to one host'
+      properties:
+        id: { type: string, format: uuid }
+        delivery_id: { type: string, format: uuid }
+        host_id: { type: string, format: uuid }
+        hostname: { type: string }
+        name: { type: string, description: 'certificate name on the host (directory under the agent certificate store)' }
+        certificate_id: { type: string, description: 'lcm certificate id' }
+        configuration_id: { type: string, description: 'deployer configuration that requested the delivery' }
+        trigger: { type: string, enum: [manual, auto_deploy, retry] }
+        state: { type: string, enum: [pending, delivered, fetched, installed, unchanged, failed, hook_failed, unsupported, superseded, expired, cancelled] }
+        reason: { type: string, description: 'reason code only' }
+        attempts: { type: integer }
+        serial: { type: string }
+        fingerprint_sha256: { type: string }
+        common_name: { type: string, description: 'subject CN of the leaf served at fetch' }
+        not_after: { type: [string, 'null'], format: date-time }
+        hook_exit_code: { type: [integer, 'null'], description: '-1 hook not run, 256 timeout' }
+        detail: { type: string, description: 'sanitised agent detail (<= 256 bytes, never hook output)' }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        finished_at: { type: [string, 'null'], format: date-time }
+    CertificateDeliveryItemPage:
+      type: object
+      additionalProperties: false
+      description: 'a list contract page of delivery items (newest first by default)'
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/CertificateDeliveryItem' } }
+        total: { type: integer }
+        page: { type: integer, description: 'the page returned (a page beyond the end answers the last page)' }
+        page_size: { type: integer }
+        sort: { type: string, enum: [created_at, updated_at, state, name] }
+        order: { type: string, enum: [asc, desc] }
+    CertificateDelivery:
+      type: object
+      additionalProperties: false
+      description: 'the delivery request an item belongs to'
+      properties:
+        id: { type: string, format: uuid }
+        source: { type: string, description: 'mesh service that requested it, e.g. deployer' }
+        configuration_id: { type: string }
+        target_id: { type: string }
+        trigger: { type: string, enum: [manual, auto_deploy, retry] }
+        certificate_id: { type: string }
+        name: { type: string }
+        key_policy: { type: string, enum: [require, certificate_only] }
+        requested_by: { type: string, description: 'SPIFFE id of the caller' }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+    CertificateDeliveryItemDetail:
+      type: object
+      additionalProperties: false
+      properties:
+        item: { $ref: '#/components/schemas/CertificateDeliveryItem' }
+        delivery: { $ref: '#/components/schemas/CertificateDelivery' }
+    HostCertificate:
+      type: object
+      additionalProperties: false
+      description: 'the current certificate of a host under one name; a name with only a queued delivery has that item''s state (pending, delivered, fetched) and no installed identity'
+      properties:
+        name: { type: string }
+        certificate_id: { type: string }
+        configuration_id: { type: string }
+        common_name: { type: string }
+        serial: { type: string }
+        fingerprint_sha256: { type: string }
+        not_after: { type: [string, 'null'], format: date-time }
+        state: { type: string, enum: [installed, unchanged, failed, hook_failed, unsupported, expired, cancelled, superseded, pending, delivered, fetched] }
+        reason: { type: string, description: 'reason code only' }
+        hook_exit_code: { type: [integer, 'null'] }
+        last_delivered_at: { type: [string, 'null'], format: date-time }
+        revoked: { type: boolean }
+        revoked_at: { type: [string, 'null'], format: date-time }
+        active_item:
+          oneOf:
+            - $ref: '#/components/schemas/CertificateDeliveryItem'
+            - type: 'null'
+    HostCertificatePage:
+      type: object
+      additionalProperties: false
+      description: 'a list contract page of a host''s certificates (name order by default)'
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/HostCertificate' } }
+        total: { type: integer }
+        page: { type: integer }
+        page_size: { type: integer }
+        sort: { type: string, enum: [name, state, not_after, last_delivered_at] }
+        order: { type: string, enum: [asc, desc] }
     AgentReleaseList:
       type: object
       properties:
@@ -417,6 +521,62 @@ paths:
       responses:
         '200': { description: 'page of detected changes (newest first by default)', content: { application/json: { schema: { $ref: '#/components/schemas/ChangePage' } } } }
         '422': { description: 'validation_failed (detail.param names the parameter)' }
+  /api/inventory/v1/hosts/{id}/certificates:
+    get:
+      operationId: listHostCertificates
+      summary: The host's current certificates, one row per name (feature 033); no material
+      x-freya-permission: 'inventory:read'
+      parameters:
+        - { $ref: '#/components/parameters/id' }
+        - { $ref: '#/components/parameters/page' }
+        - { $ref: '#/components/parameters/pageSize' }
+        - { name: sort, in: query, description: 'default name (asc)', schema: { type: string, enum: [name, state, not_after, last_delivered_at] } }
+        - { $ref: '#/components/parameters/order' }
+        - { name: state, in: query, schema: { type: string, enum: [installed, unchanged, failed, hook_failed, unsupported, expired, cancelled, superseded, pending, delivered, fetched] } }
+        - { name: revoked, in: query, description: 'only revoked (true) or only not revoked (false) certificates', schema: { type: boolean } }
+      responses:
+        '200': { description: 'page of host certificates', content: { application/json: { schema: { $ref: '#/components/schemas/HostCertificatePage' } } } }
+        '404': { description: not_found }
+        '422': { description: 'validation_failed (detail.param names the parameter)' }
+  /api/inventory/v1/certificate-deliveries:
+    get:
+      operationId: listCertificateDeliveries
+      summary: Certificate delivery items, paged (feature 033); reads work while delivery is disabled
+      x-freya-permission: 'inventory:read'
+      parameters:
+        - { $ref: '#/components/parameters/page' }
+        - { $ref: '#/components/parameters/pageSize' }
+        - { name: sort, in: query, description: 'default created_at (desc)', schema: { type: string, enum: [created_at, updated_at, state, name] } }
+        - { $ref: '#/components/parameters/order' }
+        - { name: host_id, in: query, schema: { type: string, format: uuid } }
+        - { name: state, in: query, schema: { type: string, enum: [pending, delivered, fetched, installed, unchanged, failed, hook_failed, unsupported, superseded, expired, cancelled] } }
+        - { name: name, in: query, schema: { type: string, maxLength: 64, pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$' } }
+        - { name: certificate_id, in: query, schema: { type: string, maxLength: 128 } }
+        - { name: delivery_id, in: query, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: 'page of delivery items', content: { application/json: { schema: { $ref: '#/components/schemas/CertificateDeliveryItemPage' } } } }
+        '422': { description: 'validation_failed (detail.param names the parameter)' }
+  /api/inventory/v1/certificate-deliveries/{item_id}:
+    get:
+      operationId: getCertificateDelivery
+      summary: One delivery item with its delivery (configuration, trigger, requested by)
+      x-freya-permission: 'inventory:read'
+      parameters: [{ $ref: '#/components/parameters/itemId' }]
+      responses:
+        '200': { description: 'item with its delivery', content: { application/json: { schema: { $ref: '#/components/schemas/CertificateDeliveryItemDetail' } } } }
+        '404': { description: not_found }
+  /api/inventory/v1/certificate-deliveries/{item_id}/cancel:
+    post:
+      operationId: cancelCertificateDelivery
+      summary: Cancel a queued delivery item (cancelled_by_user)
+      x-freya-permission: 'agents:manage'
+      x-freya-max-body-bytes: 1024
+      parameters: [{ $ref: '#/components/parameters/csrf' }, { $ref: '#/components/parameters/itemId' }]
+      responses:
+        '200': { description: cancelled, content: { application/json: { schema: { $ref: '#/components/schemas/CertificateDeliveryItem' } } } }
+        '404': { description: not_found }
+        '409': { description: not_cancellable }
+        '503': { description: certificate_delivery_disabled }
   /api/inventory/v1/snapshots/{id}:
     get: { operationId: getSnapshot, x-freya-permission: 'snapshots:read', parameters: [{ $ref: '#/components/parameters/id' }], responses: { '200': { description: snapshot }, '404': { description: not_found } } }
     delete: { operationId: deleteSnapshot, x-freya-permission: 'snapshots:manage', parameters: [{ $ref: '#/components/parameters/csrf' }, { $ref: '#/components/parameters/id' }], responses: { '204': { description: deleted } } }

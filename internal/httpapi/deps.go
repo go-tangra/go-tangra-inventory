@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/authz"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/backup"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/certdelivery"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/enroll"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/hosts"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/registry"
@@ -37,6 +38,11 @@ type Deps struct {
 	// Automatic enrollment (feature 029), optional: mounts the
 	// /agents/auto-enroll routes when set.
 	AutoEnroll *autoenroll.Service
+	// Certificate delivery (feature 033), optional: mounts the host
+	// certificate and delivery history routes when set; the agent list
+	// derives each agent's certificate capability from its switch (unset:
+	// disabled_on_server).
+	CertDelivery *certdelivery.Service
 }
 
 // subjects derives the authz subject from the verified platform identity. The

@@ -116,6 +116,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/inventory/v1/hosts/{id}/certificates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The host's current certificates, one row per name (feature 033); no material */
+        get: operations["listHostCertificates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/inventory/v1/certificate-deliveries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Certificate delivery items, paged (feature 033); reads work while delivery is disabled */
+        get: operations["listCertificateDeliveries"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/inventory/v1/certificate-deliveries/{item_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One delivery item with its delivery (configuration, trigger, requested by) */
+        get: operations["getCertificateDelivery"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/inventory/v1/certificate-deliveries/{item_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel a queued delivery item (cancelled_by_user) */
+        post: operations["cancelCertificateDelivery"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/inventory/v1/snapshots/{id}": {
         parameters: {
             query?: never;
@@ -514,6 +582,11 @@ export interface components {
             upgrade_id?: string;
             /** Format: date-time */
             state_changed_at?: string;
+            /**
+             * @description whether the agent can receive certificates (feature 033, first match: server switch, platform, cert.v1 announced, version >= 4.7.0)
+             * @enum {string}
+             */
+            certificate_capability?: "enabled" | "disabled_on_host" | "upgrade_required" | "not_supported_platform" | "disabled_on_server";
         };
         /** @description a list contract page (legacy cursor/limit requests: items, current_version and total only) */
         AgentFleet: {
@@ -780,6 +853,115 @@ export interface components {
                 size?: number;
             }[];
         };
+        /** @description one delivery of a certificate to one host */
+        CertificateDeliveryItem: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            delivery_id?: string;
+            /** Format: uuid */
+            host_id?: string;
+            hostname?: string;
+            /** @description certificate name on the host (directory under the agent certificate store) */
+            name?: string;
+            /** @description lcm certificate id */
+            certificate_id?: string;
+            /** @description deployer configuration that requested the delivery */
+            configuration_id?: string;
+            /** @enum {string} */
+            trigger?: "manual" | "auto_deploy" | "retry";
+            /** @enum {string} */
+            state?: "pending" | "delivered" | "fetched" | "installed" | "unchanged" | "failed" | "hook_failed" | "unsupported" | "superseded" | "expired" | "cancelled";
+            /** @description reason code only */
+            reason?: string;
+            attempts?: number;
+            serial?: string;
+            fingerprint_sha256?: string;
+            /** @description subject CN of the leaf served at fetch */
+            common_name?: string;
+            /** Format: date-time */
+            not_after?: string | null;
+            /** @description -1 hook not run, 256 timeout */
+            hook_exit_code?: number | null;
+            /** @description sanitised agent detail (<= 256 bytes, never hook output) */
+            detail?: string;
+            /** Format: date-time */
+            created_at?: string;
+            /** Format: date-time */
+            updated_at?: string;
+            /** Format: date-time */
+            finished_at?: string | null;
+        };
+        /** @description a list contract page of delivery items (newest first by default) */
+        CertificateDeliveryItemPage: {
+            items: components["schemas"]["CertificateDeliveryItem"][];
+            total: number;
+            /** @description the page returned (a page beyond the end answers the last page) */
+            page?: number;
+            page_size?: number;
+            /** @enum {string} */
+            sort?: "created_at" | "updated_at" | "state" | "name";
+            /** @enum {string} */
+            order?: "asc" | "desc";
+        };
+        /** @description the delivery request an item belongs to */
+        CertificateDelivery: {
+            /** Format: uuid */
+            id?: string;
+            /** @description mesh service that requested it, e.g. deployer */
+            source?: string;
+            configuration_id?: string;
+            target_id?: string;
+            /** @enum {string} */
+            trigger?: "manual" | "auto_deploy" | "retry";
+            certificate_id?: string;
+            name?: string;
+            /** @enum {string} */
+            key_policy?: "require" | "certificate_only";
+            /** @description SPIFFE id of the caller */
+            requested_by?: string;
+            /** Format: date-time */
+            created_at?: string;
+            /** Format: date-time */
+            expires_at?: string;
+        };
+        CertificateDeliveryItemDetail: {
+            item?: components["schemas"]["CertificateDeliveryItem"];
+            delivery?: components["schemas"]["CertificateDelivery"];
+        };
+        /** @description the current certificate of a host under one name; a name with only a queued delivery has that item's state (pending, delivered, fetched) and no installed identity */
+        HostCertificate: {
+            name?: string;
+            certificate_id?: string;
+            configuration_id?: string;
+            common_name?: string;
+            serial?: string;
+            fingerprint_sha256?: string;
+            /** Format: date-time */
+            not_after?: string | null;
+            /** @enum {string} */
+            state?: "installed" | "unchanged" | "failed" | "hook_failed" | "unsupported" | "expired" | "cancelled" | "superseded" | "pending" | "delivered" | "fetched";
+            /** @description reason code only */
+            reason?: string;
+            hook_exit_code?: number | null;
+            /** Format: date-time */
+            last_delivered_at?: string | null;
+            revoked?: boolean;
+            /** Format: date-time */
+            revoked_at?: string | null;
+            active_item?: components["schemas"]["CertificateDeliveryItem"] | null;
+        };
+        /** @description a list contract page of a host's certificates (name order by default) */
+        HostCertificatePage: {
+            items: components["schemas"]["HostCertificate"][];
+            total: number;
+            page?: number;
+            page_size?: number;
+            /** @enum {string} */
+            sort?: "name" | "state" | "not_after" | "last_delivered_at";
+            /** @enum {string} */
+            order?: "asc" | "desc";
+        };
         AgentReleaseList: {
             current_version?: string;
             items?: components["schemas"]["AgentReleaseInfo"][];
@@ -804,6 +986,8 @@ export interface components {
         upgradeState: "up_to_date" | "available" | "pending" | "in_progress" | "failed" | "rolled_back" | "manual_upgrade_required" | "unsupported";
         requestState: "pending" | "delivered" | "downloading" | "installing" | "succeeded" | "failed" | "rolled_back" | "expired" | "cancelled";
         outdated: boolean;
+        /** @example 018f3a2b-0000-7000-8000-0000000000c1 */
+        itemId: string;
         agentIdQuery: string;
     };
     requestBodies: never;
@@ -1058,6 +1242,168 @@ export interface operations {
             };
             /** @description validation_failed (detail.param names the parameter) */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    listHostCertificates: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["page"];
+                page_size?: components["parameters"]["pageSize"];
+                /** @description default name (asc) */
+                sort?: "name" | "state" | "not_after" | "last_delivered_at";
+                /** @description sort direction; defaults to the chosen field's default direction */
+                order?: components["parameters"]["order"];
+                state?: "installed" | "unchanged" | "failed" | "hook_failed" | "unsupported" | "expired" | "cancelled" | "superseded" | "pending" | "delivered" | "fetched";
+                /** @description only revoked (true) or only not revoked (false) certificates */
+                revoked?: boolean;
+            };
+            header?: never;
+            path: {
+                /** @example 018f3a2b-0000-7000-8000-000000000001 */
+                id: components["parameters"]["id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description page of host certificates */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostCertificatePage"];
+                };
+            };
+            /** @description not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description validation_failed (detail.param names the parameter) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    listCertificateDeliveries: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["page"];
+                page_size?: components["parameters"]["pageSize"];
+                /** @description default created_at (desc) */
+                sort?: "created_at" | "updated_at" | "state" | "name";
+                /** @description sort direction; defaults to the chosen field's default direction */
+                order?: components["parameters"]["order"];
+                host_id?: string;
+                state?: "pending" | "delivered" | "fetched" | "installed" | "unchanged" | "failed" | "hook_failed" | "unsupported" | "superseded" | "expired" | "cancelled";
+                name?: string;
+                certificate_id?: string;
+                delivery_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description page of delivery items */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CertificateDeliveryItemPage"];
+                };
+            };
+            /** @description validation_failed (detail.param names the parameter) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getCertificateDelivery: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @example 018f3a2b-0000-7000-8000-0000000000c1 */
+                item_id: components["parameters"]["itemId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description item with its delivery */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CertificateDeliveryItemDetail"];
+                };
+            };
+            /** @description not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    cancelCertificateDelivery: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["csrf"];
+            };
+            path: {
+                /** @example 018f3a2b-0000-7000-8000-0000000000c1 */
+                item_id: components["parameters"]["itemId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description cancelled */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CertificateDeliveryItem"];
+                };
+            };
+            /** @description not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description not_cancellable */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description certificate_delivery_disabled */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -52,6 +52,9 @@ type FleetEntry struct {
 	// How the agent enrolled (feature 029): token | auto (+ key id).
 	EnrolledVia     string `json:"enrolled_via"`
 	AutoEnrollKeyID string `json:"auto_enroll_key_id,omitempty"`
+	// Capabilities the agent announced (not serialized; the HTTP layer
+	// derives the certificate capability from them, feature 033).
+	Capabilities []string `json:"-"`
 }
 
 // FleetFilter constrains Fleet. Cursor is the last agent id of the previous
@@ -197,7 +200,7 @@ func VersionSortKey(v string) string {
 func entry(a store.Agent, last store.AgentUpgrade, target string, now time.Time) FleetEntry {
 	e := FleetEntry{AgentID: a.ID, TenantID: a.TenantID, HostID: a.HostID, Version: a.AgentVersion, OS: a.OS, Arch: a.Arch,
 		InstallType: a.InstallType, LastSeen: a.LastSeen, TargetVersion: target, StateChangedAt: a.LastSeen, UpgradeID: last.ID,
-		EnrolledVia: a.EnrolledVia, AutoEnrollKeyID: a.AutoEnrollKeyID}
+		EnrolledVia: a.EnrolledVia, AutoEnrollKeyID: a.AutoEnrollKeyID, Capabilities: a.Capabilities}
 	if e.EnrolledVia == "" {
 		e.EnrolledVia = store.EnrolledViaToken
 	}
