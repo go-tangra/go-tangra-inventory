@@ -424,7 +424,41 @@ and `policies/lcm.yaml`, add the `cert_delivery` section to
 `configs/inventory.yaml` and, for the deployer, `discovery.static.inventory:
 ["inventory:9975"]` and `inventory: { service: inventory }` to
 `configs/deployer.yaml` (go-tangra-docker branch `033-agent-cert-delivery`
-prepares all of it).
+prepares all of it). The development stack in go-tangra `deploy/stack`
+needs the same three changes in `configs/inventory.yaml` and
+`configs/deployer.yaml`; its images already carry the policies of their
+release (inventory ≥ 4.7.0, lcm with the `inventory-download` rule).
+
+**Lifecycle.** An item is `pending` (agent offline: replayed, at most 50 per
+connect, when it reconnects), `delivered` (command pushed), `fetched`
+(material served once to the item's own agent, at most 5 fetches) and ends
+`installed`, `unchanged`, `failed`, `hook_failed`, `unsupported`,
+`superseded` (a newer delivery of the same host and name, or the host
+already holds a later-expiring certificate for an automatic deployment),
+`expired` (not picked up within `pending_ttl_hours`, or not reported within
+`report_timeout_minutes` — keep that above the agents'
+`hook_timeout_seconds`) or `cancelled` (user, certificate revoked, agent
+revoked, host deleted). A deployer retry re-arms failed items (same item id,
+next attempt, at most 5); every transition writes its audit row in the same
+transaction (`cert_delivery_requested`, `_delivered`, `_fetched`,
+`_installed`, `_unchanged`, `_failed`, `_hook_failed`, `_unsupported`,
+`_superseded`, `_expired`, `_cancelled`, `_rearmed`,
+`host_certificate_revoked`).
+
+**Refusals.** A fetch or report for an item that is not the caller's own,
+not active, past its delivery window or out of fetches answers `NotFound`
+(no oracle) and is audited as `cert_delivery_refused` (reason `not_found`,
+`not_active`, `fetch_limit`, `plaintext`, `source_not_allowed`; at most one
+row per actor and reason in 10 s, the next row counts the suppressed ones).
+A host claimed by more than one non-revoked agent is `unsupported` with
+reason `ambiguous_agent` and receives nothing: an agent binds itself to a
+host by the identity it reports, so revoke the stale or foreign agent
+(Inventory > Agents) and deploy again. An idempotency key reused for another
+certificate, name or key policy is refused (`InvalidArgument`).
+
+**Metrics.** `inventory.cert_deliveries` (state, reason),
+`inventory.cert_delivery_refusals` (reason) and
+`inventory.cert_delivery_lcm_seconds` (outcome).
 
 ## On-demand refresh & live status
 
