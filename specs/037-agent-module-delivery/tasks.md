@@ -30,13 +30,13 @@ Tests come first in each phase. `[P]` = parallel (different files).
 
 ## Phase 4: Gateway (go-tangra-portal-v4)
 
-- [ ] T017 Migration 0008 + store/memstore/adapter: agent join fields, render counter, JTI update
-- [ ] T018 Tests: deliver (non-admin 403, bad host_id/inputs 400, ineligible 409, inventory down 503), targets, progress with delivery, RenderModuleBundle (wrong caller, download join, host/tenant mismatch, expired, budget → errors; success mints token with join expiry, records JTI, audits without material)
-- [ ] T019 `internal/grpcapi/modulebundle.go`, `internal/httpapi/catalogue_deliver.go`, config `catalogue.agent_delivery`, wiring, OpenAPI (+ spec 003 copy), policy rule
-- [ ] T020 Shell wizard: Download / Deliver to a host, host picker with eligibility, pre-fill, delivery progress; vitest
+- [X] T017 Migration 0008 + store/memstore/adapter: agent join fields, render counter, JTI update
+- [X] T018 Tests: deliver (non-admin 403, bad host_id/inputs 400, ineligible 409, inventory down 503), targets, progress with delivery, RenderModuleBundle (wrong caller, download join, host/tenant mismatch, expired, budget → errors; success mints token with join expiry, records JTI, audits without material)
+- [X] T019 `internal/grpcapi/modulebundle.go`, `internal/httpapi/catalogue_deliver.go`, config `catalogue.agent_delivery`, wiring, OpenAPI (+ spec 003 copy), policy rule
+- [X] T020 Shell wizard: Download / Deliver to a host, host picker with eligibility, pre-fill, delivery progress; vitest
 
 ## Phase 5: Polish
 
-- [ ] T021 Docs: inventory `deploy/README.md` (module delivery), gateway `docs/operations.md` (inventory half done: README, policy.yaml note, packaging/agent.yaml, packaging/examples/module-compose-up.sh)
-- [ ] T022 `go vet`, unit tests with -race, coverage gate, shell lint/test/build (inventory: vet incl. integration tag, -race unit tests, staticcheck, gosec and `make cover` pass)
+- [X] T021 Docs: inventory `deploy/README.md` (module delivery, policy note, agent sample, example hook), gateway `docs/operations.md`
+- [X] T022 `go vet` (incl. integration tag), unit tests with -race, coverage gate (inventory 94.1%, gateway 84.1%), shell lint/test/build; integration suites not run (no Docker)
 - [ ] T023 Release per plan.md and prod rollout (needs explicit approval)

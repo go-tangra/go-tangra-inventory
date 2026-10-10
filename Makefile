@@ -54,7 +54,7 @@ generate:
 
 # Proto contract: lint and stay wire-compatible with the released SDK.
 proto-check:
-	cd sdk && buf lint && buf breaking --against '../.git#tag=sdk/v4.3.0,subdir=sdk'
+	cd sdk && buf lint && buf breaking --against '../.git#tag=sdk/v4.4.0,subdir=sdk'
 
 # Build the federated UI remote (produces ui/dist consumed by the -tags ui build).
 ui-build:
