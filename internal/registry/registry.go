@@ -28,15 +28,29 @@ const (
 	// CommandCertificate asks the agent to fetch and install the
 	// certificate of a delivery item (feature 033).
 	CommandCertificate = "certificate"
+	// CommandModule asks the agent to fetch and write the module bundle of
+	// a delivery item (feature 037).
+	CommandModule = "module"
 )
 
 // Command is a control message pushed to a connected agent. It travels as
 // JSON through the Valkey registry, so its payloads carry identifiers only.
 type Command struct {
 	ID          string              `json:"id"`
-	Type        string              `json:"type"` // refresh | upgrade | certificate
+	Type        string              `json:"type"` // refresh | upgrade | certificate | module
 	Upgrade     *UpgradePayload     `json:"upgrade,omitempty"`
 	Certificate *CertificatePayload `json:"certificate,omitempty"`
+	Module      *ModulePayload      `json:"module,omitempty"`
+}
+
+// ModulePayload asks an agent to write the module bundle of delivery item
+// ItemID (feature 037). It carries ids only, never bundle bytes: the agent
+// pulls the bundle with FetchModuleBundle over its own authenticated
+// ingest connection.
+type ModulePayload struct {
+	ItemID  string `json:"item_id"`
+	Module  string `json:"module"`
+	Attempt int    `json:"attempt,omitempty"`
 }
 
 // CertificatePayload asks an agent to install the certificate of delivery

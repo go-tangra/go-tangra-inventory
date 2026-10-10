@@ -32,9 +32,10 @@ type Mem struct {
 	audit    []store.AuditRow
 	failNext map[string]bool
 	Now      func() time.Time
-	upg      *upgradeState    // feature 023 (lazily created)
-	aes      *autoEnrollState // feature 029 (lazily created)
-	cert     *certState       // feature 033 (lazily created)
+	upg      *upgradeState                       // feature 023 (lazily created)
+	aes      *autoEnrollState                    // feature 029 (lazily created)
+	cert     *certState                          // feature 033 (lazily created)
+	modules  map[string]store.ModuleDeliveryItem // feature 037, by id (lazily created)
 }
 
 // New builds an empty store.

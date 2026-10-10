@@ -115,6 +115,7 @@ type Store interface {
 	UpgradeStore
 	AutoEnrollStore
 	CertDeliveryStore
+	ModuleDeliveryStore
 }
 
 // ArtifactOpener opens the content of one artifact of a release being
@@ -317,4 +318,45 @@ type CertDeliveryStore interface {
 type StaleCertItem struct {
 	Item      store.CertDeliveryItem
 	ExpiresAt time.Time
+}
+
+// NewModuleItem is a module delivery item with its audit rows, created in
+// one transaction by CreateModuleItem (feature 037).
+type NewModuleItem struct {
+	Item  store.ModuleDeliveryItem
+	Audit []store.AuditRow
+	// SupersedeAudit builds the audit row of an older active item of the
+	// same host and module that the new item replaces (nil: none).
+	SupersedeAudit func(old store.ModuleDeliveryItem, newItemID string) store.AuditRow
+}
+
+// ModuleDeliveryStore persists module delivery items (feature 037). No
+// method stores bundle bytes, tokens or passwords. Every state change
+// appends its audit rows in the same transaction.
+type ModuleDeliveryStore interface {
+	// CreateModuleItem inserts the item with its audit rows atomically. An
+	// active item of the same tenant, host and module that the new active
+	// item replaces is set to superseded first (with SupersedeAudit's row)
+	// and returned. ErrConflict when (tenant, source, delivery id) exists
+	// or the id is reused.
+	CreateModuleItem(ctx context.Context, n NewModuleItem) (superseded []store.ModuleDeliveryItem, err error)
+	// GetModuleItem returns the tenant's item id (ErrNotFound otherwise).
+	GetModuleItem(ctx context.Context, tenantID, id string) (store.ModuleDeliveryItem, error)
+	// GetModuleItemByDelivery finds the item of a source's delivery id.
+	GetModuleItemByDelivery(ctx context.Context, tenantID, source, deliveryID string) (store.ModuleDeliveryItem, error)
+	// UpdateModuleItem locks the item, applies fn and stores the result
+	// with fn's audit rows; an error of fn changes nothing. ErrNotFound for
+	// another tenant's or a missing id; ErrConflict when the result would
+	// make a second active item for the host and module.
+	UpdateModuleItem(ctx context.Context, tenantID, id string, fn func(*store.ModuleDeliveryItem) ([]store.AuditRow, error)) (store.ModuleDeliveryItem, error)
+	// ListActiveModuleItemsForAgent lists an agent's pending, delivered and
+	// fetched items, oldest first, at most limit (<= 0: no limit).
+	ListActiveModuleItemsForAgent(ctx context.Context, tenantID, agentID string, limit int) ([]store.ModuleDeliveryItem, error)
+	// ListStaleModuleItems lists (system scope) the active items that
+	// expired before now and the fetched items not updated since
+	// reportBefore, oldest first, at most limit (<= 0: no limit).
+	ListStaleModuleItems(ctx context.Context, now, reportBefore time.Time, limit int) ([]store.ModuleDeliveryItem, error)
+	// PurgeModuleItems deletes (system scope) terminal items last updated
+	// before olderThan.
+	PurgeModuleItems(ctx context.Context, olderThan time.Time) (int64, error)
 }

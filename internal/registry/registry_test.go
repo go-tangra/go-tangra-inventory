@@ -226,3 +226,49 @@ func TestCertificateCommandEncoding(t *testing.T) {
 		t.Fatalf("certificate command JSON keys = %v (only ids may travel through Valkey)", flat)
 	}
 }
+
+// TestModuleCommandEncoding (feature 037): a module command carries ids
+// only, through the in-process registry and the JSON the Valkey registry
+// publishes (keys id, type, module.item_id, module.module, module.attempt).
+func TestModuleCommandEncoding(t *testing.T) {
+	cmd := Command{ID: "c1", Type: CommandModule, Module: &ModulePayload{ItemID: "item-1", Module: "sms-gw", Attempt: 1}}
+	ctx := context.Background()
+	r := NewMemory()
+	ch, unregister, err := r.Register(ctx, ConnectedAgent{AgentID: "a1", TenantID: "t1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unregister()
+	if ok, err := r.Deliver(ctx, "a1", cmd); !ok || err != nil {
+		t.Fatalf("deliver: %v %v", ok, err)
+	}
+	if got := <-ch; got.Type != CommandModule || got.Module == nil || *got.Module != *cmd.Module {
+		t.Fatalf("memory round trip: %+v", got)
+	}
+	raw, err := json.Marshal(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back Command
+	if err := json.Unmarshal(raw, &back); err != nil || back.Module == nil || *back.Module != *cmd.Module || back.Certificate != nil {
+		t.Fatalf("json round trip: %+v %v", back, err)
+	}
+	var keys map[string]any
+	if err := json.Unmarshal(raw, &keys); err != nil {
+		t.Fatal(err)
+	}
+	var flat []string
+	for k, v := range keys {
+		if m, ok := v.(map[string]any); ok {
+			for kk := range m {
+				flat = append(flat, k+"."+kk)
+			}
+			continue
+		}
+		flat = append(flat, k)
+	}
+	sort.Strings(flat)
+	if strings.Join(flat, ",") != "id,module.attempt,module.item_id,module.module,type" {
+		t.Fatalf("module command JSON keys = %v", flat)
+	}
+}
