@@ -12,7 +12,7 @@ message Command { ...; ModuleCommand module = 5; }    // set when type = MODULE
 // FetchModuleBundle (feature 037).
 message ModuleCommand {
   string item_id = 1;   // uuid
-  string module = 2;    // ^[a-z][a-z0-9-]{0,62}$; re-validated by the agent
+  string module = 2;    // ^[a-z0-9][a-z0-9-]{0,62}$; re-validated by the agent
   uint32 attempt = 3;
 }
 ```
@@ -115,11 +115,16 @@ message ModuleTarget {
 message ListModuleTargetsResponse { repeated ModuleTarget hosts = 1; bool truncated = 2; }
 ```
 
-Errors: `FailedPrecondition` while `module_delivery.enabled` is false;
-`PermissionDenied` for a caller outside `sources`; `InvalidArgument` with
-the field name; `NotFound` for an unknown host or delivery;
-`FailedPrecondition` with reason in the message when the host is not
-eligible (`no_agent`, `upgrade_required`, …) — no item is stored then.
+Errors: `FailedPrecondition` with the message exactly `disabled_on_server`
+while `module_delivery.enabled` is false; `PermissionDenied` for a caller
+outside `sources`; `InvalidArgument` with the message `invalid <field>`;
+`NotFound` (`not_found`) for an unknown host or delivery;
+`FailedPrecondition` whose message is exactly the reason token when the
+host is not eligible (`no_agent`, `ambiguous_agent`,
+`not_supported_platform`, `upgrade_required`, `disabled_on_host`,
+`retired`) — no item is stored then. `version` must be a semantic version
+without "v" (pre-release and build suffixes allowed, <= 64 bytes);
+`expires_at` must lie in (now, now + 7 days].
 
 ## ModuleBundleSource (mesh; the gateway serves; inventory calls)
 
@@ -138,6 +143,12 @@ message RenderModuleBundleRequest {
 }
 ```
 
-The source sends the header (item_id empty) then chunks. Errors:
-`NotFound` (unknown, expired, host or tenant mismatch: no oracle),
-`ResourceExhausted` (render budget spent), `Unavailable` (auth down).
+The source sends the header (module, version, size, sha256, delivery_id;
+item_id empty) then chunks of at most 1 MiB with contiguous offsets from 0.
+Errors: `NotFound` for every refusal (unknown, expired, host or tenant
+mismatch, render budget spent: no oracle), `PermissionDenied` for a wrong
+caller, `Unavailable` when rendering fails. Inventory counts every fetch;
+`NotFound` fails the item (`source_refused`) and the agent gets `NotFound`;
+any other error or a malformed stream (wrong module, size or digest, gaps)
+is `Unavailable` to the agent until the fifth fetch, which fails the item
+(`fetch_budget`).

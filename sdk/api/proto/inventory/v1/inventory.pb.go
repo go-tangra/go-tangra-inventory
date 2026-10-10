@@ -6627,7 +6627,7 @@ func (x *Command) GetModule() *ModuleCommand {
 type ModuleCommand struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ItemId        string                 `protobuf:"bytes,1,opt,name=item_id,json=itemId,proto3" json:"item_id,omitempty"` // uuid of the module delivery item
-	Module        string                 `protobuf:"bytes,2,opt,name=module,proto3" json:"module,omitempty"`               // ^[a-z][a-z0-9-]{0,62}$; validated again by the agent
+	Module        string                 `protobuf:"bytes,2,opt,name=module,proto3" json:"module,omitempty"`               // ^[a-z0-9][a-z0-9-]{0,62}$; validated again by the agent
 	Attempt       uint32                 `protobuf:"varint,3,opt,name=attempt,proto3" json:"attempt,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -9026,7 +9026,7 @@ type CreateModuleDeliveryRequest struct {
 	TenantId      string                 `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
 	DeliveryId    string                 `protobuf:"bytes,2,opt,name=delivery_id,json=deliveryId,proto3" json:"delivery_id,omitempty"` // uuid; idempotency key per (tenant, source)
 	HostId        string                 `protobuf:"bytes,3,opt,name=host_id,json=hostId,proto3" json:"host_id,omitempty"`
-	Module        string                 `protobuf:"bytes,4,opt,name=module,proto3" json:"module,omitempty"`                         // ^[a-z][a-z0-9-]{0,62}$
+	Module        string                 `protobuf:"bytes,4,opt,name=module,proto3" json:"module,omitempty"`                         // ^[a-z0-9][a-z0-9-]{0,62}$
 	Version       string                 `protobuf:"bytes,5,opt,name=version,proto3" json:"version,omitempty"`                       // <= 64
 	ExpiresAt     int64                  `protobuf:"varint,6,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"` // unix seconds, in (now, now + 7 days]
 	unknownFields protoimpl.UnknownFields

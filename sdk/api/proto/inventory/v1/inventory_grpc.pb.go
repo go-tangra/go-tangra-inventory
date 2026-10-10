@@ -1912,8 +1912,12 @@ const (
 // ModuleDeliveryService (mesh only; not proxied by the gateway) hands
 // rendered module bundles to inventory agents (feature 037). Callers pass
 // references only. Authorized by the inbound mesh policy and, in the handler,
-// by module_delivery.sources; every method returns FailedPrecondition while
-// module_delivery.enabled is false.
+// by module_delivery.sources; every method returns FailedPrecondition
+// "disabled_on_server" while module_delivery.enabled is false.
+// CreateModuleDelivery refuses a host that cannot receive a module with
+// FailedPrecondition whose message is exactly the reason token (no_agent,
+// ambiguous_agent, not_supported_platform, upgrade_required,
+// disabled_on_host, retired); nothing is stored then.
 type ModuleDeliveryServiceClient interface {
 	CreateModuleDelivery(ctx context.Context, in *CreateModuleDeliveryRequest, opts ...grpc.CallOption) (*ModuleDelivery, error)
 	GetModuleDelivery(ctx context.Context, in *GetModuleDeliveryRequest, opts ...grpc.CallOption) (*ModuleDelivery, error)
@@ -1965,8 +1969,12 @@ func (c *moduleDeliveryServiceClient) ListModuleTargets(ctx context.Context, in 
 // ModuleDeliveryService (mesh only; not proxied by the gateway) hands
 // rendered module bundles to inventory agents (feature 037). Callers pass
 // references only. Authorized by the inbound mesh policy and, in the handler,
-// by module_delivery.sources; every method returns FailedPrecondition while
-// module_delivery.enabled is false.
+// by module_delivery.sources; every method returns FailedPrecondition
+// "disabled_on_server" while module_delivery.enabled is false.
+// CreateModuleDelivery refuses a host that cannot receive a module with
+// FailedPrecondition whose message is exactly the reason token (no_agent,
+// ambiguous_agent, not_supported_platform, upgrade_required,
+// disabled_on_host, retired); nothing is stored then.
 type ModuleDeliveryServiceServer interface {
 	CreateModuleDelivery(context.Context, *CreateModuleDeliveryRequest) (*ModuleDelivery, error)
 	GetModuleDelivery(context.Context, *GetModuleDeliveryRequest) (*ModuleDelivery, error)
@@ -2099,7 +2107,10 @@ const (
 //
 // ModuleBundleSource is served by the bundle source (the gateway) and called
 // by the inventory when an agent fetches its item. It renders the bundle at
-// that moment; the source sends the header (item_id "") and then chunks.
+// that moment; the source sends the header (item_id "") and then chunks of at
+// most 1 MiB with contiguous offsets from 0. NotFound (refused: unknown,
+// expired, mismatched or out of renders) fails the item; any other error is
+// retried by the agent within the item's fetch budget.
 type ModuleBundleSourceClient interface {
 	RenderModuleBundle(ctx context.Context, in *RenderModuleBundleRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ModuleBundleChunk], error)
 }
@@ -2137,7 +2148,10 @@ type ModuleBundleSource_RenderModuleBundleClient = grpc.ServerStreamingClient[Mo
 //
 // ModuleBundleSource is served by the bundle source (the gateway) and called
 // by the inventory when an agent fetches its item. It renders the bundle at
-// that moment; the source sends the header (item_id "") and then chunks.
+// that moment; the source sends the header (item_id "") and then chunks of at
+// most 1 MiB with contiguous offsets from 0. NotFound (refused: unknown,
+// expired, mismatched or out of renders) fails the item; any other error is
+// retried by the agent within the item's fetch budget.
 type ModuleBundleSourceServer interface {
 	RenderModuleBundle(*RenderModuleBundleRequest, grpc.ServerStreamingServer[ModuleBundleChunk]) error
 	mustEmbedUnimplementedModuleBundleSourceServer()

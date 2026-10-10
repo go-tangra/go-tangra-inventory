@@ -14,6 +14,10 @@ modules:
 `module.v1` is announced only when `enabled`, on Linux, and the edge uses TLS
 (or `allow_insecure_transport`).
 
+The module name of the header is re-checked against
+`^[a-z0-9][a-z0-9-]{0,62}$` (the gateway catalogue pattern) before anything
+on disk is touched.
+
 Layout written: `<directory>/<module>/…` exactly as the archive's
 `<module>/` tree. Staged in `<directory>/.staging-<module>-<random>` then
 renamed into place; `<directory>/<module>` existing → `already_installed`.

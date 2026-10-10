@@ -863,7 +863,7 @@ message Command {
 // FetchModuleBundle over its authenticated connection (feature 037).
 message ModuleCommand {
   string item_id = 1;                // uuid of the module delivery item
-  string module = 2;                 // ^[a-z][a-z0-9-]{0,62}$; validated again by the agent
+  string module = 2;                 // ^[a-z0-9][a-z0-9-]{0,62}$; validated again by the agent
   uint32 attempt = 3;
 }
 
@@ -1171,8 +1171,12 @@ message ReportModuleResponse {
 // ModuleDeliveryService (mesh only; not proxied by the gateway) hands
 // rendered module bundles to inventory agents (feature 037). Callers pass
 // references only. Authorized by the inbound mesh policy and, in the handler,
-// by module_delivery.sources; every method returns FailedPrecondition while
-// module_delivery.enabled is false.
+// by module_delivery.sources; every method returns FailedPrecondition
+// "disabled_on_server" while module_delivery.enabled is false.
+// CreateModuleDelivery refuses a host that cannot receive a module with
+// FailedPrecondition whose message is exactly the reason token (no_agent,
+// ambiguous_agent, not_supported_platform, upgrade_required,
+// disabled_on_host, retired); nothing is stored then.
 service ModuleDeliveryService {
   rpc CreateModuleDelivery(CreateModuleDeliveryRequest) returns (ModuleDelivery);
   rpc GetModuleDelivery(GetModuleDeliveryRequest) returns (ModuleDelivery);
@@ -1196,7 +1200,7 @@ message CreateModuleDeliveryRequest {
   string tenant_id = 1;
   string delivery_id = 2;            // uuid; idempotency key per (tenant, source)
   string host_id = 3;
-  string module = 4;                 // ^[a-z][a-z0-9-]{0,62}$
+  string module = 4;                 // ^[a-z0-9][a-z0-9-]{0,62}$
   string version = 5;                // <= 64
   int64 expires_at = 6;              // unix seconds, in (now, now + 7 days]
 }
@@ -1248,7 +1252,10 @@ message ListModuleTargetsResponse {
 
 // ModuleBundleSource is served by the bundle source (the gateway) and called
 // by the inventory when an agent fetches its item. It renders the bundle at
-// that moment; the source sends the header (item_id "") and then chunks.
+// that moment; the source sends the header (item_id "") and then chunks of at
+// most 1 MiB with contiguous offsets from 0. NotFound (refused: unknown,
+// expired, mismatched or out of renders) fails the item; any other error is
+// retried by the agent within the item's fetch budget.
 service ModuleBundleSource {
   rpc RenderModuleBundle(RenderModuleBundleRequest) returns (stream ModuleBundleChunk);
 }
