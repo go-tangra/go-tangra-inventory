@@ -32,9 +32,10 @@ type Mem struct {
 	audit    []store.AuditRow
 	failNext map[string]bool
 	Now      func() time.Time
-	upg      *upgradeState    // feature 023 (lazily created)
-	aes      *autoEnrollState // feature 029 (lazily created)
-	cert     *certState       // feature 033 (lazily created)
+	upg      *upgradeState                       // feature 023 (lazily created)
+	aes      *autoEnrollState                    // feature 029 (lazily created)
+	cert     *certState                          // feature 033 (lazily created)
+	modules  map[string]store.ModuleDeliveryItem // feature 037, by id (lazily created)
 }
 
 // New builds an empty store.
@@ -207,6 +208,9 @@ func mergeHost(dst, src store.Host) store.Host {
 func (m *Mem) GetHost(_ context.Context, tenantID, id string) (store.Host, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if err := m.fail("GetHost"); err != nil {
+		return store.Host{}, err
+	}
 	h, ok := m.hosts[id]
 	if !ok || h.TenantID != tenantID {
 		return store.Host{}, repo.ErrNotFound

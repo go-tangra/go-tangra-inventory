@@ -585,6 +585,8 @@ const (
 	CapUpgradeV1 = "upgrade.v1"
 	// CapCertV1: the agent installs delivered certificates (feature 033).
 	CapCertV1 = "cert.v1"
+	// CapModuleV1: the agent writes delivered module bundles (feature 037).
+	CapModuleV1 = "module.v1"
 )
 
 // --- agent releases and upgrades (feature 023) ---
@@ -935,6 +937,79 @@ const (
 	MaxReplayPerConnect = 50
 	MaxDetailBytes      = 256
 	MaxCommonNameBytes  = 256 // item and host certificate common_name
+)
+
+// --- module delivery (feature 037) ---
+
+// ModuleDeliveryItem is the delivery of one rendered module bundle (a
+// gateway join) to one host. It holds references only: the bundle is
+// rendered by the source when the agent fetches the item and never stored.
+// Its id is the only identifier the agent sees. States are the Delivery*
+// states without unchanged and cancelled.
+type ModuleDeliveryItem struct {
+	ID           string     `json:"id"`
+	TenantID     string     `json:"-"`
+	Source       string     `json:"source"`      // SPIFFE service name of the caller, e.g. "gateway"
+	DeliveryID   string     `json:"delivery_id"` // the source's id (unique per tenant and source)
+	HostID       string     `json:"host_id"`
+	AgentID      string     `json:"agent_id,omitempty"` // resolved at create
+	Module       string     `json:"module"`             // ModuleNameRE
+	Version      string     `json:"version"`
+	State        string     `json:"state"`
+	Reason       string     `json:"reason,omitempty"`
+	HookExitCode int        `json:"hook_exit_code"` // -1 = no hook ran; 0..255; 256 = timeout
+	Attempt      int        `json:"attempt"`        // 1 (a re-delivery is a new item)
+	Fetches      int        `json:"fetches"`        // 0..MaxModuleFetches
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+	ExpiresAt    time.Time  `json:"expires_at"`
+	DeliveredAt  *time.Time `json:"delivered_at,omitempty"`
+	FetchedAt    *time.Time `json:"fetched_at,omitempty"`
+	ReportedAt   *time.Time `json:"reported_at,omitempty"`
+}
+
+// Active reports whether the item still waits for its agent (the partial
+// unique index inventory_module_items_active_uq: one active item per host
+// and module).
+func (i ModuleDeliveryItem) Active() bool { return CertDeliveryActive(i.State) }
+
+// ModuleNameRE is the module name pattern shared with the gateway
+// catalogue; the agent checks it again before it touches its directory.
+const ModuleNameRE = `^[a-z0-9][a-z0-9-]{0,62}$`
+
+// Module delivery reason codes besides the shared ones above (closed set):
+// reported by the agent ...
+const (
+	ReasonInvalidModule    = "invalid_module"
+	ReasonChecksumMismatch = "checksum_mismatch"
+	ReasonTooLarge         = "too_large"
+	ReasonAlreadyInstalled = "already_installed"
+	ReasonFetchFailed      = "fetch_failed"
+)
+
+// ... or set by the server.
+const (
+	ReasonNotSupportedPlatform = "not_supported_platform"
+	ReasonUpgradeRequired      = "upgrade_required"
+	ReasonDisabledOnHost       = "disabled_on_host"
+	ReasonRetired              = "retired"
+	ReasonFetchBudget          = "fetch_budget"
+	ReasonReportTimeout        = "report_timeout"
+	ReasonSourceRefused        = "source_refused"
+)
+
+// AgentModuleReasons are the reason codes an agent may report for a module
+// item.
+var AgentModuleReasons = []string{ReasonInvalidModule, ReasonInvalidBundle, ReasonChecksumMismatch, ReasonTooLarge,
+	ReasonAlreadyInstalled, ReasonWriteFailed, ReasonDiskFull, ReasonHookFailed, ReasonHookTimeout, ReasonHookRefused,
+	ReasonDisabledLocally, ReasonBusy, ReasonFetchFailed}
+
+// Module delivery bounds (spec 037).
+const (
+	MaxModuleFetches     = 5
+	MaxModuleBundleBytes = 12 << 20 // rendered zip
+	MaxModuleTTL         = 7 * 24 * time.Hour
+	MaxModuleVersionLen  = 64
 )
 
 // --- audit ---

@@ -62,3 +62,24 @@ upgrade:
 #   deploy_hook: ""                    # e.g. /usr/local/sbin/reload-nginx.sh
 #   hook_timeout_seconds: 300          # 30-1800; the hook's process group is killed after it
 #   allow_insecure_transport: false    # development only: accept certificates over a plaintext ingest connection
+
+# Module bundles delivered by the platform (Modules > Add > Deliver to a
+# host in the console, Linux only). A bundle (compose file, rendered
+# configuration, .env with the join token and store passwords) is written
+# only to <directory>/<module>/, exactly as the archive's <module>/ tree:
+# .env and everything under private/ 0600 (private directories 0700),
+# executables 0755, other files 0644, directories 0750, all owned by
+# owner:group. An existing <directory>/<module> is never touched (the
+# delivery fails with already_installed; remove the directory to
+# reinstall). Nothing is started unless deploy_hook is set here, with the
+# same rules as certificates.deploy_hook; it runs directly in MODULE_DIR
+# with only PATH, LANG, MODULE_NAME, MODULE_VERSION and MODULE_DIR (example:
+# /usr/share/doc/tangra-inventory-agent/examples/module-compose-up.sh).
+# modules:
+#   enabled: true                      # false: refuse deliveries ("disabled locally")
+#   directory: /opt/tangra/modules     # absolute; not under /proc /sys /dev /home /root /tmp; not a symlink
+#   owner: root                        # user owning the files (name or uid)
+#   group: root                        # group of files and directories
+#   deploy_hook: ""                    # e.g. /usr/local/sbin/module-compose-up
+#   hook_timeout_seconds: 600          # 30-1800; the hook's process group is killed after it
+#   allow_insecure_transport: false    # development only: accept bundles over a plaintext ingest connection

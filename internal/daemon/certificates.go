@@ -40,13 +40,14 @@ const (
 	certMaxBackoff  = time.Minute
 )
 
-// certJob is one CERTIFICATE command. ctx is the stream's lifetime: fetch
-// retries stop when the stream ends (the server replays active items on the
-// next connect).
-type certJob struct {
+// itemJob is one queued delivery command (CERTIFICATE or MODULE). ctx is
+// the stream's lifetime: fetch retries stop when the stream ends (the
+// server replays active items on the next connect).
+type itemJob struct {
 	ctx    context.Context
 	itemID string
 	key    string // dedup key: item id and attempt
+	name   string // module name of a MODULE command
 }
 
 // certKey is the dedup key of a command: a re-armed item (retry, rearm of a
@@ -55,23 +56,29 @@ func certKey(itemID string, attempt uint32) string {
 	return fmt.Sprintf("%s#%d", itemID, attempt)
 }
 
-// certState deduplicates and queues CERTIFICATE commands: an item attempt is
+// itemState deduplicates and queues delivery commands of one kind
+// (certificates, feature 033; modules, feature 037): an item attempt is
 // handled once at a time, finished attempts are remembered (bounded), and a
 // result whose report could not be sent is kept and re-sent on the next
-// command for the item instead of installing again.
-type certState struct {
+// command for the item instead of installing again. R is the report.
+type itemState[R any] struct {
 	mu       sync.Mutex
 	inflight map[string]bool
 	done     map[string]bool
 	order    []string
-	unsent   map[string]*invv1.ReportCertificateRequest
-	queue    chan certJob
+	unsent   map[string]R
+	queue    chan itemJob
 	backoff  func(attempt int) time.Duration
 }
 
-func newCertState() *certState {
-	return &certState{inflight: map[string]bool{}, done: map[string]bool{}, unsent: map[string]*invv1.ReportCertificateRequest{},
-		queue: make(chan certJob, certQueueSize), backoff: certBackoff}
+func newItemState[R any]() *itemState[R] {
+	return &itemState[R]{inflight: map[string]bool{}, done: map[string]bool{}, unsent: map[string]R{},
+		queue: make(chan itemJob, certQueueSize), backoff: certBackoff}
+}
+
+// newCertState is the certificate command state.
+func newCertState() *itemState[*invv1.ReportCertificateRequest] {
+	return newItemState[*invv1.ReportCertificateRequest]()
 }
 
 func certBackoff(attempt int) time.Duration {
@@ -84,7 +91,7 @@ func certBackoff(attempt int) time.Duration {
 
 // claim marks an item attempt in flight; false when it is already queued,
 // running or finished.
-func (c *certState) claim(key string) bool {
+func (c *itemState[R]) claim(key string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.inflight[key] || c.done[key] {
@@ -95,7 +102,7 @@ func (c *certState) claim(key string) bool {
 }
 
 // release lets a later command for the item attempt run again.
-func (c *certState) release(key string) {
+func (c *itemState[R]) release(key string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.inflight, key)
@@ -103,7 +110,7 @@ func (c *certState) release(key string) {
 
 // finish remembers an item attempt as reported and drops a kept result of
 // the item.
-func (c *certState) finish(key, itemID string) {
+func (c *itemState[R]) finish(key, itemID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.inflight, key)
@@ -120,17 +127,19 @@ func (c *certState) finish(key, itemID string) {
 }
 
 // keepUnsent stores a result whose report failed and releases the attempt.
-func (c *certState) keepUnsent(key string, r *invv1.ReportCertificateRequest) {
+func (c *itemState[R]) keepUnsent(key, itemID string, r R) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.unsent[r.GetItemId()] = r
+	c.unsent[itemID] = r
 	delete(c.inflight, key)
 }
 
-func (c *certState) takeUnsent(id string) *invv1.ReportCertificateRequest {
+// takeUnsent returns the kept result of item id (ok false: none).
+func (c *itemState[R]) takeUnsent(id string) (R, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.unsent[id]
+	r, ok := c.unsent[id]
+	return r, ok
 }
 
 // WithCertificates enables certificate delivery with the local store (Linux
@@ -160,7 +169,7 @@ func (d *Daemon) enqueueCertificate(ctx context.Context, cmd *invv1.Command) {
 		return
 	}
 	select {
-	case d.certs.queue <- certJob{ctx: ctx, itemID: id, key: key}:
+	case d.certs.queue <- itemJob{ctx: ctx, itemID: id, key: key}:
 	default:
 		log.Printf("daemon: certificate item %s refused: queue full", id)
 		go d.sendCertReport(ctx, key, &invv1.ReportCertificateRequest{ItemId: id, State: store.DeliveryFailed, Reason: store.ReasonBusy,
@@ -182,8 +191,8 @@ func (d *Daemon) certLoop(ctx context.Context) {
 
 // processCertificate fetches, installs and reports one item. Material is
 // held only for the install; nothing of it is logged.
-func (d *Daemon) processCertificate(ctx context.Context, j certJob) {
-	if r := d.certs.takeUnsent(j.itemID); r != nil {
+func (d *Daemon) processCertificate(ctx context.Context, j itemJob) {
+	if r, ok := d.certs.takeUnsent(j.itemID); ok {
 		d.sendCertReport(ctx, j.key, r)
 		return
 	}
@@ -243,7 +252,7 @@ func (d *Daemon) sendCertReport(ctx context.Context, key string, r *invv1.Report
 	accepted, err := d.newCertClient(d.agentID, d.credential).Report(ctx, r)
 	if err != nil {
 		log.Printf("daemon: certificate item %s: report %s failed: %v", r.GetItemId(), r.GetState(), err)
-		d.certs.keepUnsent(key, r)
+		d.certs.keepUnsent(key, r.GetItemId(), r)
 		return
 	}
 	if !accepted {

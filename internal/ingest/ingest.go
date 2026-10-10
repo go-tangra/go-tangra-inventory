@@ -55,6 +55,9 @@ type Server struct {
 
 	// Certificate delivery (feature 033); nil until WithCertDelivery.
 	certEdge *certEdge
+
+	// Module delivery (feature 037); nil until WithModuleDelivery.
+	moduleEdge *moduleEdge
 }
 
 // New builds an ingest Server. A non-positive maxBytes falls back to
@@ -185,9 +188,10 @@ func (s *Server) StreamCommands(req *inventoryv1.StreamRequest, stream inventory
 
 	// Upgrade requests created while the agent was offline (or whose push
 	// was lost) are delivered on every connect; the agent deduplicates.
-	// Then the certificate deliveries waiting for it (feature 033), likewise
-	// replayed on every connect.
-	for _, cmd := range append(s.pendingCommands(ctx, agent), s.certCommands(ctx, agent)...) {
+	// Then the certificate deliveries (feature 033) and module deliveries
+	// (feature 037) waiting for it, likewise replayed on every connect.
+	replay := append(s.pendingCommands(ctx, agent), s.certCommands(ctx, agent)...)
+	for _, cmd := range append(replay, s.moduleCommands(ctx, agent)...) {
 		if err := stream.Send(commandToPB(cmd)); err != nil {
 			return err
 		}

@@ -50,3 +50,16 @@ func CertItemRow(t EventType, actorKind, actorID, outcome string, i store.CertDe
 func CertItemCancelledRow(i store.CertDeliveryItem, now time.Time) store.AuditRow {
 	return CertItemRow(CertDeliveryCancelled, ActorSystem, SystemActor, OutcomeOK, i, nil, now)
 }
+
+// ModuleItemRow is the audit row of a module delivery item transition:
+// identifiers, module, version, state and reason, plus extra (feature 037).
+// Nothing of the bundle is ever passed in.
+func ModuleItemRow(t EventType, actorKind, actorID, outcome string, i store.ModuleDeliveryItem, extra map[string]any, now time.Time) store.AuditRow {
+	d := map[string]any{"delivery_id": i.DeliveryID, "item_id": i.ID, "host_id": i.HostID, "agent_id": i.AgentID,
+		"source": i.Source, "module": i.Module, "version": i.Version, "state": i.State, "reason": i.Reason}
+	for k, v := range extra {
+		d[k] = v
+	}
+	return SafeRow(Event{TenantID: i.TenantID, EventType: t, ActorKind: actorKind, ActorID: actorID, SubjectKind: SubjectModuleDelivery,
+		SubjectID: i.ID, Outcome: outcome, Reason: i.Reason, Details: d}, now)
+}

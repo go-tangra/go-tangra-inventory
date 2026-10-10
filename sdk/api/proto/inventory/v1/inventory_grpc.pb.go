@@ -1169,6 +1169,8 @@ const (
 	IngestService_ReportUpgrade_FullMethodName        = "/inventory.v1.IngestService/ReportUpgrade"
 	IngestService_FetchCertificate_FullMethodName     = "/inventory.v1.IngestService/FetchCertificate"
 	IngestService_ReportCertificate_FullMethodName    = "/inventory.v1.IngestService/ReportCertificate"
+	IngestService_FetchModuleBundle_FullMethodName    = "/inventory.v1.IngestService/FetchModuleBundle"
+	IngestService_ReportModule_FullMethodName         = "/inventory.v1.IngestService/ReportModule"
 )
 
 // IngestServiceClient is the client API for IngestService service.
@@ -1191,6 +1193,9 @@ type IngestServiceClient interface {
 	// except Enroll; bound to the verified agent's own delivery items.
 	FetchCertificate(ctx context.Context, in *FetchCertificateRequest, opts ...grpc.CallOption) (*CertificateBundle, error)
 	ReportCertificate(ctx context.Context, in *ReportCertificateRequest, opts ...grpc.CallOption) (*ReportCertificateResponse, error)
+	// Module delivery (feature 037), bound to the verified agent's own items.
+	FetchModuleBundle(ctx context.Context, in *FetchModuleBundleRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ModuleBundleChunk], error)
+	ReportModule(ctx context.Context, in *ReportModuleRequest, opts ...grpc.CallOption) (*ReportModuleResponse, error)
 }
 
 type ingestServiceClient struct {
@@ -1299,6 +1304,35 @@ func (c *ingestServiceClient) ReportCertificate(ctx context.Context, in *ReportC
 	return out, nil
 }
 
+func (c *ingestServiceClient) FetchModuleBundle(ctx context.Context, in *FetchModuleBundleRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ModuleBundleChunk], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &IngestService_ServiceDesc.Streams[2], IngestService_FetchModuleBundle_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[FetchModuleBundleRequest, ModuleBundleChunk]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type IngestService_FetchModuleBundleClient = grpc.ServerStreamingClient[ModuleBundleChunk]
+
+func (c *ingestServiceClient) ReportModule(ctx context.Context, in *ReportModuleRequest, opts ...grpc.CallOption) (*ReportModuleResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReportModuleResponse)
+	err := c.cc.Invoke(ctx, IngestService_ReportModule_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // IngestServiceServer is the server API for IngestService service.
 // All implementations must embed UnimplementedIngestServiceServer
 // for forward compatibility.
@@ -1319,6 +1353,9 @@ type IngestServiceServer interface {
 	// except Enroll; bound to the verified agent's own delivery items.
 	FetchCertificate(context.Context, *FetchCertificateRequest) (*CertificateBundle, error)
 	ReportCertificate(context.Context, *ReportCertificateRequest) (*ReportCertificateResponse, error)
+	// Module delivery (feature 037), bound to the verified agent's own items.
+	FetchModuleBundle(*FetchModuleBundleRequest, grpc.ServerStreamingServer[ModuleBundleChunk]) error
+	ReportModule(context.Context, *ReportModuleRequest) (*ReportModuleResponse, error)
 	mustEmbedUnimplementedIngestServiceServer()
 }
 
@@ -1352,6 +1389,12 @@ func (UnimplementedIngestServiceServer) FetchCertificate(context.Context, *Fetch
 }
 func (UnimplementedIngestServiceServer) ReportCertificate(context.Context, *ReportCertificateRequest) (*ReportCertificateResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ReportCertificate not implemented")
+}
+func (UnimplementedIngestServiceServer) FetchModuleBundle(*FetchModuleBundleRequest, grpc.ServerStreamingServer[ModuleBundleChunk]) error {
+	return status.Error(codes.Unimplemented, "method FetchModuleBundle not implemented")
+}
+func (UnimplementedIngestServiceServer) ReportModule(context.Context, *ReportModuleRequest) (*ReportModuleResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReportModule not implemented")
 }
 func (UnimplementedIngestServiceServer) mustEmbedUnimplementedIngestServiceServer() {}
 func (UnimplementedIngestServiceServer) testEmbeddedByValue()                       {}
@@ -1504,6 +1547,35 @@ func _IngestService_ReportCertificate_Handler(srv interface{}, ctx context.Conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _IngestService_FetchModuleBundle_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(FetchModuleBundleRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(IngestServiceServer).FetchModuleBundle(m, &grpc.GenericServerStream[FetchModuleBundleRequest, ModuleBundleChunk]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type IngestService_FetchModuleBundleServer = grpc.ServerStreamingServer[ModuleBundleChunk]
+
+func _IngestService_ReportModule_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReportModuleRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IngestServiceServer).ReportModule(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IngestService_ReportModule_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IngestServiceServer).ReportModule(ctx, req.(*ReportModuleRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // IngestService_ServiceDesc is the grpc.ServiceDesc for IngestService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1535,6 +1607,10 @@ var IngestService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "ReportCertificate",
 			Handler:    _IngestService_ReportCertificate_Handler,
 		},
+		{
+			MethodName: "ReportModule",
+			Handler:    _IngestService_ReportModule_Handler,
+		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
@@ -1545,6 +1621,11 @@ var IngestService_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "DownloadAgentRelease",
 			Handler:       _IngestService_DownloadAgentRelease_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "FetchModuleBundle",
+			Handler:       _IngestService_FetchModuleBundle_Handler,
 			ServerStreams: true,
 		},
 	},
@@ -1815,5 +1896,322 @@ var CertificateDeliveryService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
+	Metadata: "inventory/v1/inventory.proto",
+}
+
+const (
+	ModuleDeliveryService_CreateModuleDelivery_FullMethodName = "/inventory.v1.ModuleDeliveryService/CreateModuleDelivery"
+	ModuleDeliveryService_GetModuleDelivery_FullMethodName    = "/inventory.v1.ModuleDeliveryService/GetModuleDelivery"
+	ModuleDeliveryService_ListModuleTargets_FullMethodName    = "/inventory.v1.ModuleDeliveryService/ListModuleTargets"
+)
+
+// ModuleDeliveryServiceClient is the client API for ModuleDeliveryService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// ModuleDeliveryService (mesh only; not proxied by the gateway) hands
+// rendered module bundles to inventory agents (feature 037). Callers pass
+// references only. Authorized by the inbound mesh policy and, in the handler,
+// by module_delivery.sources; every method returns FailedPrecondition
+// "disabled_on_server" while module_delivery.enabled is false.
+// CreateModuleDelivery refuses a host that cannot receive a module with
+// FailedPrecondition whose message is exactly the reason token (no_agent,
+// ambiguous_agent, not_supported_platform, upgrade_required,
+// disabled_on_host, retired); nothing is stored then.
+type ModuleDeliveryServiceClient interface {
+	CreateModuleDelivery(ctx context.Context, in *CreateModuleDeliveryRequest, opts ...grpc.CallOption) (*ModuleDelivery, error)
+	GetModuleDelivery(ctx context.Context, in *GetModuleDeliveryRequest, opts ...grpc.CallOption) (*ModuleDelivery, error)
+	ListModuleTargets(ctx context.Context, in *ListModuleTargetsRequest, opts ...grpc.CallOption) (*ListModuleTargetsResponse, error)
+}
+
+type moduleDeliveryServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewModuleDeliveryServiceClient(cc grpc.ClientConnInterface) ModuleDeliveryServiceClient {
+	return &moduleDeliveryServiceClient{cc}
+}
+
+func (c *moduleDeliveryServiceClient) CreateModuleDelivery(ctx context.Context, in *CreateModuleDeliveryRequest, opts ...grpc.CallOption) (*ModuleDelivery, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ModuleDelivery)
+	err := c.cc.Invoke(ctx, ModuleDeliveryService_CreateModuleDelivery_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *moduleDeliveryServiceClient) GetModuleDelivery(ctx context.Context, in *GetModuleDeliveryRequest, opts ...grpc.CallOption) (*ModuleDelivery, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ModuleDelivery)
+	err := c.cc.Invoke(ctx, ModuleDeliveryService_GetModuleDelivery_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *moduleDeliveryServiceClient) ListModuleTargets(ctx context.Context, in *ListModuleTargetsRequest, opts ...grpc.CallOption) (*ListModuleTargetsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListModuleTargetsResponse)
+	err := c.cc.Invoke(ctx, ModuleDeliveryService_ListModuleTargets_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ModuleDeliveryServiceServer is the server API for ModuleDeliveryService service.
+// All implementations must embed UnimplementedModuleDeliveryServiceServer
+// for forward compatibility.
+//
+// ModuleDeliveryService (mesh only; not proxied by the gateway) hands
+// rendered module bundles to inventory agents (feature 037). Callers pass
+// references only. Authorized by the inbound mesh policy and, in the handler,
+// by module_delivery.sources; every method returns FailedPrecondition
+// "disabled_on_server" while module_delivery.enabled is false.
+// CreateModuleDelivery refuses a host that cannot receive a module with
+// FailedPrecondition whose message is exactly the reason token (no_agent,
+// ambiguous_agent, not_supported_platform, upgrade_required,
+// disabled_on_host, retired); nothing is stored then.
+type ModuleDeliveryServiceServer interface {
+	CreateModuleDelivery(context.Context, *CreateModuleDeliveryRequest) (*ModuleDelivery, error)
+	GetModuleDelivery(context.Context, *GetModuleDeliveryRequest) (*ModuleDelivery, error)
+	ListModuleTargets(context.Context, *ListModuleTargetsRequest) (*ListModuleTargetsResponse, error)
+	mustEmbedUnimplementedModuleDeliveryServiceServer()
+}
+
+// UnimplementedModuleDeliveryServiceServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedModuleDeliveryServiceServer struct{}
+
+func (UnimplementedModuleDeliveryServiceServer) CreateModuleDelivery(context.Context, *CreateModuleDeliveryRequest) (*ModuleDelivery, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateModuleDelivery not implemented")
+}
+func (UnimplementedModuleDeliveryServiceServer) GetModuleDelivery(context.Context, *GetModuleDeliveryRequest) (*ModuleDelivery, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetModuleDelivery not implemented")
+}
+func (UnimplementedModuleDeliveryServiceServer) ListModuleTargets(context.Context, *ListModuleTargetsRequest) (*ListModuleTargetsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListModuleTargets not implemented")
+}
+func (UnimplementedModuleDeliveryServiceServer) mustEmbedUnimplementedModuleDeliveryServiceServer() {}
+func (UnimplementedModuleDeliveryServiceServer) testEmbeddedByValue()                               {}
+
+// UnsafeModuleDeliveryServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to ModuleDeliveryServiceServer will
+// result in compilation errors.
+type UnsafeModuleDeliveryServiceServer interface {
+	mustEmbedUnimplementedModuleDeliveryServiceServer()
+}
+
+func RegisterModuleDeliveryServiceServer(s grpc.ServiceRegistrar, srv ModuleDeliveryServiceServer) {
+	// If the following call panics, it indicates UnimplementedModuleDeliveryServiceServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&ModuleDeliveryService_ServiceDesc, srv)
+}
+
+func _ModuleDeliveryService_CreateModuleDelivery_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateModuleDeliveryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ModuleDeliveryServiceServer).CreateModuleDelivery(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ModuleDeliveryService_CreateModuleDelivery_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ModuleDeliveryServiceServer).CreateModuleDelivery(ctx, req.(*CreateModuleDeliveryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ModuleDeliveryService_GetModuleDelivery_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetModuleDeliveryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ModuleDeliveryServiceServer).GetModuleDelivery(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ModuleDeliveryService_GetModuleDelivery_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ModuleDeliveryServiceServer).GetModuleDelivery(ctx, req.(*GetModuleDeliveryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ModuleDeliveryService_ListModuleTargets_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListModuleTargetsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ModuleDeliveryServiceServer).ListModuleTargets(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ModuleDeliveryService_ListModuleTargets_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ModuleDeliveryServiceServer).ListModuleTargets(ctx, req.(*ListModuleTargetsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// ModuleDeliveryService_ServiceDesc is the grpc.ServiceDesc for ModuleDeliveryService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var ModuleDeliveryService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "inventory.v1.ModuleDeliveryService",
+	HandlerType: (*ModuleDeliveryServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "CreateModuleDelivery",
+			Handler:    _ModuleDeliveryService_CreateModuleDelivery_Handler,
+		},
+		{
+			MethodName: "GetModuleDelivery",
+			Handler:    _ModuleDeliveryService_GetModuleDelivery_Handler,
+		},
+		{
+			MethodName: "ListModuleTargets",
+			Handler:    _ModuleDeliveryService_ListModuleTargets_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "inventory/v1/inventory.proto",
+}
+
+const (
+	ModuleBundleSource_RenderModuleBundle_FullMethodName = "/inventory.v1.ModuleBundleSource/RenderModuleBundle"
+)
+
+// ModuleBundleSourceClient is the client API for ModuleBundleSource service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// ModuleBundleSource is served by the bundle source (the gateway) and called
+// by the inventory when an agent fetches its item. It renders the bundle at
+// that moment; the source sends the header (item_id "") and then chunks of at
+// most 1 MiB with contiguous offsets from 0. NotFound (refused: unknown,
+// expired, mismatched or out of renders) fails the item; any other error is
+// retried by the agent within the item's fetch budget.
+type ModuleBundleSourceClient interface {
+	RenderModuleBundle(ctx context.Context, in *RenderModuleBundleRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ModuleBundleChunk], error)
+}
+
+type moduleBundleSourceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewModuleBundleSourceClient(cc grpc.ClientConnInterface) ModuleBundleSourceClient {
+	return &moduleBundleSourceClient{cc}
+}
+
+func (c *moduleBundleSourceClient) RenderModuleBundle(ctx context.Context, in *RenderModuleBundleRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ModuleBundleChunk], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &ModuleBundleSource_ServiceDesc.Streams[0], ModuleBundleSource_RenderModuleBundle_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[RenderModuleBundleRequest, ModuleBundleChunk]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ModuleBundleSource_RenderModuleBundleClient = grpc.ServerStreamingClient[ModuleBundleChunk]
+
+// ModuleBundleSourceServer is the server API for ModuleBundleSource service.
+// All implementations must embed UnimplementedModuleBundleSourceServer
+// for forward compatibility.
+//
+// ModuleBundleSource is served by the bundle source (the gateway) and called
+// by the inventory when an agent fetches its item. It renders the bundle at
+// that moment; the source sends the header (item_id "") and then chunks of at
+// most 1 MiB with contiguous offsets from 0. NotFound (refused: unknown,
+// expired, mismatched or out of renders) fails the item; any other error is
+// retried by the agent within the item's fetch budget.
+type ModuleBundleSourceServer interface {
+	RenderModuleBundle(*RenderModuleBundleRequest, grpc.ServerStreamingServer[ModuleBundleChunk]) error
+	mustEmbedUnimplementedModuleBundleSourceServer()
+}
+
+// UnimplementedModuleBundleSourceServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedModuleBundleSourceServer struct{}
+
+func (UnimplementedModuleBundleSourceServer) RenderModuleBundle(*RenderModuleBundleRequest, grpc.ServerStreamingServer[ModuleBundleChunk]) error {
+	return status.Error(codes.Unimplemented, "method RenderModuleBundle not implemented")
+}
+func (UnimplementedModuleBundleSourceServer) mustEmbedUnimplementedModuleBundleSourceServer() {}
+func (UnimplementedModuleBundleSourceServer) testEmbeddedByValue()                            {}
+
+// UnsafeModuleBundleSourceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to ModuleBundleSourceServer will
+// result in compilation errors.
+type UnsafeModuleBundleSourceServer interface {
+	mustEmbedUnimplementedModuleBundleSourceServer()
+}
+
+func RegisterModuleBundleSourceServer(s grpc.ServiceRegistrar, srv ModuleBundleSourceServer) {
+	// If the following call panics, it indicates UnimplementedModuleBundleSourceServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&ModuleBundleSource_ServiceDesc, srv)
+}
+
+func _ModuleBundleSource_RenderModuleBundle_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(RenderModuleBundleRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(ModuleBundleSourceServer).RenderModuleBundle(m, &grpc.GenericServerStream[RenderModuleBundleRequest, ModuleBundleChunk]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ModuleBundleSource_RenderModuleBundleServer = grpc.ServerStreamingServer[ModuleBundleChunk]
+
+// ModuleBundleSource_ServiceDesc is the grpc.ServiceDesc for ModuleBundleSource service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var ModuleBundleSource_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "inventory.v1.ModuleBundleSource",
+	HandlerType: (*ModuleBundleSourceServer)(nil),
+	Methods:     []grpc.MethodDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "RenderModuleBundle",
+			Handler:       _ModuleBundleSource_RenderModuleBundle_Handler,
+			ServerStreams: true,
+		},
+	},
 	Metadata: "inventory/v1/inventory.proto",
 }
