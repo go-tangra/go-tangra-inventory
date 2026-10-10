@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/agentcerts"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/agentmodules"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/collector"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/config"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/daemon"
@@ -180,6 +181,12 @@ func runDaemon(cfg config.AgentConfig, configPath string) error {
 	// certificates.directory, a hook only from the local configuration.
 	if st := certificateStore(cfg.Certificates, agentcerts.Deps{}); st != nil {
 		d.WithCertificates(st)
+	}
+	// Module delivery (feature 037, Linux): bundles only below the local
+	// modules.directory, never over an existing module, a hook only from
+	// the local configuration.
+	if w := moduleWriter(cfg.Modules, agentmodules.Deps{}); w != nil {
+		d.WithModules(w)
 	}
 	// Self-upgrade (feature 023): announce the platform, confirm or report an
 	// upgrade in flight, act on upgrade commands when enabled.

@@ -338,7 +338,7 @@ func TestCertificateReportRetriedFromMemory(t *testing.T) {
 	if f != 1 || inst.count() != 1 || len(reps) != 1 || reps[0].GetState() != "installed" {
 		t.Fatalf("fetches=%d installs=%d reports=%v", f, inst.count(), reps)
 	}
-	if d.certs.takeUnsent("item-1") != nil {
+	if _, ok := d.certs.takeUnsent("item-1"); ok {
 		t.Fatal("unsent kept after delivery")
 	}
 }

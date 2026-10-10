@@ -31,58 +31,69 @@ type hookResult struct {
 // runHook checks and runs the locally configured hook for an installed name
 // (contracts/agent-config.md §4). Its output goes to the local log only.
 func (s *Store) runHook(ctx context.Context, req Request, b certmaterial.Bundle, hasKey, renewal bool) hookResult {
-	if why := s.checkHook(); why != "" {
+	if why := CheckHook(s.hooks, s.cfg.Hook, s.root); why != "" {
 		s.logf("certs: name %s: deploy hook %s refused: %s", req.Name, s.cfg.Hook, why)
 		return hookResult{code: HookNotRun, reason: store.ReasonHookRefused, detail: why}
 	}
 	out := s.hooks.Run(ctx, HookSpec{Path: s.cfg.Hook, Dir: path.Join(s.cfg.Dir, livePath(req.Name)),
 		Env: hookEnv(s.cfg.Dir, req.Name, req.CertificateID, b, hasKey, renewal), Timeout: s.cfg.HookTimeout})
+	code, reason, detail := HookVerdict(out, s.cfg.HookTimeout, func(format string, args ...any) {
+		s.logf("certs: name %s: "+format, append([]any{req.Name}, args...)...)
+	})
+	return hookResult{code: code, reason: reason, detail: detail}
+}
+
+// HookVerdict maps a hook run to the report (shared with the module writer,
+// feature 037): exit code, reason ("" on success) and a short detail that
+// never holds hook output. The output excerpt (at most MaxHookOutput bytes)
+// goes to logf only.
+func HookVerdict(out HookOutcome, timeout time.Duration, logf func(format string, args ...any)) (code int, reason, detail string) {
 	if len(out.Output) > 0 {
 		excerpt := out.Output
 		if len(excerpt) > MaxHookOutput {
 			excerpt = excerpt[:MaxHookOutput]
 		}
-		s.logf("certs: name %s: deploy hook output: %q", req.Name, excerpt)
+		logf("deploy hook output: %q", excerpt)
 	}
 	switch {
 	case out.Err != nil:
-		s.logf("certs: name %s: deploy hook could not be started: %v", req.Name, out.Err)
-		return hookResult{code: hookNoStart, reason: store.ReasonHookFailed, detail: "hook could not be started"}
+		logf("deploy hook could not be started: %v", out.Err)
+		return hookNoStart, store.ReasonHookFailed, "hook could not be started"
 	case out.TimedOut:
-		return hookResult{code: HookTimedOut, reason: store.ReasonHookTimeout,
-			detail: "hook killed after " + s.cfg.HookTimeout.Round(time.Second).String()}
+		return HookTimedOut, store.ReasonHookTimeout, "hook killed after " + timeout.Round(time.Second).String()
 	case out.ExitCode != 0:
-		return hookResult{code: out.ExitCode, reason: store.ReasonHookFailed, detail: "hook exited with code " + strconv.Itoa(out.ExitCode)}
+		return out.ExitCode, store.ReasonHookFailed, "hook exited with code " + strconv.Itoa(out.ExitCode)
 	}
-	return hookResult{code: 0}
+	return 0, "", ""
 }
 
-// checkHook returns why the hook may not run ("" when it may): it must be a
-// regular file (not a symlink) owned by root, executable by its owner, not
+// CheckHook returns why hook may not run ("" when it may), shared with the
+// module writer (feature 037): it must be an absolute path to a regular
+// file (not a symlink) owned by rootUID, executable by its owner, not
 // writable by group or others, and its directory and every ancestor up to
-// "/" must be root-owned directories not writable by group or others (a
+// "/" must be rootUID-owned directories not writable by group or others (a
 // writable ancestor would let a local user rename the path and substitute
 // the hook that runs as root).
-func (s *Store) checkHook() string {
-	if !path.IsAbs(s.cfg.Hook) { // the configuration refuses it too
+func CheckHook(r HookRunner, hook string, rootUID int) string {
+	if !path.IsAbs(hook) { // the configuration refuses it too
 		return "hook path is not absolute"
 	}
-	fi, err := s.hooks.Lstat(s.cfg.Hook)
+	fi, err := r.Lstat(hook)
 	switch {
 	case err != nil:
 		return "hook not found"
 	case !fi.IsRegular():
 		return "hook is not a regular file"
-	case fi.UID != s.root:
+	case fi.UID != rootUID:
 		return "hook is not owned by root"
 	case fi.Mode.Perm()&0o022 != 0:
 		return "hook is writable by group or others"
 	case fi.Mode.Perm()&0o100 == 0:
 		return "hook is not executable"
 	}
-	for dir := path.Dir(s.cfg.Hook); ; dir = path.Dir(dir) {
-		di, err := s.hooks.Stat(dir)
-		if err != nil || !di.IsDir() || di.UID != s.root || di.Mode.Perm()&0o022 != 0 {
+	for dir := path.Dir(hook); ; dir = path.Dir(dir) {
+		di, err := r.Stat(dir)
+		if err != nil || !di.IsDir() || di.UID != rootUID || di.Mode.Perm()&0o022 != 0 {
 			return "hook directory " + dir + " is not root-owned or is writable by group or others"
 		}
 		if dir == "/" {
