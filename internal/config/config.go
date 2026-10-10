@@ -54,6 +54,60 @@ type Config struct {
 	// CertDelivery relays lcm certificates to inventory agents for the
 	// deployer (feature 033); off by default.
 	CertDelivery CertDelivery `yaml:"cert_delivery"`
+	// ModuleDelivery relays rendered module bundles to inventory agents for
+	// the gateway's add-module wizard (feature 037); off by default.
+	ModuleDelivery ModuleDelivery `yaml:"module_delivery"`
+}
+
+// ModuleDelivery configures the module delivery relay (feature 037).
+// Sources are the mesh service names (last SPIFFE path segment) allowed to
+// call ModuleDeliveryService, on top of the inbound mesh policy;
+// SourceService is the discovery name of the service serving
+// ModuleBundleSource (the gateway). AllowPlaintextIngest lets
+// FetchModuleBundle serve bundles over a plaintext ingest edge (development
+// stack only; refused in production).
+type ModuleDelivery struct {
+	Enabled              bool     `yaml:"enabled"`
+	Sources              []string `yaml:"sources"`
+	SourceService        string   `yaml:"source_service"`
+	ReportTimeoutMinutes int      `yaml:"report_timeout_minutes"`
+	MaxConcurrentFetches int      `yaml:"max_concurrent_fetches"`
+	SourceTimeoutSeconds int      `yaml:"source_timeout_seconds"`
+	AllowPlaintextIngest bool     `yaml:"allow_plaintext_ingest"`
+}
+
+// ReportTimeout fails a fetched module item whose agent does not report.
+func (d ModuleDelivery) ReportTimeout() time.Duration {
+	return time.Duration(d.ReportTimeoutMinutes) * time.Minute
+}
+
+// SourceTimeout bounds one RenderModuleBundle call.
+func (d ModuleDelivery) SourceTimeout() time.Duration {
+	return time.Duration(d.SourceTimeoutSeconds) * time.Second
+}
+
+func (d ModuleDelivery) validate(prod bool) error {
+	if len(d.Sources) > 32 {
+		return errors.New("config: module_delivery.sources allows at most 32 services")
+	}
+	for _, s := range d.Sources {
+		if !serviceNameRE.MatchString(s) {
+			return fmt.Errorf("config: module_delivery.sources entry %q is not a service name", s)
+		}
+	}
+	switch {
+	case !serviceNameRE.MatchString(d.SourceService):
+		return errors.New("config: module_delivery.source_service must be a service name")
+	case d.ReportTimeoutMinutes < 5 || d.ReportTimeoutMinutes > 120:
+		return errors.New("config: module_delivery.report_timeout_minutes must be within [5, 120]")
+	case d.MaxConcurrentFetches < 1 || d.MaxConcurrentFetches > 500:
+		return errors.New("config: module_delivery.max_concurrent_fetches must be within [1, 500]")
+	case d.SourceTimeoutSeconds < 2 || d.SourceTimeoutSeconds > 120:
+		return errors.New("config: module_delivery.source_timeout_seconds must be within [2, 120]")
+	case prod && d.AllowPlaintextIngest:
+		return errors.New("config: module_delivery.allow_plaintext_ingest is not permitted in production")
+	}
+	return nil
 }
 
 // CertDelivery configures the certificate delivery relay (feature 033).
@@ -315,6 +369,8 @@ func Default() Config {
 			ChunkBytes: 1 << 20, RequestTTLHours: 168, ProgressTimeoutMinutes: 15},
 		CertDelivery: CertDelivery{Sources: []string{"deployer"}, LCMService: "lcm", PendingTTLHours: 168,
 			ReportTimeoutMinutes: 15, MaxConcurrentFetches: 50, LCMTimeoutSeconds: 10},
+		ModuleDelivery: ModuleDelivery{Sources: []string{"gateway"}, SourceService: "gateway", ReportTimeoutMinutes: 30,
+			MaxConcurrentFetches: 20, SourceTimeoutSeconds: 30},
 	}
 }
 
@@ -409,6 +465,9 @@ func (c Config) Validate() error {
 	if err := c.CertDelivery.validate(prod); err != nil {
 		return err
 	}
+	if err := c.ModuleDelivery.validate(prod); err != nil {
+		return err
+	}
 	return c.AgentReleases.validate()
 }
 
@@ -457,6 +516,9 @@ func (c Config) Warnings() []string {
 	}
 	if c.CertDelivery.AllowPlaintextIngest {
 		w = append(w, "cert_delivery.allow_plaintext_ingest: certificate material served to agents without TLS (development only)")
+	}
+	if c.ModuleDelivery.AllowPlaintextIngest {
+		w = append(w, "module_delivery.allow_plaintext_ingest: module bundles with secrets served to agents without TLS (development only)")
 	}
 	return w
 }
@@ -558,6 +620,60 @@ type AgentConfig struct {
 	// chooses only the certificate name; nothing runs unless DeployHook is
 	// set here.
 	Certificates AgentCertificates `yaml:"certificates"`
+
+	// Modules configures the module bundles the platform delivers to this
+	// host (feature 037). Bundles are written only below Directory; the
+	// server chooses only the module name; nothing runs unless DeployHook
+	// is set here.
+	Modules AgentModules `yaml:"modules"`
+}
+
+// AgentModules is the agent's module directory configuration
+// (specs/037 contracts/agent-config.md).
+type AgentModules struct {
+	Enabled                bool   `yaml:"enabled"`
+	Directory              string `yaml:"directory"`
+	Owner                  string `yaml:"owner"`
+	Group                  string `yaml:"group"`
+	DeployHook             string `yaml:"deploy_hook"`
+	HookTimeoutSeconds     int    `yaml:"hook_timeout_seconds"`
+	AllowInsecureTransport bool   `yaml:"allow_insecure_transport"`
+}
+
+// Validate checks the modules section (also when disabled), with the same
+// path, account and hook rules as the certificates section. The directory
+// itself must not be a symlink; the agent checks that when it opens it.
+func (c AgentModules) Validate() error {
+	d := c.Directory
+	if d == "" || !path.IsAbs(d) || path.Clean(d) != d || d == "/" {
+		return errors.New("config: agent modules.directory must be an absolute, clean path other than /")
+	}
+	for _, p := range forbiddenCertDirs {
+		if d == p || strings.HasPrefix(d, p+"/") {
+			return fmt.Errorf("config: agent modules.directory must not be under %s", p)
+		}
+	}
+	if !validAccount(c.Owner) || !validAccount(c.Group) {
+		return errors.New("config: agent modules.owner and modules.group must be a user/group name or a numeric id")
+	}
+	if h := c.DeployHook; h != "" && (!path.IsAbs(h) || path.Clean(h) != h || h == "/") {
+		return errors.New("config: agent modules.deploy_hook must be empty or an absolute, clean file path")
+	}
+	if c.HookTimeoutSeconds < 30 || c.HookTimeoutSeconds > 1800 {
+		return errors.New("config: agent modules.hook_timeout_seconds must be within [30, 1800]")
+	}
+	return nil
+}
+
+// HookTimeout bounds one deploy hook run.
+func (c AgentModules) HookTimeout() time.Duration {
+	return time.Duration(c.HookTimeoutSeconds) * time.Second
+}
+
+// Announce reports whether the agent announces module.v1: enabled, on
+// Linux, and over TLS unless the plaintext opt-out is set locally.
+func (c AgentModules) Announce(goos string, insecureTransport bool) bool {
+	return c.Enabled && goos == "linux" && (!insecureTransport || c.AllowInsecureTransport)
 }
 
 // AgentCertificates is the agent's certificate store configuration
@@ -694,7 +810,8 @@ func DefaultAgent() AgentConfig {
 	return AgentConfig{IntervalSeconds: 3600, CollectBMC: true, CollectUpdates: true, UpdateTimeoutSeconds: 120, CollectDisks: true,
 		Upgrade: AgentUpgrade{Enabled: true, ConfirmTimeoutSeconds: 300},
 		Certificates: AgentCertificates{Enabled: true, Directory: "/etc/inventory-agent/certs", Owner: "root", Group: "root",
-			DirMode: "0750", CertMode: "0644", KeyMode: "0600", KeepPrevious: 1, HookTimeoutSeconds: 300}}
+			DirMode: "0750", CertMode: "0644", KeyMode: "0600", KeepPrevious: 1, HookTimeoutSeconds: 300},
+		Modules: AgentModules{Enabled: true, Directory: "/opt/tangra/modules", Owner: "root", Group: "root", HookTimeoutSeconds: 600}}
 }
 
 // LoadAgent reads the endpoint agent's YAML over DefaultAgent(); unknown fields
@@ -761,7 +878,10 @@ func (a AgentConfig) Validate() error {
 			return err
 		}
 	}
-	return a.Certificates.Validate()
+	if err := a.Certificates.Validate(); err != nil {
+		return err
+	}
+	return a.Modules.Validate()
 }
 
 // Warnings lists accepted insecure opt-outs of the agent (logged at start).
@@ -769,6 +889,9 @@ func (a AgentConfig) Warnings() []string {
 	var w []string
 	if a.Insecure && a.Certificates.AllowInsecureTransport {
 		w = append(w, "certificates.allow_insecure_transport: certificates and keys received over a plaintext ingest connection (development only)")
+	}
+	if a.Insecure && a.Modules.AllowInsecureTransport {
+		w = append(w, "modules.allow_insecure_transport: module bundles with secrets received over a plaintext ingest connection (development only)")
 	}
 	return w
 }

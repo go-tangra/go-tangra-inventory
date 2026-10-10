@@ -215,6 +215,11 @@ func Build(ctx context.Context, cfg config.Config, o Options) (a *App, err error
 	if err != nil {
 		return nil, err
 	}
+	// Module delivery relay (feature 037): off unless module_delivery.enabled.
+	moduleSvc, err := a.buildModuleDelivery(ctx, instanceID)
+	if err != nil {
+		return nil, err
+	}
 
 	// Mesh HTTP surface (reached only through the gateway).
 	hopts := []httpapi.Option{httpapi.WithVerifier(a.Verifier)}
@@ -243,6 +248,9 @@ func Build(ctx context.Context, cfg config.Config, o Options) (a *App, err error
 		// CertificateDeliveryService (deployer): the inbound policy and
 		// cert_delivery.sources both have to admit the caller.
 		CertDelivery: certSvc, CertSources: cfg.CertDelivery.Sources,
+		// ModuleDeliveryService (gateway add-module wizard): the inbound
+		// policy and module_delivery.sources both have to admit the caller.
+		ModuleDelivery: moduleSvc, ModuleSources: cfg.ModuleDelivery.Sources,
 	})
 
 	// Off-mesh INGEST EDGE: a separate, network-isolated gRPC listener that
@@ -255,7 +263,10 @@ func Build(ctx context.Context, cfg config.Config, o Options) (a *App, err error
 		WithAutoEnroll(autoSvc).
 		// Certificate material only over TLS unless the development opt-out
 		// cert_delivery.allow_plaintext_ingest is set.
-		WithCertDelivery(certSvc, cfg.CertDelivery.MaxConcurrentFetches, cfg.Ingest.Insecure && !cfg.CertDelivery.AllowPlaintextIngest)
+		WithCertDelivery(certSvc, cfg.CertDelivery.MaxConcurrentFetches, cfg.Ingest.Insecure && !cfg.CertDelivery.AllowPlaintextIngest).
+		// Module bundles (secrets) likewise only over TLS unless
+		// module_delivery.allow_plaintext_ingest is set.
+		WithModuleDelivery(moduleSvc, cfg.ModuleDelivery.MaxConcurrentFetches, cfg.Ingest.Insecure && !cfg.ModuleDelivery.AllowPlaintextIngest)
 	var ingestTLS *ingest.CertLoader
 	if !cfg.Ingest.Insecure {
 		if ingestTLS, err = ingest.NewCertLoader(cfg.Ingest.TLSCertFile, cfg.Ingest.TLSKeyFile); err != nil {
@@ -266,7 +277,8 @@ func Build(ctx context.Context, cfg config.Config, o Options) (a *App, err error
 
 	// Maintenance: mark stale hosts + purge old snapshots on an interval;
 	// seed releases, sweep upgrade requests, apply release retention.
-	a.workers = append(a.workers, a.maintenance, a.upgradeWorker(relSvc, upgSvc), a.certWorker(certSvc))
+	a.workers = append(a.workers, a.maintenance, a.upgradeWorker(relSvc, upgSvc), a.certWorker(certSvc),
+		a.moduleWorker(moduleSvc))
 	return a, nil
 }
 
@@ -302,7 +314,7 @@ func (a *App) serveIngest(ctx context.Context, s *ingest.Server, tlsCert *ingest
 }
 
 // maintenance marks hosts stale and purges snapshots and terminal certificate
-// delivery items beyond the retention window.
+// and module delivery items beyond the retention window.
 func (a *App) maintenance(ctx context.Context) {
 	t := time.NewTicker(a.Cfg.PurgeInterval())
 	defer t.Stop()
@@ -322,6 +334,12 @@ func (a *App) maintenance(ctx context.Context) {
 				a.Log.Warn("purge certificate delivery items", "err", err)
 			} else if n > 0 {
 				a.Log.Info("purged old certificate delivery items", "count", n)
+			}
+			// Terminal module delivery items (feature 037) too.
+			if n, err := a.Repo.PurgeModuleItems(ctx, now.Add(-a.Cfg.RetentionWindow())); err != nil {
+				a.Log.Warn("purge module delivery items", "err", err)
+			} else if n > 0 {
+				a.Log.Info("purged old module delivery items", "count", n)
 			}
 		}
 	}
