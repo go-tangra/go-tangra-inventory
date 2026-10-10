@@ -208,6 +208,9 @@ func mergeHost(dst, src store.Host) store.Host {
 func (m *Mem) GetHost(_ context.Context, tenantID, id string) (store.Host, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if err := m.fail("GetHost"); err != nil {
+		return store.Host{}, err
+	}
 	h, ok := m.hosts[id]
 	if !ok || h.TenantID != tenantID {
 		return store.Host{}, repo.ErrNotFound

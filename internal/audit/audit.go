@@ -79,6 +79,20 @@ const (
 	CertDeliveryCancelled   EventType = "cert_delivery_cancelled"
 	CertDeliveryRefused     EventType = "cert_delivery_refused"
 	HostCertificateRevoked  EventType = "host_certificate_revoked"
+	// Feature 037: module delivery. Item transitions are written through
+	// the repo in the transaction of the state change (SafeRow). Details
+	// carry identifiers, module, version, state and reason only: never
+	// bundle bytes, tokens or passwords.
+	ModuleDeliveryCreated     EventType = "module_delivery_created"
+	ModuleDeliverySuperseded  EventType = "module_delivery_superseded"
+	ModuleDeliveryDelivered   EventType = "module_delivery_delivered"
+	ModuleDeliveryFetched     EventType = "module_delivery_fetched"
+	ModuleDeliveryInstalled   EventType = "module_delivery_installed"
+	ModuleDeliveryFailed      EventType = "module_delivery_failed"
+	ModuleDeliveryHookFailed  EventType = "module_delivery_hook_failed"
+	ModuleDeliveryUnsupported EventType = "module_delivery_unsupported"
+	ModuleDeliveryExpired     EventType = "module_delivery_expired"
+	ModuleDeliveryRefused     EventType = "module_delivery_refused"
 )
 
 // certEvents are the certificate delivery event types (feature 033): their
@@ -88,6 +102,10 @@ var certEvents = map[EventType]bool{
 	CertDeliveryInstalled: true, CertDeliveryUnchanged: true, CertDeliveryFailed: true, CertDeliveryHookFailed: true,
 	CertDeliveryUnsupported: true, CertDeliverySuperseded: true, CertDeliveryExpired: true, CertDeliveryCancelled: true,
 	CertDeliveryRefused: true, HostCertificateRevoked: true,
+	// Feature 037 module delivery events follow the same strict rule.
+	ModuleDeliveryCreated: true, ModuleDeliverySuperseded: true, ModuleDeliveryDelivered: true, ModuleDeliveryFetched: true,
+	ModuleDeliveryInstalled: true, ModuleDeliveryFailed: true, ModuleDeliveryHookFailed: true, ModuleDeliveryUnsupported: true,
+	ModuleDeliveryExpired: true, ModuleDeliveryRefused: true,
 }
 
 // PlatformTenant is the tenant id of platform-scope events (agent release
@@ -110,6 +128,8 @@ const (
 	// Feature 033: a certificate delivery item (or, for request-level rows,
 	// the delivery).
 	SubjectCertDelivery = "cert_delivery"
+	// Feature 037: a module delivery item.
+	SubjectModuleDelivery = "module_delivery"
 )
 
 // Outcomes (closed set).
@@ -145,6 +165,8 @@ func init() {
 		CertDeliveryRequested, CertDeliveryRearmed, CertDeliveryDelivered, CertDeliveryFetched, CertDeliveryInstalled,
 		CertDeliveryUnchanged, CertDeliveryFailed, CertDeliveryHookFailed, CertDeliveryUnsupported, CertDeliverySuperseded,
 		CertDeliveryExpired, CertDeliveryCancelled, CertDeliveryRefused, HostCertificateRevoked,
+		ModuleDeliveryCreated, ModuleDeliverySuperseded, ModuleDeliveryDelivered, ModuleDeliveryFetched, ModuleDeliveryInstalled,
+		ModuleDeliveryFailed, ModuleDeliveryHookFailed, ModuleDeliveryUnsupported, ModuleDeliveryExpired, ModuleDeliveryRefused,
 	} {
 		known[t] = struct{}{}
 	}
@@ -190,7 +212,7 @@ func Validate(e Event) error {
 	}
 	switch e.SubjectKind {
 	case SubjectHost, SubjectSnapshot, SubjectAgent, SubjectToken, SubjectBackup, SubjectSystem, SubjectUpgradePolicy, SubjectRelease, SubjectAutoEnrollKey,
-		SubjectCertDelivery:
+		SubjectCertDelivery, SubjectModuleDelivery:
 	default:
 		return fmt.Errorf("audit: subject_kind %q", e.SubjectKind)
 	}
