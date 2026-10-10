@@ -63,6 +63,9 @@ enum CommandType {
   // Install the certificate of delivery item Command.certificate.item_id
   // (feature 033). Agents older than 033 log and ignore it.
   COMMAND_TYPE_CERTIFICATE = 3;
+  // Install the module bundle of delivery item Command.module.item_id
+  // (feature 037). Agents older than 037 log and ignore it.
+  COMMAND_TYPE_MODULE = 4;
 }
 
 // ---- Shared identity + host messages
@@ -788,6 +791,9 @@ service IngestService {
   // except Enroll; bound to the verified agent's own delivery items.
   rpc FetchCertificate(FetchCertificateRequest) returns (CertificateBundle);
   rpc ReportCertificate(ReportCertificateRequest) returns (ReportCertificateResponse);
+  // Module delivery (feature 037), bound to the verified agent's own items.
+  rpc FetchModuleBundle(FetchModuleBundleRequest) returns (stream ModuleBundleChunk);
+  rpc ReportModule(ReportModuleRequest) returns (ReportModuleResponse);
 }
 
 message EnrollRequest {
@@ -850,6 +856,15 @@ message Command {
   CommandType type = 2;
   UpgradeCommand upgrade = 3;        // set when type = UPGRADE
   CertificateCommand certificate = 4; // set when type = CERTIFICATE (feature 033)
+  ModuleCommand module = 5;           // set when type = MODULE (feature 037)
+}
+
+// ModuleCommand carries only references; the agent pulls the bundle with
+// FetchModuleBundle over its authenticated connection (feature 037).
+message ModuleCommand {
+  string item_id = 1;                // uuid of the module delivery item
+  string module = 2;                 // ^[a-z][a-z0-9-]{0,62}$; validated again by the agent
+  uint32 attempt = 3;
 }
 
 // CertificateCommand carries only references; the agent pulls the material
@@ -1110,4 +1125,137 @@ message MarkCertificateRevokedRequest {
 message MarkCertificateRevokedResponse {
   int32 cancelled_items = 1;
   int32 flagged_hosts = 2;
+}
+
+// ---- Module delivery (feature 037)
+
+message FetchModuleBundleRequest {
+  string item_id = 1;                // uuid of the agent's own active module item
+}
+
+// ModuleBundleChunk streams a rendered module install bundle (a zip that
+// holds secrets): the header first, then contiguous chunks. It is never
+// logged, stored, cached or published by the inventory.
+message ModuleBundleChunk {
+  oneof part {
+    ModuleBundleHeader header = 1;   // always the first message
+    ArtifactChunk chunk = 2;         // <= 1 MiB each
+  }
+}
+
+message ModuleBundleHeader {
+  string item_id = 1;                // set by the inventory toward the agent; "" from the source
+  string module = 2;
+  string version = 3;
+  int64 size = 4;                    // 1 byte .. 12 MiB
+  string sha256 = 5;                 // lowercase hex of the zip
+  string delivery_id = 6;            // the source's delivery (gateway join) id
+}
+
+// ReportModuleRequest states: installed | failed | hook_failed. Reason codes
+// (closed set): invalid_module, invalid_bundle, checksum_mismatch, too_large,
+// already_installed, write_failed, disk_full, hook_failed, hook_timeout,
+// hook_refused, disabled_locally, busy, fetch_failed.
+message ReportModuleRequest {
+  string item_id = 1;
+  string state = 2;
+  string reason = 3;
+  int32 hook_exit_code = 4;          // -1 = hook not run; 0..255; 256 = timeout
+  string detail = 5;                 // <= 256 bytes, sanitised; never hook output
+}
+
+message ReportModuleResponse {
+  bool accepted = 1;                 // false = ignored (terminal/duplicate)
+}
+
+// ModuleDeliveryService (mesh only; not proxied by the gateway) hands
+// rendered module bundles to inventory agents (feature 037). Callers pass
+// references only. Authorized by the inbound mesh policy and, in the handler,
+// by module_delivery.sources; every method returns FailedPrecondition while
+// module_delivery.enabled is false.
+service ModuleDeliveryService {
+  rpc CreateModuleDelivery(CreateModuleDeliveryRequest) returns (ModuleDelivery);
+  rpc GetModuleDelivery(GetModuleDeliveryRequest) returns (ModuleDelivery);
+  rpc ListModuleTargets(ListModuleTargetsRequest) returns (ListModuleTargetsResponse);
+}
+
+enum ModuleDeliveryState {
+  MODULE_DELIVERY_STATE_UNSPECIFIED = 0;
+  MODULE_DELIVERY_STATE_PENDING = 1;
+  MODULE_DELIVERY_STATE_DELIVERED = 2;
+  MODULE_DELIVERY_STATE_FETCHED = 3;
+  MODULE_DELIVERY_STATE_INSTALLED = 4;
+  MODULE_DELIVERY_STATE_FAILED = 5;
+  MODULE_DELIVERY_STATE_HOOK_FAILED = 6;
+  MODULE_DELIVERY_STATE_UNSUPPORTED = 7;
+  MODULE_DELIVERY_STATE_SUPERSEDED = 8;
+  MODULE_DELIVERY_STATE_EXPIRED = 9;
+}
+
+message CreateModuleDeliveryRequest {
+  string tenant_id = 1;
+  string delivery_id = 2;            // uuid; idempotency key per (tenant, source)
+  string host_id = 3;
+  string module = 4;                 // ^[a-z][a-z0-9-]{0,62}$
+  string version = 5;                // <= 64
+  int64 expires_at = 6;              // unix seconds, in (now, now + 7 days]
+}
+
+message GetModuleDeliveryRequest {
+  string tenant_id = 1;
+  string delivery_id = 2;
+}
+
+message ModuleDelivery {
+  string item_id = 1;
+  string delivery_id = 2;
+  string tenant_id = 3;
+  string host_id = 4;
+  string hostname = 5;
+  string module = 6;
+  string version = 7;
+  ModuleDeliveryState state = 8;
+  string reason = 9;                 // closed set
+  int32 hook_exit_code = 10;         // -1 = none
+  bool agent_online = 11;
+  int64 created_at = 12;             // unix seconds
+  int64 updated_at = 13;
+  int64 expires_at = 14;
+  bool created = 15;                 // false = idempotent replay
+}
+
+message ListModuleTargetsRequest {
+  string tenant_id = 1;
+  string query = 2;                  // hostname substring, <= 64
+  int32 limit = 3;                   // 1..200, default 50
+}
+
+message ModuleTarget {
+  string host_id = 1;
+  string hostname = 2;
+  string os_name = 3;
+  bool agent_online = 4;
+  // enabled | disabled_on_host | upgrade_required | not_supported_platform |
+  // no_agent | ambiguous_agent | disabled_on_server
+  string capability = 5;
+  repeated string ip_addresses = 6;  // latest snapshot; no loopback/link-local; no prefix; <= 16
+}
+
+message ListModuleTargetsResponse {
+  repeated ModuleTarget hosts = 1;
+  bool truncated = 2;
+}
+
+// ModuleBundleSource is served by the bundle source (the gateway) and called
+// by the inventory when an agent fetches its item. It renders the bundle at
+// that moment; the source sends the header (item_id "") and then chunks.
+service ModuleBundleSource {
+  rpc RenderModuleBundle(RenderModuleBundleRequest) returns (stream ModuleBundleChunk);
+}
+
+message RenderModuleBundleRequest {
+  string tenant_id = 1;
+  string delivery_id = 2;
+  string host_id = 3;                // the verified agent's host
+  string item_id = 4;                // for the source's audit only
 }
