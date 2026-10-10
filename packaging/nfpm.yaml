@@ -30,6 +30,10 @@ contents:
     type: config|noreplace
     file_info:
       mode: 0640
+  - src: ./packaging/examples/module-compose-up.sh
+    dst: /usr/share/doc/tangra-inventory-agent/examples/module-compose-up.sh
+    file_info:
+      mode: 0644
   - dst: /etc/inventory-agent
     type: dir
     file_info:

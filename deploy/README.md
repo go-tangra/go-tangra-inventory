@@ -287,7 +287,8 @@ in-memory), `retention` (`days`), `stale` (`after_seconds`), `jobs`, `events`,
 `gateway`, `enroll` (`token_ttl_seconds` — minted enrollment-token lifetime),
 `mesh_enroll` (the server's own SVID enrollment), `limits_inventory`
 (`max_request_bytes`, `max_snapshot_bytes`), `agent_releases` (agent
-self-upgrade, see [above](#agent-self-upgrade)), and `host_reports`
+self-upgrade, see [above](#agent-self-upgrade)), `cert_delivery` and
+`module_delivery` (see below), and `host_reports`
 (`consumers` — mesh service names allowed to call HostReportService, default
 `[ipam, asset]` (asset reads the virtualization role for its inventory-sync filter); `max_page_bytes` — bound of one ListHostReports page, default 3 MiB). Framework `server`/`admin`/
 `discovery` sections supply the mesh gRPC/HTTP and admin listeners.
@@ -459,6 +460,100 @@ certificate, name or key policy is refused (`InvalidArgument`).
 **Metrics.** `inventory.cert_deliveries` (state, reason),
 `inventory.cert_delivery_refusals` (reason) and
 `inventory.cert_delivery_lcm_seconds` (outcome).
+
+## Module delivery (gateway add-module wizard, feature 037)
+
+**Modules > Add > Deliver to a host** in the console hands a rendered module
+bundle (compose file, rendered configuration, `.env` with the join token and
+store passwords) straight to the host's enrolled agent instead of a zip
+download. The gateway calls `inventory.v1.ModuleDeliveryService` (mesh only,
+references only): inventory stores one item per host and module and pushes
+a `MODULE` command carrying the item id. When the agent pulls the item with
+`FetchModuleBundle`, inventory asks the gateway to render the bundle at that
+moment (`inventory.v1.ModuleBundleSource/RenderModuleBundle`, served by the
+gateway, for the verified agent's host), checks its size (at most 12 MiB)
+and SHA-256, relays it as a header plus chunks of at most 1 MiB, zeroes its
+buffer and keeps nothing. Server switch (off by default):
+
+```yaml
+module_delivery:
+  enabled: true
+  sources: [gateway]              # mesh services allowed to call ModuleDeliveryService (on top of the policy)
+  source_service: gateway         # discovery name of the service serving ModuleBundleSource
+  report_timeout_minutes: 30      # 5-120; keep it above the agents' modules.hook_timeout_seconds
+  max_concurrent_fetches: 20      # 1-500 per replica (one per agent)
+  source_timeout_seconds: 30      # 2-120, one RenderModuleBundle call
+  allow_plaintext_ingest: false   # dev stack with ingest.insecure only; refused in production
+```
+
+Policies: inventory's `gateway-forwards` rule already admits the gateway to
+every inventory method (the handler additionally requires `gateway` in
+`module_delivery.sources`). The gateway's policy (portal `deploy/policy.yaml`,
+production `policies/gateway.yaml`) needs the rule that lets inventory
+render:
+
+```yaml
+  - id: inventory-module-bundle
+    from: ["spiffe://example.org/svc/inventory"]
+    to: ["gateway"]
+    operations: ["/inventory.v1.ModuleBundleSource/RenderModuleBundle"]
+    effect: allow
+```
+
+and inventory needs `discovery.static.gateway` (it already has it for the
+gateway registration). The gateway's `catalogue.agent_delivery.
+inventory_service` names inventory. Agents need release ≥ 4.8.0 and the
+`modules` section of `agent.yaml` (enabled by default, directory
+`/opt/tangra/modules`, see `packaging/agent.yaml`); only the local
+configuration chooses the directory, the owner and the hook
+(`packaging/examples/module-compose-up.sh` is an example hook running
+`docker compose up -d` in `MODULE_DIR`). The agent announces `module.v1`
+only on Linux and over TLS (or with `modules.allow_insecure_transport`).
+
+**Eligibility.** `ListModuleTargets` reports each non-retired host's
+capability: `enabled`, `disabled_on_host` (agent ≥ 4.8.0 without
+`module.v1`), `upgrade_required`, `not_supported_platform` (Windows),
+`no_agent` or `ambiguous_agent` (more than one non-revoked agent claims the
+host: revoke the stale or foreign one), with the latest snapshot's
+addresses (no loopback or link-local, at most 16) for the wizard's
+pre-fill. `CreateModuleDelivery` refuses any other host with
+`FailedPrecondition` whose message is exactly the reason token (also
+`retired`), stores nothing and audits `module_delivery_refused`; while
+`module_delivery.enabled` is false every method answers `FailedPrecondition`
+`disabled_on_server`.
+
+**Lifecycle.** An item is `pending` (agent offline: replayed, at most 50 per
+connect, until it expires), `delivered` (command pushed), `fetched`
+(bundle relayed to the item's own agent; at most 5 fetches, each counted
+even when the gateway fails) and ends `installed`, `failed`, `hook_failed`,
+`unsupported` (the agent stopped announcing `module.v1`, or a second agent
+claimed the host), `superseded` (a newer delivery for the same host and
+module) or `expired` (past the join's expiry). It fails with
+`source_refused` when the gateway answers `NotFound` (join unknown, expired,
+for another host, or out of renders), `fetch_budget` after five fetches that
+the gateway could not serve, and `report_timeout` when a fetched item is not
+reported within `report_timeout_minutes`. The agent never overwrites
+`<directory>/<module>` (`already_installed`): a reinstall means removing the
+directory first, since a new bundle carries new store passwords. Agent
+reasons: `invalid_module`, `invalid_bundle`, `checksum_mismatch`,
+`too_large`, `already_installed`, `write_failed`, `disk_full`, `hook_failed`,
+`hook_timeout`, `hook_refused`, `disabled_locally`, `busy`, `fetch_failed`.
+Every transition writes its audit row in the same transaction
+(`module_delivery_created`, `_delivered`, `_fetched`, `_installed`,
+`_failed`, `_hook_failed`, `_unsupported`, `_superseded`, `_expired`,
+`_refused`); rows, commands and logs carry ids, module, version, state and
+reason only, never bundle bytes, the token or a password.
+
+**Refusals.** A fetch or report for an item that is not the caller's own,
+not active, expired or out of fetches answers `NotFound` (no oracle) and is
+audited as `module_delivery_refused` (reason `not_found`, `not_active`,
+`fetch_limit`, `plaintext`, `source_not_allowed`, `not_fetched`; at most one
+row per actor and reason in 10 s).
+
+**Metrics.** `inventory.module_deliveries` (state, reason),
+`inventory.module_delivery_refusals` (reason) and
+`inventory.module_delivery_source_seconds` (outcome: ok, refused,
+bad_bundle, unavailable).
 
 ## On-demand refresh & live status
 

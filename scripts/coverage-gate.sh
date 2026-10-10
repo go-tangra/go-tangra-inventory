@@ -5,12 +5,14 @@
 # bounds what IPAM receives, and the agent self-upgrade path: release manifest
 # verification, the agent-side upgrade core and the server upgrade lifecycle;
 # feature 033: the certificate material rules, the certificate delivery relay
-# and the agent certificate store core).
+# and the agent certificate store core; feature 037: the module delivery relay
+# and the agent module writer).
 set -euo pipefail
 PROFILE="${1:-coverage.out}"
 MODULE="github.com/go-tangra/go-tangra-inventory/v4"
 SECURITY_PKGS=("internal/authz" "internal/sealed" "internal/enroll" "internal/hostreport" "internal/agentrelease" "internal/selfupdate" "internal/upgrades"
-  "internal/certmaterial" "internal/certdelivery" "internal/agentcerts")
+  "internal/certmaterial" "internal/certdelivery" "internal/agentcerts"
+  "internal/moduledelivery" "internal/agentmodules")
 total=$(go tool cover -func="$PROFILE" | awk '/^total:/ {gsub("%","",$3); print $3}')
 echo "coverage: total ${total}%"
 fail=0

@@ -123,3 +123,30 @@ func TestPolicyDeployerCertDelivery(t *testing.T) {
 		}
 	}
 }
+
+// ModuleDeliveryService (feature 037) is reached by the gateway through
+// gateway-forwards and by no other module.
+func TestPolicyModuleDelivery(t *testing.T) {
+	f, err := os.Open("../../deploy/policy.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	pol, err := authz.Load(f)
+	if err != nil {
+		t.Fatalf("policy: %v", err)
+	}
+	for _, op := range inventoryOps(t) {
+		if !strings.HasPrefix(op, "/inventory.v1.ModuleDeliveryService/") {
+			continue
+		}
+		if d := pol.Authorize(context.Background(), identity.ForService("example.org", "gateway"), "inventory", op); !d.Allowed || d.RuleID != "gateway-forwards" {
+			t.Errorf("gateway %s: %+v", op, d)
+		}
+		for _, svc := range []string{"deployer", "ipam", "asset", "lcm", "scheduler"} {
+			if pol.Authorize(context.Background(), identity.ForService("example.org", svc), "inventory", op).Allowed {
+				t.Errorf("%s may call %s", svc, op)
+			}
+		}
+	}
+}

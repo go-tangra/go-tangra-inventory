@@ -65,3 +65,71 @@ func TestSampleCertificatesSection(t *testing.T) {
 		t.Fatalf("sample %+v differs from the defaults %+v", cfg.Certificates, config.DefaultAgent().Certificates)
 	}
 }
+
+// sampleSection returns the commented section `name:` of the sample config,
+// uncommented.
+func sampleSection(t *testing.T, name string) []string {
+	t.Helper()
+	raw, err := os.ReadFile("agent.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	in := false
+	for _, l := range strings.Split(string(raw), "\n") {
+		switch {
+		case l == "# "+name+":":
+			in = true
+			out = append(out, name+":")
+		case in && strings.HasPrefix(l, "#   "):
+			out = append(out, l[2:])
+		default:
+			in = false
+		}
+	}
+	return out
+}
+
+// TestSampleModulesSection (feature 037): the commented modules section of
+// the sample config, uncommented, is valid and equals the built-in
+// defaults.
+func TestSampleModulesSection(t *testing.T) {
+	out := sampleSection(t, "modules")
+	if len(out) != 8 {
+		t.Fatalf("modules section has %d lines:\n%s", len(out), strings.Join(out, "\n"))
+	}
+	p := filepath.Join(t.TempDir(), "agent.yaml")
+	if err := os.WriteFile(p, []byte(strings.Join(out, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadAgent(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Modules != config.DefaultAgent().Modules {
+		t.Fatalf("sample %+v differs from the defaults %+v", cfg.Modules, config.DefaultAgent().Modules)
+	}
+}
+
+// TestExampleModuleHook (feature 037): the shipped example hook is a POSIX
+// sh script that starts the module with docker compose in MODULE_DIR, and
+// the packages carry it.
+func TestExampleModuleHook(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("examples", "module-compose-up.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(raw)
+	for _, want := range []string{"#!/bin/sh\n", "set -eu", "MODULE_DIR", "docker compose", "up -d"} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("example hook lacks %q", want)
+		}
+	}
+	nfpm, err := os.ReadFile("nfpm.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(nfpm), "src: ./packaging/examples/module-compose-up.sh") {
+		t.Fatal("nfpm.yaml does not ship the example hook")
+	}
+}

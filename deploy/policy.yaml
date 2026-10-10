@@ -6,7 +6,11 @@
 # host reports (HostReportService, feature 020) and nothing else; the handler
 # additionally checks host_reports.consumers. The deployer requests
 # certificate deliveries to agents (CertificateDeliveryService, feature 033);
-# the handler additionally checks cert_delivery.sources.
+# the handler additionally checks cert_delivery.sources. The gateway asks for
+# module deliveries (ModuleDeliveryService, feature 037) through
+# gateway-forwards; the handler additionally checks module_delivery.sources.
+# Inventory calls the gateway's ModuleBundleSource as a client (the rule
+# lives in the gateway's policy).
 version: inventory-dev-1
 rules:
   - id: gateway-forwards
