@@ -3,7 +3,9 @@ package moduledelivery
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -363,5 +365,47 @@ func TestFetchEndedAfterRead(t *testing.T) {
 	f.svc.repo = staleGetRepo{Repo: f.svc.repo, item: v.ModuleDeliveryItem}
 	if _, err := f.svc.Fetch(ctx, a, v.ID); !errors.Is(err, repo.ErrNotFound) || len(f.src.reqs) != 0 || f.met.refused[RefusedNotActive] != 1 {
 		t.Fatalf("fetch: %v", err)
+	}
+}
+
+// TestFetchSourceFailureLogged: the agent only learns NotFound or
+// Unavailable, so every source failure is logged with the source's status
+// code (and never its message) for the operator.
+func TestFetchSourceFailureLogged(t *testing.T) {
+	for name, tc := range map[string]struct {
+		src           *fakeSource
+		outcome, code string
+	}{
+		"unauthenticated": {&fakeSource{callErr: status.Error(codes.Unauthenticated, "peer identity required")}, "unavailable", "Unauthenticated"},
+		"refused":         {&fakeSource{callErr: notFound("no such join")}, "refused", "NotFound"},
+		"bad bundle": {&fakeSource{bundle: []byte("zip"), mutate: func(m []*invv1.ModuleBundleChunk) []*invv1.ModuleBundleChunk {
+			return m[:1]
+		}}, "bad_bundle", "Unknown"},
+	} {
+		f := newFix(t)
+		var buf bytes.Buffer
+		f.svc.SetLogger(slog.New(slog.NewJSONHandler(&buf, nil)))
+		f.svc.SetLogger(nil) // nil keeps the logger
+		f.svc.cfg.SourceService = "gateway"
+		_, a := f.modHost(t, "gw-1", true)
+		v := f.create(t, did(1), "gw-1")
+		tc.src.module = "sms-gw"
+		f.svc.src = tc.src
+		_, _ = f.svc.Fetch(ctx, a, v.ID)
+		var line map[string]any
+		if err := json.Unmarshal(buf.Bytes(), &line); err != nil {
+			t.Fatalf("%s: log %q: %v", name, buf.String(), err)
+		}
+		if line["level"] != "WARN" || line["msg"] != "module delivery: bundle source failed" || line["item"] != v.ID || line["source"] != "gateway" ||
+			line["outcome"] != tc.outcome || line["code"] != tc.code || line["fetches"] != float64(1) {
+			t.Fatalf("%s: log %v", name, line)
+		}
+		if strings.Contains(buf.String(), "peer identity required") || strings.Contains(buf.String(), "no such join") {
+			t.Fatalf("%s: the source's message was logged: %s", name, buf.String())
+		}
+	}
+	// The mapped error reads as the sentinel, never as the remote message.
+	if err := sourceErr(status.Error(codes.Unauthenticated, "peer identity required")); err.Error() != ErrSourceUnavailable.Error() {
+		t.Fatalf("mapped error %q", err)
 	}
 }

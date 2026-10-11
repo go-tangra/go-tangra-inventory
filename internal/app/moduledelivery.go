@@ -66,7 +66,8 @@ func (a *App) buildModuleDelivery(ctx context.Context, instanceID string) (*modu
 		src = invv1.NewModuleBundleSourceClient(conn)
 	}
 	svc := moduledelivery.New(a.Repo, src, a.Registry, moduledelivery.Config{Enabled: cfg.Enabled, ReportTimeout: cfg.ReportTimeout(),
-		SourceTimeout: cfg.SourceTimeout(), InstanceID: instanceID})
+		SourceTimeout: cfg.SourceTimeout(), SourceService: cfg.SourceService, InstanceID: instanceID})
+	svc.SetLogger(a.Log)
 	if m := a.Freya.Metrics(); m != nil {
 		mm, err := newModuleMetrics(m.Meter("github.com/go-tangra/go-tangra-inventory/v4"))
 		if err != nil {

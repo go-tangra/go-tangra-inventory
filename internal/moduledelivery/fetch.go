@@ -133,6 +133,12 @@ func (s *Service) Fetch(ctx context.Context, a store.Agent, itemID string) (*Bun
 	start := s.now()
 	b, err := s.render(ctx, it)
 	s.metrics.source(s.now().Sub(start), sourceOutcome(err))
+	if err != nil {
+		// The agent only learns NotFound or Unavailable; the operator needs
+		// the source's status code to tell a refusal from a broken path.
+		s.log.Warn("module delivery: bundle source failed", "item", it.ID, "module", it.Module, "source", s.cfg.SourceService,
+			"outcome", sourceOutcome(err), "code", sourceCode(err).String(), "fetches", it.Fetches)
+	}
 	switch {
 	case errors.Is(err, errSourceRefused):
 		return nil, s.failItem(ctx, it, store.DeliveryFailed, store.ReasonSourceRefused, audit.ModuleDeliveryFailed)
@@ -193,12 +199,32 @@ func sourceOutcome(err error) string {
 
 // sourceErr maps a source failure: NotFound (unknown, expired or mismatched
 // join, render budget spent) is a refusal; anything else is retryable. The
-// remote message is never propagated.
+// remote message is never propagated; the status code is kept for the log.
 func sourceErr(err error) error {
-	if status.Code(err) == codes.NotFound {
-		return errSourceRefused
+	f := sourceFailure{err: ErrSourceUnavailable, code: status.Code(err)}
+	if f.code == codes.NotFound {
+		f.err = errSourceRefused
 	}
-	return ErrSourceUnavailable
+	return f
+}
+
+// sourceFailure is a mapped source error with the source's status code.
+type sourceFailure struct {
+	err  error
+	code codes.Code
+}
+
+func (f sourceFailure) Error() string { return f.err.Error() }
+func (f sourceFailure) Unwrap() error { return f.err }
+
+// sourceCode is the source's status code of err (Unknown when err did not
+// come from the source, e.g. a malformed bundle).
+func sourceCode(err error) codes.Code {
+	var f sourceFailure
+	if errors.As(err, &f) {
+		return f.code
+	}
+	return codes.Unknown
 }
 
 // render asks the source for the bundle of it (the verified agent's host)
