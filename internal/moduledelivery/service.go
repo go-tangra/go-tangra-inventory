@@ -3,6 +3,7 @@ package moduledelivery
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"regexp"
 	"sync"
 	"time"
@@ -99,6 +100,7 @@ type Config struct {
 	Enabled       bool
 	ReportTimeout time.Duration // fetched items fail without a report after it
 	SourceTimeout time.Duration // bound of one RenderModuleBundle call
+	SourceService string        // the source's mesh service name, for logs
 	InstanceID    string        // recorded on module_delivery_delivered rows
 }
 
@@ -120,6 +122,7 @@ type Service struct {
 	reg     Registry
 	cfg     Config
 	metrics observer
+	log     *slog.Logger
 	now     func() time.Time
 	newID   func() string
 
@@ -129,7 +132,15 @@ type Service struct {
 
 // New builds the service. src may be nil while the relay is disabled.
 func New(r Repo, src Source, reg Registry, cfg Config) *Service {
-	return &Service{repo: r, src: src, reg: reg, cfg: cfg, now: utcNow, newID: store.NewID, refused: map[string]refusal{}}
+	return &Service{repo: r, src: src, reg: reg, cfg: cfg, now: utcNow, newID: store.NewID, refused: map[string]refusal{},
+		log: slog.New(slog.DiscardHandler)}
+}
+
+// SetLogger installs the logger (nil keeps the current one; default: none).
+func (s *Service) SetLogger(l *slog.Logger) {
+	if l != nil {
+		s.log = l
+	}
 }
 
 func utcNow() time.Time { return time.Now().UTC() }
