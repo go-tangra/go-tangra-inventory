@@ -403,3 +403,26 @@ jobs:
             APP_VERSION=${{ steps.version.outputs.value }}
             VCS_REF=${{ github.sha }}
             AGENT_RELEASE_KEYS=${{ env.AGENT_RELEASE_KEYS }}
+
+  # Module catalogue entry (spec 035): on a release tag, publish
+  # catalogue-entry.json and bundle.zip (tangra-module.yaml, deploy/bundle/)
+  # with a GitHub artifact attestation, so gateways can list and install this
+  # release. Runs after the image is pushed (the action checks it is
+  # pullable) and after the release job created the GitHub release.
+  catalogue:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [docker, release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: go-tangra/go-tangra/.github/actions/catalogue-entry@v4.9.0
+        with:
+          tool-version: v4.9.0
+          permissions-command: go run ./cmd/inventory-catalogue-permissions

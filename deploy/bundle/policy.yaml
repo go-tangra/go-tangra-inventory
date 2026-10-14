@@ -1,0 +1,38 @@
+# Freya service-to-service policy for inventory (rendered for this core's
+# trust domain): deny by default. The gateway forwards browser traffic and
+# asks for module deliveries; asset and ipam pull host reports; the deployer
+# requests certificate deliveries. Each handler additionally checks its
+# config list (host_reports.consumers, cert_delivery.sources,
+# module_delivery.sources). Agents use the ingest edge, not the mesh.
+version: inventory-join-1
+rules:
+  - id: gateway-forwards
+    from: ["spiffe://${TRUST_DOMAIN}/svc/gateway"]
+    to: ["inventory"]
+    operations: ["*"]
+    effect: allow
+  - id: asset-sync
+    from: ["spiffe://${TRUST_DOMAIN}/svc/asset"]
+    to: ["inventory"]
+    operations: ["/inventory.v1.InventoryHostService/ListHosts", "/inventory.v1.InventoryHostService/GetHost",
+                 "/inventory.v1.HostReportService/ListHostReports", "/inventory.v1.HostReportService/GetHostReport",
+                 "/grpc.health.v1.Health/Check"]
+    effect: allow
+  - id: ipam-hostsync
+    from: ["spiffe://${TRUST_DOMAIN}/svc/ipam"]
+    to: ["inventory"]
+    operations: ["/inventory.v1.HostReportService/ListReportTenants",
+                 "/inventory.v1.HostReportService/ListHostReports",
+                 "/inventory.v1.HostReportService/GetHostReport",
+                 "/grpc.health.v1.Health/Check"]
+    effect: allow
+  - id: deployer-cert-delivery
+    from: ["spiffe://${TRUST_DOMAIN}/svc/deployer"]
+    to: ["inventory"]
+    operations: ["/inventory.v1.CertificateDeliveryService/CreateCertificateDelivery",
+                 "/inventory.v1.CertificateDeliveryService/GetCertificateDelivery",
+                 "/inventory.v1.CertificateDeliveryService/PreviewCertificateTargets",
+                 "/inventory.v1.CertificateDeliveryService/VerifyHostCertificates",
+                 "/inventory.v1.CertificateDeliveryService/MarkCertificateRevoked",
+                 "/grpc.health.v1.Health/Check"]
+    effect: allow
