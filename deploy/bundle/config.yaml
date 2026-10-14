@@ -1,0 +1,55 @@
+# inventory configuration, rendered by the gateway's add-module wizard: every
+# ${...} below was filled from the core's own configuration, so the issuer,
+# trust domain and addresses match the core exactly.
+service_name: inventory
+trust_domain: ${TRUST_DOMAIN}
+env: production
+identity:
+  provider: provided
+mesh_enroll:
+  enabled: true
+  enroll_url: ${LCM_ENROLL_URL}
+  lcm_grpc: ${LCM_GRPC}
+  tenant_id: ${MESH_TENANT_ID}
+  token_file: /tokens/enrollment.token
+  state_file: /state/svid.json
+authz: { source: file, path: /app/policy.yaml }
+server: { grpc_addr: 0.0.0.0:9975, http_addr: 0.0.0.0:9976 }
+admin: { addr: 127.0.0.1:9810 }
+discovery:
+  static:
+    gateway: ["${GATEWAY_GRPC}"]
+    auth: ["${AUTH_GRPC}"]
+    lcm: ["${LCM_GRPC}"]
+limits: { max_request_bytes: 16842752 }
+limits_inventory: { max_request_bytes: 16842752, max_snapshot_bytes: 16777216 }
+db:
+  dsn: postgres://inventory_app:${GEN_PASSWORD_2}@inventory-db:5432/inventory?sslmode=verify-full&sslrootcert=/tls/ca.pem
+  migrate_dsn: postgres://postgres:${GEN_PASSWORD_1}@inventory-db:5432/inventory?sslmode=verify-full&sslrootcert=/tls/ca.pem
+  max_conns: 16
+# The core's event bus: platform:events:<tenant> reaches the browser only
+# through the gateway's SSE hub, which reads the core's Valkey. The live agent
+# registry (inv:agent:* keys and channels) shares the connection; only
+# inventory reads those keys.
+valkey:
+  addresses: ["${VALKEY_ADDRESS}"]
+  username: inventory
+  password: "${VALKEY_PASSWORD}"
+  ca_file: /tls/valkey-ca.pem
+kek: { source: env, env: INVENTORY_KEK }
+# Off-mesh ingest edge for the endpoint agents. The certificate is issued by
+# this bundle's local CA for the name inventory-ingest (see README.md); a
+# replaced pair is picked up without a restart.
+ingest:
+  addr: 0.0.0.0:9977
+  tls_cert_file: /ingest-tls/tls.crt
+  tls_key_file: /ingest-tls/tls.key
+  tls_reload_seconds: 60
+registry: { heartbeat_seconds: 30 }
+retention: { days: 90 }
+stale: { after_seconds: 86400 }
+jobs: { workers: 4, interval_seconds: 60, purge_interval_seconds: 3600 }
+events: { enabled: true }
+gateway: { service: gateway, issuer: ${GATEWAY_ISSUER} }
+enroll: { token_ttl_seconds: 3600 }
+cert_delivery: { enabled: true, sources: [deployer], lcm_service: lcm, allow_plaintext_ingest: false }
