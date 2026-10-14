@@ -8,9 +8,19 @@ The module applies its database migrations on start and enrolls for its
 mesh identity with the single-use token.
 
 `private/` holds credentials (the enrolment token, the bundle's TLS keys);
-`.env` and `config.yaml` hold generated passwords and the module KEK. Keep
-them on this host only, and keep a copy of `.env`: without `GEN_KEY_1` the
-stored agent credentials cannot be opened.
+`.env` holds generated passwords and the module KEK; `config.yaml` holds the
+database passwords and the event-bus password you gave. Keep them on this
+host only, and keep a copy of `.env`: without `GEN_KEY_1` the stored agent
+credentials cannot be opened.
+
+**Event bus.** Inventory joins the core's event bus (Valkey, TLS) as user
+`inventory`: the core's Valkey must accept that user from this host. Live UI
+updates (agent online/offline, snapshot received) travel through the stream
+`platform:events:<tenant>`, which the gateway reads from the core's Valkey;
+the live agent registry uses the keys and pub/sub channels `inv:agent:*` on
+the same connection. The user needs at least `~platform:events:*
+~inv:agent:* &inv:agent:cmd:*` and the stream, string, hash, set, key and
+pub/sub commands.
 
 **Agents.** The ingest edge listens on `INGEST_PUBLIC_PORT` with a
 certificate for the name `inventory-ingest` from this bundle's local CA.

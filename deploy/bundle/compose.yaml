@@ -3,7 +3,8 @@
 # Values come from .env (written by the gateway: core addresses, generated
 # passwords and keys, and the host inputs you gave). private/ holds the
 # single-use enrolment token, the mesh CA and this bundle's own TLS material
-# (local CA, server certificates for the database, Valkey and the ingest edge).
+# (local CA, server certificates for the database and the ingest edge). The
+# event bus is the core's Valkey (VALKEY_ADDRESS, TLS, CA from VALKEY_CA_FILE).
 name: tangra-inventory
 services:
   inventory-db:
@@ -22,21 +23,6 @@ services:
       - ./init-db.sh:/docker-entrypoint-initdb.d/10-app-role.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d inventory"]
-      interval: 5s
-      retries: 30
-  # Event bus and live agent registry: TLS only, one ACL user.
-  inventory-valkey:
-    image: valkey/valkey:8.0
-    restart: unless-stopped
-    entrypoint: ["sh", "-c", "install -d -o valkey -m 0700 /tls-vk && install -o valkey -m 0600 /tls/inventory-valkey.key /tls-vk/server.key && install -o valkey -m 0644 /tls/inventory-valkey.crt /tls-vk/server.crt && exec docker-entrypoint.sh \"$$@\"", "--"]
-    command: ["valkey-server", "--port", "0", "--tls-port", "6379",
-      "--tls-cert-file", "/tls-vk/server.crt", "--tls-key-file", "/tls-vk/server.key",
-      "--tls-ca-cert-file", "/tls/ca.pem", "--tls-auth-clients", "no",
-      "--user", "default", "off", "--user", "inventory", "on", ">${GEN_PASSWORD_3}", "~*", "&*", "+@all"]
-    volumes:
-      - ./private/tls:/tls:ro
-    healthcheck:
-      test: ["CMD", "valkey-cli", "--tls", "--cacert", "/tls/ca.pem", "-h", "inventory-valkey", "--user", "inventory", "--pass", "${GEN_PASSWORD_3}", "--no-auth-warning", "ping"]
       interval: 5s
       retries: 30
   # One-shot: hands the ingest key pair and the state directory to the
@@ -66,6 +52,7 @@ services:
       - ./policy.yaml:/app/policy.yaml:ro
       - ./private/enrollment.token:/tokens/enrollment.token:ro
       - ./private/tls/ca.pem:/tls/ca.pem:ro
+      - ${VALKEY_CA_FILE}:/tls/valkey-ca.pem:ro
       - inventory-ingest-tls:/ingest-tls:ro
       - inventory-state:/state
     healthcheck:
@@ -76,7 +63,6 @@ services:
       start_period: 10s
     depends_on:
       inventory-db: { condition: service_healthy }
-      inventory-valkey: { condition: service_healthy }
       inventory-init: { condition: service_completed_successfully }
 volumes:
   inventory-db: {}

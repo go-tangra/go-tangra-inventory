@@ -27,7 +27,15 @@ db:
   dsn: postgres://inventory_app:${GEN_PASSWORD_2}@inventory-db:5432/inventory?sslmode=verify-full&sslrootcert=/tls/ca.pem
   migrate_dsn: postgres://postgres:${GEN_PASSWORD_1}@inventory-db:5432/inventory?sslmode=verify-full&sslrootcert=/tls/ca.pem
   max_conns: 16
-valkey: { addresses: ["inventory-valkey:6379"], username: inventory, password: ${GEN_PASSWORD_3}, ca_file: /tls/ca.pem }
+# The core's event bus: platform:events:<tenant> reaches the browser only
+# through the gateway's SSE hub, which reads the core's Valkey. The live agent
+# registry (inv:agent:* keys and channels) shares the connection; only
+# inventory reads those keys.
+valkey:
+  addresses: ["${VALKEY_ADDRESS}"]
+  username: inventory
+  password: "${VALKEY_PASSWORD}"
+  ca_file: /tls/valkey-ca.pem
 kek: { source: env, env: INVENTORY_KEK }
 # Off-mesh ingest edge for the endpoint agents. The certificate is issued by
 # this bundle's local CA for the name inventory-ingest (see README.md); a
