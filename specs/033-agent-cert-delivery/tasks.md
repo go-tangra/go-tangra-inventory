@@ -308,11 +308,11 @@ can be recreated in v4 and renew in place; quickstart manual 13 passes.
 - [X] T113 [P] Docs: `README.md` (feature overview, agent config, layout, hook), `deploy/README.md` (service config, policies, stack diffs), `SECURITY.md` (key handling statement), `go-tangra-deployer-v4/README.md` (provider, field table incl. overridable fields and the BIG-IP/FortiGate profile options, migration note for v3 `ssl_profile`/`default_ssl_profile` users)
 - [X] T114 Local freya-stack validation with locally built images (quickstart manual 1–13); record results in `specs/033-agent-cert-delivery/checklists/security-review.md` — **done 2026-10-02**: steps 1–12 pass; step 13 not run live (no lab appliances, fake-appliance tests only)
 - [X] T115 Run `/speckit-analyze` consistency check across spec/plan/tasks; fix drift
-- [ ] T116 Release inventory SDK: PR merge, tag `sdk/v4.4.0` (**user confirmation**)
-- [ ] T117 Release inventory v4.7.0: PR merge, tag; approve the `release` environment signing job (**user approval in GitHub**); verify the GitHub release carries the signed agent artifacts (**user confirmation**)
-- [ ] T118 Deployer: replace the temporary `replace` with `github.com/go-tangra/go-tangra-inventory/sdk/v4 v4.4.0` in `go-tangra-deployer-v4/go.mod`; `GOWORK=off go build ./... && go test ./...`
-- [ ] T119 Release deployer v4.4.0 (on top of the released hotfix `fix/provider-endpoint-exfil`) and push lcm policy change (`go-tangra-lcm-v4` PR, no release needed) (**user confirmation**)
-- [ ] T120 Production (**user confirmation**, backups first): pin inventory 4.7.0 and deployer 4.4.0 in go-tangra-docker, apply policies/configs from contracts/mesh-policy.md, deploy, migration 0010, "Upgrade all" agents, quickstart manual 1–3 on one production host before enabling auto-deploy targets
+- [X] T116 Release inventory SDK: PR merge, tag `sdk/v4.4.0` (**user confirmation**)
+- [X] T117 Release inventory v4.7.0: PR merge, tag; approve the `release` environment signing job (**user approval in GitHub**); verify the GitHub release carries the signed agent artifacts (**user confirmation**)
+- [X] T118 Deployer: replace the temporary `replace` with `github.com/go-tangra/go-tangra-inventory/sdk/v4 v4.4.0` in `go-tangra-deployer-v4/go.mod`; `GOWORK=off go build ./... && go test ./...`
+- [X] T119 Release deployer v4.4.0 (on top of the released hotfix `fix/provider-endpoint-exfil`) and push lcm policy change (`go-tangra-lcm-v4` PR, no release needed) (**user confirmation**)
+- [ ] T120 Production (**user confirmation**, backups first): pin inventory 4.7.0 and deployer 4.4.0 in go-tangra-docker, apply policies/configs from contracts/mesh-policy.md, deploy, migration 0010, "Upgrade all" agents, quickstart manual 1–3 on one production host before enabling auto-deploy targets — **2026-10-02**: inventory 4.7.0, deployer 4.4.0, lcm 4.6.2 live in production (backups `/root/backups/*-pre-033-20261002-071636*`, policies/configs/pins applied, migration 11, all registered, `cert_delivery` enabled); open: "Upgrade all" agents and quickstart 1–3 on one production host before auto-deploy targets
 
 ---
 
