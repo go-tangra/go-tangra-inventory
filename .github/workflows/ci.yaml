@@ -51,6 +51,12 @@ jobs:
             go.sum
             sdk/go.sum
 
+      # Help pages (docs/help): front-matter, slugs, links, images, limits.
+      - name: Lint help pages
+        uses: go-tangra/go-tangra/.github/actions/docs-lint@v4.10.0
+        with:
+          tool-version: v4.10.0
+
       - name: go vet (service)
         run: go vet ./...
 

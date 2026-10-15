@@ -16,6 +16,7 @@ import (
 
 	"github.com/go-tangra/go-tangra-lcm/sdk/v4/pkg/lcmidentity"
 	"github.com/go-tangra/go-tangra/v4"
+	"github.com/go-tangra/go-tangra/v4/helpdocs"
 	"github.com/valkey-io/valkey-go"
 	"google.golang.org/grpc"
 
@@ -23,6 +24,7 @@ import (
 	"github.com/go-tangra/go-tangra-auth/sdk/v4/pkg/authclient"
 	"github.com/go-tangra/go-tangra-portal/sdk/v4/pkg/gatewayclient"
 
+	"github.com/go-tangra/go-tangra-inventory/v4/docs"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/autoenroll"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/backup"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/config"
@@ -68,6 +70,7 @@ type App struct {
 	Hub      *stream.Hub
 	Registry registry.Registry
 	Enroll   *enroll.Service
+	Docs     *helpdocs.Bundle // embedded help pages, served to the gateway
 
 	closers []func()
 	workers []func(context.Context)
@@ -81,6 +84,11 @@ func Build(ctx context.Context, cfg config.Config, o Options) (a *App, err error
 		handler = slog.NewJSONHandler(os.Stderr, nil)
 	}
 	a.Log = slog.New(handler)
+
+	// The help pages are built in; a broken tree refuses to start (CI lints it).
+	if a.Docs, err = helpdocs.Load(docs.Help(), inventorymanifest.Module); err != nil {
+		return nil, fmt.Errorf("help docs: %w", err)
+	}
 
 	// Mesh identity: enroll for the module's own SPIFFE SVID over lcm.
 	fopts := append([]freya.Option{freya.WithLogger(handler)}, o.Freya...)
@@ -236,6 +244,8 @@ func Build(ctx context.Context, cfg config.Config, o Options) (a *App, err error
 		// while cert_delivery.enabled is false.
 		CertDelivery: certSvc,
 	})
+	// Help pages for the gateway only; registered before the "/" catch-all.
+	a.Freya.HTTP().Handle(helpdocs.BundlePath, helpdocs.NewHandler(a.Docs, helpdocs.AllowServices(cfg.Gateway.Service)))
 	a.Freya.HTTP().HandlePrefix("/", a.HTTP.Handler())
 
 	// Service-to-service gRPC surface (inventory.v1), SPIFFE mTLS, not gateway-proxied.
@@ -429,6 +439,7 @@ func (a *App) register(ctx context.Context) {
 			continue
 		}
 		client, err = gatewayclient.New(conn, gatewayclient.Options{Manifest: man, HTTPURL: "https://" + httpEP.Host, GRPCTarget: grpcEP.Host, Logger: a.Log,
+			DocsDigest: a.Docs.Digest, // the gateway fetches the help bundle when it changes
 			OnState: func(s gatewayclient.State) {
 				a.Log.Info("gateway lease", "registered", s.Registered, "lease", s.LeaseID, "err", s.Err)
 			}})
