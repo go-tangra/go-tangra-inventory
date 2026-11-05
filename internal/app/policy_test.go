@@ -32,8 +32,9 @@ func inventoryOps(t *testing.T) []string {
 	return ops
 }
 
-// The ipam-hostsync rule admits svc/ipam to the three HostReportService RPCs
-// and health, and to nothing else in inventory.
+// The ipam-hostsync rule admits svc/ipam to the three HostReportService RPCs,
+// RefreshInventory (device re-sync) and health, and to nothing else in
+// inventory.
 func TestPolicyIPAMHostSync(t *testing.T) {
 	f, err := os.Open("../../deploy/policy.yaml")
 	if err != nil {
@@ -46,10 +47,11 @@ func TestPolicyIPAMHostSync(t *testing.T) {
 	}
 	ipam := identity.ForService("example.org", "ipam")
 	allowed := map[string]bool{
-		"/inventory.v1.HostReportService/ListReportTenants": true,
-		"/inventory.v1.HostReportService/ListHostReports":   true,
-		"/inventory.v1.HostReportService/GetHostReport":     true,
-		"/grpc.health.v1.Health/Check":                      true,
+		"/inventory.v1.HostReportService/ListReportTenants":    true,
+		"/inventory.v1.HostReportService/ListHostReports":      true,
+		"/inventory.v1.HostReportService/GetHostReport":        true,
+		"/inventory.v1.InventoryAgentService/RefreshInventory": true,
+		"/grpc.health.v1.Health/Check":                         true,
 	}
 	ops := append(inventoryOps(t), "/grpc.health.v1.Health/Check", "/grpc.health.v1.Health/Watch")
 	seen := 0
