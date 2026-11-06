@@ -133,3 +133,35 @@ func TestExampleModuleHook(t *testing.T) {
 		t.Fatal("nfpm.yaml does not ship the example hook")
 	}
 }
+
+// TestAutoEnrollByHand: editing the packaged agent.yaml by hand (set
+// ingest_endpoint, add auto_enroll; deploy/README.md) gives a valid config
+// that keeps the packaged credential and state paths.
+func TestAutoEnrollByHand(t *testing.T) {
+	raw, err := os.ReadFile("agent.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lines []string
+	for _, l := range strings.Split(string(raw), "\n") {
+		if strings.HasPrefix(l, "ingest_endpoint:") {
+			l = "ingest_endpoint: portal.example.org:9977"
+		}
+		lines = append(lines, l)
+	}
+	edited := strings.Join(lines, "\n") + "auto_enroll:\n  key_id: ak_0123456789abcdef01234567\n  key_file: /etc/inventory-agent/auto-enroll.key\n"
+	path := filepath.Join(t.TempDir(), "agent.yaml")
+	if err := os.WriteFile(path, []byte(edited), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadAgent(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("edited packaged config refused: %v", err)
+	}
+	if cfg.CredentialFile != "/var/lib/inventory-agent/credential" || cfg.StateFile != "/var/lib/inventory-agent/state.json" || !cfg.AutoEnroll.Configured() {
+		t.Fatalf("unexpected config: credential=%q state=%q auto=%+v", cfg.CredentialFile, cfg.StateFile, cfg.AutoEnroll)
+	}
+}

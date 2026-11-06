@@ -37,25 +37,20 @@ offers the matching `agent.yaml` lines.
 
 ## 3. Configure every server
 
-Configuration management installs the package and writes two files on each
-server. The secret, mode `0600`:
+Configuration management installs the package and runs one command on each
+server, as root:
 
 ```sh
-install -m 0600 /dev/stdin /etc/inventory-agent/auto-enroll.key <<< '<the aks_ secret>'
+inventory-agent configure -ingest inventory.example.com:9977 \
+  -auto-enroll-key-id ak_0123456789abcdef01234567 \
+  -auto-enroll-secret-stdin <<< '<the aks_ secret>'
 ```
 
-and `/etc/inventory-agent/agent.yaml`:
+It stores the secret in `/etc/inventory-agent/auto-enroll.key` (mode `0600`),
+sets `ingest_endpoint` and `auto_enroll` in `/etc/inventory-agent/agent.yaml`
+and starts the service. The package already created the directories.
 
-```yaml
-ingest_endpoint: inventory.example.com:9977
-credential_file: /var/lib/inventory-agent/credential
-state_file: /var/lib/inventory-agent/state.json
-auto_enroll:
-  key_id: ak_0123456789abcdef01234567   # the Key ID from step 2
-  key_file: /etc/inventory-agent/auto-enroll.key
-```
-
-Then `systemctl start inventory-agent`. The agent uses the key only when it
+The agent uses the key only when it
 has no credential yet and there is no token file. It never sends the secret:
 it signs its request with it, and the request is accepted only from an
 address in the key's networks, with a clock within a few minutes of the

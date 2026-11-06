@@ -147,11 +147,19 @@ const columns: Column<AutoEnrollKey>[] = [
   { key: 'created_at', label: 'Created', hideOnStack: true, sortable: true, defaultDir: 'desc', format: (k) => fmt(k.created_at) },
 ]
 
+// `inventory-agent configure` (cmd/inventory-agent/configure.go) writes the
+// settings into the packaged agent.yaml, stores the secret read from stdin in
+// a 0600 key file and starts the service; the package creates the
+// directories. The secret goes through stdin, not argv.
 const keyFile = '/etc/inventory-agent/auto-enroll.key'
-const configSnippet = computed(() =>
-  issued.value ? `credential_file: /var/lib/inventory-agent/credential\nstate_file: /var/lib/inventory-agent/state\nauto_enroll:\n  key_id: ${issued.value.key.key_id}\n  key_file: ${keyFile}` : '',
+const configureCommand = (keyID: string, secret: string): string => `inventory-agent configure -ingest <host>:9977 -auto-enroll-key-id ${keyID} -auto-enroll-secret-stdin <<< '${secret}'`
+const configureExample = configureCommand('<key id ak_…>', '<secret aks_…>')
+const configureSnippet = computed(() => (issued.value ? configureCommand(issued.value.key.key_id, issued.value.secret) : ''))
+// Without configure: flags only override the config file, whose
+// credential_file and state_file auto-enrollment needs.
+const cliSnippet = computed(() =>
+  issued.value ? `inventory-agent -daemon -config /etc/inventory-agent/agent.yaml -ingest <host>:9977 -auto-enroll-key-id ${issued.value.key.key_id} -auto-enroll-key-file ${keyFile}` : '',
 )
-const cliSnippet = computed(() => (issued.value ? `inventory-agent -daemon -ingest <host>:9977 -auto-enroll-key-id ${issued.value.key.key_id} -auto-enroll-key-file ${keyFile}` : ''))
 </script>
 
 <template>
@@ -163,6 +171,11 @@ const cliSnippet = computed(() => (issued.value ? `inventory-agent -daemon -inge
         Agents (for example deployed by go-tangra-client) can enroll without a single-use token by proving that they hold an enrollment key. The key itself is never sent:
         the agent signs its request, which is accepted only from the key's networks, within {{ Math.round(settings.window_seconds / 60) }} minutes of the agent's clock and only once.
       </p>
+      <p class="mb-1 text-sm text-base-content/70">
+        On a host with the <code>tangra-inventory-agent</code> package installed, one command as root configures the agent with a key and starts it (the console shows it filled in
+        when a key is created or rotated):
+      </p>
+      <pre class="mb-3 overflow-x-auto rounded-box bg-base-200 p-3 text-xs" data-test="auto-enroll-example">{{ configureExample }}</pre>
       <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
         <UiSwitch id="auto-enroll-enabled" :model-value="settings.enabled" label="Allow agents to enroll with a key" :disabled="switching" data-test="auto-enroll-enabled" @update:model-value="toggle" />
         <UiButton icon="mdi-key-plus" data-test="auto-enroll-new" @click="openCreate">New key</UiButton>
@@ -186,11 +199,14 @@ const cliSnippet = computed(() => (issued.value ? `inventory-agent -daemon -inge
         <UiInput id="auto-key-id" :model-value="issued.key.key_id" label="Key ID" readonly data-test="auto-key-id" />
         <UiSecretField id="auto-key-secret" :model-value="issued.secret" label="Secret" readonly class="mt-3" data-test="auto-key-secret" />
         <div class="mt-2 flex justify-end"><UiCopyButton :value="issued.secret" label="Copy secret" /></div>
-        <p class="mt-4 text-sm text-base-content/70">Write the secret to <code>{{ keyFile }}</code> (readable by the agent only), then configure the agent:</p>
-        <pre class="mt-2 overflow-x-auto rounded-box bg-base-200 p-3 text-xs" data-test="auto-key-config">{{ configSnippet }}</pre>
-        <div class="mt-1 flex justify-end"><UiCopyButton :value="configSnippet" label="Copy configuration" /></div>
-        <p class="mt-3 text-sm text-base-content/70">or pass it on the command line:</p>
-        <pre class="mt-2 overflow-x-auto rounded-box bg-base-200 p-3 text-xs">{{ cliSnippet }}</pre>
+        <p class="mt-4 text-sm text-base-content/70">
+          On a host with the <code>tangra-inventory-agent</code> package installed, run as root with your ingest host filled in. It stores the secret in
+          <code>{{ keyFile }}</code> (mode 0600), writes the settings into <code>/etc/inventory-agent/agent.yaml</code> and starts the service, which enrolls on its first start:
+        </p>
+        <pre class="mt-2 overflow-x-auto rounded-box bg-base-200 p-3 text-xs" data-test="auto-key-config">{{ configureSnippet }}</pre>
+        <div class="mt-1 flex justify-end"><UiCopyButton :value="configureSnippet" label="Copy command" /></div>
+        <p class="mt-3 text-sm text-base-content/70">To run the agent in the foreground instead, with the secret already in <code>{{ keyFile }}</code>:</p>
+        <pre class="mt-2 overflow-x-auto rounded-box bg-base-200 p-3 text-xs" data-test="auto-key-cli">{{ cliSnippet }}</pre>
       </template>
       <UiForm v-else :form="form">
         <div class="flex flex-col gap-3">

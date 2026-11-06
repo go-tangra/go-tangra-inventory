@@ -45,9 +45,10 @@ In the containerized platform stack it comes up with one command; see
 
 ```
 inventory-agent -ingest <host:port> -token <enrollment-token>   # one-shot enroll+collect+submit
-inventory-agent -ingest <host:port> -auto-enroll-key-id ak_… -auto-enroll-key-file <file>   # same, with an auto-enrollment key
+inventory-agent -config agent.yaml -ingest <host:port> -auto-enroll-key-id ak_… -auto-enroll-key-file <file>   # same, with an auto-enrollment key (agent.yaml sets credential_file + state_file)
 inventory-agent -config agent.yaml -daemon                      # enroll once, submit on an interval, hold a refresh stream
 inventory-agent -o ./out                                        # collect and write JSON (no submit)
+inventory-agent configure -ingest <host:port> -auto-enroll-key-id ak_… -auto-enroll-secret-stdin <<< 'aks_…'   # write the packaged agent.yaml + key file, start the service
 inventory-agent -service install | uninstall                    # Windows service only
 ```
 
@@ -99,10 +100,16 @@ deleted at any time. Its secret (`aks_…`) is shown once, at creation or
 rotation; afterwards only the public key id (`ak_…`) is visible.
 
 ```sh
+sudo inventory-agent configure -ingest <host:9977> -auto-enroll-key-id ak_… -auto-enroll-secret-stdin <<< '<secret aks_… from the console>'
+# configure stores the secret in /etc/inventory-agent/auto-enroll.key (0600), sets
+# ingest_endpoint and auto_enroll in /etc/inventory-agent/agent.yaml (comments and
+# other settings kept; nothing written if the result is invalid), then enables and
+# restarts inventory-agent (-no-start: only write). By hand instead:
 sudo install -m 0600 /dev/stdin /etc/inventory-agent/auto-enroll.key <<< '<secret aks_… from the console>'
 sudoedit /etc/inventory-agent/agent.yaml     # auto_enroll: { key_id: ak_…, key_file: /etc/inventory-agent/auto-enroll.key }
 sudo systemctl start inventory-agent
-# or: inventory-agent -daemon -ingest <host:9977> -auto-enroll-key-id ak_… -auto-enroll-key-file /etc/inventory-agent/auto-enroll.key
+# or: inventory-agent -daemon -config /etc/inventory-agent/agent.yaml -ingest <host:9977> -auto-enroll-key-id ak_… -auto-enroll-key-file /etc/inventory-agent/auto-enroll.key
+#     (-config is required: credential_file and state_file come from it)
 ```
 
 The agent uses the key only when it has no stored credential and no token

@@ -5,7 +5,8 @@
 //
 // Subcommands (feature 023): `update [-check]` checks the enrolled platform
 // for a newer agent and upgrades; `upgrade-apply -state <file>` is the helper
-// the agent itself starts to install a verified upgrade.
+// the agent itself starts to install a verified upgrade; `configure` writes
+// command-line settings into the packaged agent.yaml and starts the service.
 package main
 
 import (
@@ -41,6 +42,8 @@ func main() {
 			os.Exit(runUpdate(os.Args[2:], os.Stderr, defaultDeps()))
 		case "upgrade-apply":
 			os.Exit(runApply(os.Args[2:], os.Stderr, defaultDeps()))
+		case "configure":
+			os.Exit(runConfigure(os.Args[2:], os.Stdin, os.Stderr, defaultConfigureDeps()))
 		}
 	}
 	var (
