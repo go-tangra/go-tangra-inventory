@@ -134,10 +134,10 @@ func TestExampleModuleHook(t *testing.T) {
 	}
 }
 
-// TestAutoEnrollConsoleSteps: the console's steps (AutoEnrollCard.vue) on the
-// packaged agent.yaml (set ingest_endpoint, append auto_enroll) give a valid
-// config that keeps the packaged credential and state paths.
-func TestAutoEnrollConsoleSteps(t *testing.T) {
+// TestAutoEnrollByHand: editing the packaged agent.yaml by hand (set
+// ingest_endpoint, add auto_enroll; deploy/README.md) gives a valid config
+// that keeps the packaged credential and state paths.
+func TestAutoEnrollByHand(t *testing.T) {
 	raw, err := os.ReadFile("agent.yaml")
 	if err != nil {
 		t.Fatal(err)
