@@ -39,3 +39,26 @@ func TestResolveConfigAutoEnrollOverrides(t *testing.T) {
 		t.Fatalf("auto-enroll flags not applied: %+v", cfg.AutoEnroll)
 	}
 }
+
+// TestAutoEnrollCommandNeedsPackagedConfig pins the console's foreground
+// command (AutoEnrollCard.vue): with the packaged agent.yaml it is valid;
+// flags alone lack credential_file and state_file.
+func TestAutoEnrollCommandNeedsPackagedConfig(t *testing.T) {
+	f := flags{ingest: "portal.example.org:9977", autoKeyID: "ak_0123456789abcdef01234567", autoKeyFile: "/etc/inventory-agent/auto-enroll.key"}
+
+	cfg, err := resolveConfig(filepath.Join("..", "..", "packaging", "agent.yaml"), f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("command with -config refused: %v", err)
+	}
+
+	cfg, err = resolveConfig("", f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("command without -config accepted; the console may drop -config")
+	}
+}
