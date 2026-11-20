@@ -228,6 +228,11 @@ func Build(ctx context.Context, cfg config.Config, o Options) (a *App, err error
 	if err != nil {
 		return nil, err
 	}
+	// Teleport join relay (feature 038): off unless teleport_join.enabled.
+	teleportSvc, err := a.buildTeleportJoin(ctx, instanceID)
+	if err != nil {
+		return nil, err
+	}
 
 	// Mesh HTTP surface (reached only through the gateway).
 	hopts := []httpapi.Option{httpapi.WithVerifier(a.Verifier)}
@@ -261,6 +266,9 @@ func Build(ctx context.Context, cfg config.Config, o Options) (a *App, err error
 		// ModuleDeliveryService (gateway add-module wizard): the inbound
 		// policy and module_delivery.sources both have to admit the caller.
 		ModuleDelivery: moduleSvc, ModuleSources: cfg.ModuleDelivery.Sources,
+		// TeleportJoinDeliveryService (teleport module): the inbound policy
+		// and teleport_join.sources both have to admit the caller.
+		TeleportJoin: teleportSvc, TeleportSources: cfg.TeleportJoin.Sources,
 	})
 
 	// Off-mesh INGEST EDGE: a separate, network-isolated gRPC listener that
@@ -276,7 +284,10 @@ func Build(ctx context.Context, cfg config.Config, o Options) (a *App, err error
 		WithCertDelivery(certSvc, cfg.CertDelivery.MaxConcurrentFetches, cfg.Ingest.Insecure && !cfg.CertDelivery.AllowPlaintextIngest).
 		// Module bundles (secrets) likewise only over TLS unless
 		// module_delivery.allow_plaintext_ingest is set.
-		WithModuleDelivery(moduleSvc, cfg.ModuleDelivery.MaxConcurrentFetches, cfg.Ingest.Insecure && !cfg.ModuleDelivery.AllowPlaintextIngest)
+		WithModuleDelivery(moduleSvc, cfg.ModuleDelivery.MaxConcurrentFetches, cfg.Ingest.Insecure && !cfg.ModuleDelivery.AllowPlaintextIngest).
+		// Teleport join tokens likewise only over TLS unless
+		// teleport_join.allow_plaintext_ingest is set.
+		WithTeleportJoin(teleportSvc, cfg.TeleportJoin.MaxConcurrentFetches, cfg.Ingest.Insecure && !cfg.TeleportJoin.AllowPlaintextIngest)
 	var ingestTLS *ingest.CertLoader
 	if !cfg.Ingest.Insecure {
 		if ingestTLS, err = ingest.NewCertLoader(cfg.Ingest.TLSCertFile, cfg.Ingest.TLSKeyFile); err != nil {
@@ -288,7 +299,7 @@ func Build(ctx context.Context, cfg config.Config, o Options) (a *App, err error
 	// Maintenance: mark stale hosts + purge old snapshots on an interval;
 	// seed releases, sweep upgrade requests, apply release retention.
 	a.workers = append(a.workers, a.maintenance, a.upgradeWorker(relSvc, upgSvc), a.certWorker(certSvc),
-		a.moduleWorker(moduleSvc))
+		a.moduleWorker(moduleSvc), a.teleportWorker(teleportSvc))
 	return a, nil
 }
 
@@ -324,7 +335,7 @@ func (a *App) serveIngest(ctx context.Context, s *ingest.Server, tlsCert *ingest
 }
 
 // maintenance marks hosts stale and purges snapshots and terminal certificate
-// and module delivery items beyond the retention window.
+// and module delivery and Teleport join items beyond the retention window.
 func (a *App) maintenance(ctx context.Context) {
 	t := time.NewTicker(a.Cfg.PurgeInterval())
 	defer t.Stop()
@@ -350,6 +361,12 @@ func (a *App) maintenance(ctx context.Context) {
 				a.Log.Warn("purge module delivery items", "err", err)
 			} else if n > 0 {
 				a.Log.Info("purged old module delivery items", "count", n)
+			}
+			// And terminal Teleport join items (feature 038).
+			if n, err := a.Repo.PurgeTeleportItems(ctx, now.Add(-a.Cfg.RetentionWindow())); err != nil {
+				a.Log.Warn("purge teleport join items", "err", err)
+			} else if n > 0 {
+				a.Log.Info("purged old teleport join items", "count", n)
 			}
 		}
 	}

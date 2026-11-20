@@ -58,6 +58,9 @@ type Server struct {
 
 	// Module delivery (feature 037); nil until WithModuleDelivery.
 	moduleEdge *moduleEdge
+
+	// Teleport join delivery (feature 038); nil until WithTeleportJoin.
+	teleportEdge *teleportEdge
 }
 
 // New builds an ingest Server. A non-positive maxBytes falls back to
@@ -188,10 +191,12 @@ func (s *Server) StreamCommands(req *inventoryv1.StreamRequest, stream inventory
 
 	// Upgrade requests created while the agent was offline (or whose push
 	// was lost) are delivered on every connect; the agent deduplicates.
-	// Then the certificate deliveries (feature 033) and module deliveries
-	// (feature 037) waiting for it, likewise replayed on every connect.
+	// Then the certificate deliveries (feature 033), module deliveries
+	// (feature 037) and Teleport joins (feature 038) waiting for it,
+	// likewise replayed on every connect.
 	replay := append(s.pendingCommands(ctx, agent), s.certCommands(ctx, agent)...)
-	for _, cmd := range append(replay, s.moduleCommands(ctx, agent)...) {
+	replay = append(replay, s.moduleCommands(ctx, agent)...)
+	for _, cmd := range append(replay, s.teleportCommands(ctx, agent)...) {
 		if err := stream.Send(commandToPB(cmd)); err != nil {
 			return err
 		}

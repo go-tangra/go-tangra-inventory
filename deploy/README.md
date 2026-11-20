@@ -294,8 +294,8 @@ in-memory), `retention` (`days`), `stale` (`after_seconds`), `jobs`, `events`,
 `gateway`, `enroll` (`token_ttl_seconds` — minted enrollment-token lifetime),
 `mesh_enroll` (the server's own SVID enrollment), `limits_inventory`
 (`max_request_bytes`, `max_snapshot_bytes`), `agent_releases` (agent
-self-upgrade, see [above](#agent-self-upgrade)), `cert_delivery` and
-`module_delivery` (see below), and `host_reports`
+self-upgrade, see [above](#agent-self-upgrade)), `cert_delivery`,
+`module_delivery` and `teleport_join` (see below), and `host_reports`
 (`consumers` — mesh service names allowed to call HostReportService, default
 `[ipam, asset]` (asset reads the virtualization role for its inventory-sync filter); `max_page_bytes` — bound of one ListHostReports page, default 3 MiB). Framework `server`/`admin`/
 `discovery` sections supply the mesh gRPC/HTTP and admin listeners.
@@ -561,6 +561,116 @@ row per actor and reason in 10 s).
 `inventory.module_delivery_refusals` (reason) and
 `inventory.module_delivery_source_seconds` (outcome: ok, refused,
 bad_bundle, unavailable).
+
+## Teleport join (teleport module SSH-node enrollment, feature 038)
+
+The teleport module (go-tangra-teleport, `specs/002-agent-ssh-enrollment`)
+enrolls inventory hosts as Teleport SSH nodes through their enrolled
+agents. It calls `inventory.v1.TeleportJoinDeliveryService` (mesh only,
+references only: host id, cluster id, its own enrollment id): inventory
+stores one item per host and cluster and pushes a `TELEPORT_JOIN` command
+carrying the item id. When the agent pulls the item with
+`FetchTeleportJoin`, inventory asks the teleport module for the join
+material at that moment (`inventory.v1.TeleportJoinSource/RenderTeleportJoin`,
+served by the teleport module, for the verified agent's host): a
+single-use provision token (role Node), the proxy address, the CA pins, the
+cluster's Teleport version and static `tangra.io/` labels. Inventory relays
+it to the item's own agent and keeps no token material anywhere (not in
+the database, the audit, logs or metrics). Server switch (off by default):
+
+```yaml
+teleport_join:
+  enabled: true
+  sources: [teleport]             # mesh services allowed to call TeleportJoinDeliveryService (on top of the policy)
+  source_service: teleport        # discovery name of the service serving TeleportJoinSource
+  report_timeout_minutes: 30      # 15-180; keep it above the agents' teleport.timeout_minutes
+  max_concurrent_fetches: 20      # 1-500 per replica (one per agent)
+  source_timeout_seconds: 10      # 2-120, one RenderTeleportJoin call
+  allow_plaintext_ingest: false   # dev stack with ingest.insecure only; refused in production
+```
+
+Policies: inventory's policy has the rule `teleport-join` (in
+`deploy/policy.yaml` and the bundle):
+
+```yaml
+  - id: teleport-join
+    from: ["spiffe://example.org/svc/teleport"]
+    to: ["inventory"]
+    operations: ["/inventory.v1.TeleportJoinDeliveryService/*",
+                 "/grpc.health.v1.Health/Check"]
+    effect: allow
+```
+
+and the handler additionally requires the caller in
+`teleport_join.sources`. The teleport module's policy needs a rule that
+lets inventory call `/inventory.v1.TeleportJoinSource/RenderTeleportJoin`,
+and inventory needs `discovery.static.teleport`. Agents need the release
+with feature 038 and the `teleport` section of `agent.yaml` (enabled by
+default, see `packaging/agent.yaml`).
+
+**Agent.** A Linux agent always announces `teleport.v1`; with
+`teleport.enabled: false` it answers every join with `disabled_locally`.
+It handles one join at a time (another is `busy`) and refuses, before
+fetching (so the token is not spent), a host without systemd or on an
+architecture other than amd64/arm64 (`unsupported_platform`) and a host
+that already has `/etc/teleport.yaml` or an active or enabled teleport unit
+(`already_installed`). It validates the material strictly
+(`invalid_material`: version `x.y.z`; proxy `host:port`, DNS name or a
+non-loopback, non-link-local IP; 1-4 `sha256:<hex>` CA pins; a printable
+token without whitespace of at most 256 bytes; at most 64 labels under
+`tangra.io/`), reports `installing`, downloads
+`https://cdn.teleport.dev/teleport-v<version>-linux-<arch>-bin.tar.gz`
+(fixed origin; at most 512 MiB) and checks it against the published
+`.sha256` (`checksum_mismatch`), installs only the `teleport` binary to
+`/usr/local/bin/teleport` (0755), writes `/etc/teleport.yaml` (0600:
+`version: v3`, nodename = hostname, `data_dir: /var/lib/teleport`, token
+join, `proxy_server`, `ca_pin`, only `ssh_service` with the labels) and
+`/etc/systemd/system/teleport.service`, runs `systemctl daemon-reload` and
+`systemctl enable --now teleport`, and reports `joined` with the node's
+`/var/lib/teleport/host_uuid` once the unit is active and that file
+exists, within `teleport.timeout_minutes` (default 15). Any failure after
+the configuration was written rewrites it with an empty `token_name` and
+stops and disables the unit (`download_failed`, `install_failed`,
+`join_failed`, `timeout`); such a token-free configuration of the agent
+does not count as `already_installed`, so the join can be retried.
+
+**Eligibility.** `ListTeleportJoinTargets` (by query or host ids) reports
+each host's facts (hostname, OS, architecture, manufacturer, model, tags)
+for the module's labels, and its capability: `enabled`, `upgrade_required`
+(agent without `teleport.v1`), `not_supported_platform` (not Linux),
+`no_agent`, `ambiguous_agent` or `retired`. `CreateTeleportJoin` refuses any
+other host with `FailedPrecondition` whose message is exactly the reason
+token, stores nothing and audits `teleport_join_refused`; while
+`teleport_join.enabled` is false every method answers `FailedPrecondition`
+`disabled_on_server`. A repeated create with the same enrollment id returns
+the existing item with `created: false`; a new enrollment for the same host
+and cluster supersedes the active one. `GetTeleportJoins` reads up to 200
+items by enrollment id; `CancelTeleportJoin` cancels an active item.
+
+**Lifecycle.** An item is `pending` (agent offline: replayed, at most 50
+per connect, until it expires), `delivered`, `fetched` (material relayed;
+at most 5 fetches, each counted even when the source fails), `installing`
+and ends `joined` (with the node host uuid), `failed`, `unsupported`,
+`superseded`, `expired` or `cancelled`. It fails with `source_refused` when
+the teleport module answers `NotFound`, `fetch_budget` after five fetches,
+and `report_timeout` when a fetched or installing item is not reported
+within `report_timeout_minutes`. A report for a terminal item or a
+repeated report answers `accepted: false`; report details are sanitised
+and at most 256 bytes. Every transition writes its audit row in the same
+transaction (`teleport_join_created`, `_superseded`, `_delivered`,
+`_fetched`, `_installing`, `_joined`, `_failed`, `_unsupported`, `_expired`,
+`_cancelled`, `_refused`) with ids, state and reason only.
+
+**Refusals.** A fetch or report for an item that is not the caller's own,
+not active or out of fetches answers `NotFound` and is audited as
+`teleport_join_refused` (reason `not_found`, `not_active`, `fetch_limit`,
+`plaintext`, `source_not_allowed`, `not_fetched`; at most one row per actor
+and reason in 10 s).
+
+**Metrics.** `inventory.teleport_joins` (state, reason),
+`inventory.teleport_join_refusals` (reason) and
+`inventory.teleport_join_source_seconds` (outcome: ok, refused,
+bad_material, unavailable).
 
 ## On-demand refresh & live status
 

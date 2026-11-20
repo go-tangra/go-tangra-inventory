@@ -31,16 +31,29 @@ const (
 	// CommandModule asks the agent to fetch and write the module bundle of
 	// a delivery item (feature 037).
 	CommandModule = "module"
+	// CommandTeleportJoin asks the agent to fetch the join material of a
+	// Teleport join item, install Teleport and join (feature 038).
+	CommandTeleportJoin = "teleport_join"
 )
 
 // Command is a control message pushed to a connected agent. It travels as
 // JSON through the Valkey registry, so its payloads carry identifiers only.
 type Command struct {
-	ID          string              `json:"id"`
-	Type        string              `json:"type"` // refresh | upgrade | certificate | module
-	Upgrade     *UpgradePayload     `json:"upgrade,omitempty"`
-	Certificate *CertificatePayload `json:"certificate,omitempty"`
-	Module      *ModulePayload      `json:"module,omitempty"`
+	ID           string               `json:"id"`
+	Type         string               `json:"type"` // refresh | upgrade | certificate | module | teleport_join
+	Upgrade      *UpgradePayload      `json:"upgrade,omitempty"`
+	Certificate  *CertificatePayload  `json:"certificate,omitempty"`
+	Module       *ModulePayload       `json:"module,omitempty"`
+	TeleportJoin *TeleportJoinPayload `json:"teleport_join,omitempty"`
+}
+
+// TeleportJoinPayload asks an agent to join Teleport with the material of
+// item ItemID (feature 038). It carries ids only, never the join token: the
+// agent pulls the material with FetchTeleportJoin over its own
+// authenticated ingest connection.
+type TeleportJoinPayload struct {
+	ItemID  string `json:"item_id"`
+	Attempt int    `json:"attempt,omitempty"`
 }
 
 // ModulePayload asks an agent to write the module bundle of delivery item

@@ -116,6 +116,7 @@ type Store interface {
 	AutoEnrollStore
 	CertDeliveryStore
 	ModuleDeliveryStore
+	TeleportJoinStore
 }
 
 // ArtifactOpener opens the content of one artifact of a release being
@@ -359,4 +360,47 @@ type ModuleDeliveryStore interface {
 	// PurgeModuleItems deletes (system scope) terminal items last updated
 	// before olderThan.
 	PurgeModuleItems(ctx context.Context, olderThan time.Time) (int64, error)
+}
+
+// NewTeleportItem is a Teleport join item with its audit rows, created in
+// one transaction by CreateTeleportItem (feature 038).
+type NewTeleportItem struct {
+	Item  store.TeleportJoinItem
+	Audit []store.AuditRow
+	// SupersedeAudit builds the audit row of an older active item of the
+	// same host and cluster that the new item replaces (nil: none).
+	SupersedeAudit func(old store.TeleportJoinItem, newItemID string) store.AuditRow
+}
+
+// TeleportJoinStore persists Teleport join items (feature 038). No method
+// stores a join token, CA pins or labels. Every state change appends its
+// audit rows in the same transaction.
+type TeleportJoinStore interface {
+	// CreateTeleportItem inserts the item with its audit rows atomically.
+	// An active item of the same tenant, host and cluster that the new
+	// active item replaces is set to superseded first (with
+	// SupersedeAudit's row) and returned. ErrConflict when (tenant, source,
+	// enrollment id) exists or the id is reused.
+	CreateTeleportItem(ctx context.Context, n NewTeleportItem) (superseded []store.TeleportJoinItem, err error)
+	// GetTeleportItem returns the tenant's item id (ErrNotFound otherwise).
+	GetTeleportItem(ctx context.Context, tenantID, id string) (store.TeleportJoinItem, error)
+	// GetTeleportItemByEnrollment finds the item of a source's enrollment id.
+	GetTeleportItemByEnrollment(ctx context.Context, tenantID, source, enrollmentID string) (store.TeleportJoinItem, error)
+	// UpdateTeleportItem locks the item, applies fn and stores the result
+	// with fn's audit rows; an error of fn changes nothing. ErrNotFound for
+	// another tenant's or a missing id; ErrConflict when the result would
+	// make a second active item for the host and cluster.
+	UpdateTeleportItem(ctx context.Context, tenantID, id string, fn func(*store.TeleportJoinItem) ([]store.AuditRow, error)) (store.TeleportJoinItem, error)
+	// ListActiveTeleportItemsForAgent lists an agent's active items
+	// (pending, delivered, fetched, installing), oldest first, at most
+	// limit (<= 0: no limit).
+	ListActiveTeleportItemsForAgent(ctx context.Context, tenantID, agentID string, limit int) ([]store.TeleportJoinItem, error)
+	// ListStaleTeleportItems lists (system scope) the pending, delivered
+	// and fetched items that expired before now and the fetched and
+	// installing items not updated since reportBefore, oldest first, at
+	// most limit (<= 0: no limit).
+	ListStaleTeleportItems(ctx context.Context, now, reportBefore time.Time, limit int) ([]store.TeleportJoinItem, error)
+	// PurgeTeleportItems deletes (system scope) terminal items last updated
+	// before olderThan.
+	PurgeTeleportItems(ctx context.Context, olderThan time.Time) (int64, error)
 }

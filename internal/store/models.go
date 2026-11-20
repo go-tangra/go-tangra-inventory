@@ -587,6 +587,11 @@ const (
 	CapCertV1 = "cert.v1"
 	// CapModuleV1: the agent writes delivered module bundles (feature 037).
 	CapModuleV1 = "module.v1"
+	// CapTeleportV1: the agent knows COMMAND_TYPE_TELEPORT_JOIN and can
+	// install Teleport and join it as an SSH node (feature 038). Linux
+	// agents announce it whether or not the local configuration enables
+	// it; a disabled agent reports disabled_locally.
+	CapTeleportV1 = "teleport.v1"
 )
 
 // --- agent releases and upgrades (feature 023) ---
@@ -1010,6 +1015,76 @@ const (
 	MaxModuleBundleBytes = 12 << 20 // rendered zip
 	MaxModuleTTL         = 7 * 24 * time.Hour
 	MaxModuleVersionLen  = 64
+)
+
+// --- Teleport join delivery (feature 038) ---
+
+// TeleportJoinItem is the delivery of one Teleport SSH-node enrollment (the
+// teleport module's enrollment) to one host. It holds references only: the
+// join material (a single-use provision token) is rendered by the source
+// when the agent fetches the item, relayed and never stored. Its id is the
+// only identifier the agent sees.
+type TeleportJoinItem struct {
+	ID           string     `json:"id"`
+	TenantID     string     `json:"-"`
+	Source       string     `json:"source"`        // SPIFFE service name of the caller, e.g. "teleport"
+	EnrollmentID string     `json:"enrollment_id"` // the source's id (unique per tenant and source)
+	HostID       string     `json:"host_id"`
+	AgentID      string     `json:"agent_id,omitempty"` // resolved at create
+	ClusterID    string     `json:"cluster_id"`         // a newer item for (host, cluster) supersedes
+	State        string     `json:"state"`
+	Reason       string     `json:"reason,omitempty"`
+	NodeHostUUID string     `json:"node_host_uuid,omitempty"` // set with joined
+	Attempt      int        `json:"attempt"`                  // 1 (a re-enrollment is a new item)
+	Fetches      int        `json:"fetches"`                  // 0..MaxTeleportFetches
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+	ExpiresAt    time.Time  `json:"expires_at"`
+	DeliveredAt  *time.Time `json:"delivered_at,omitempty"`
+	FetchedAt    *time.Time `json:"fetched_at,omitempty"`
+	ReportedAt   *time.Time `json:"reported_at,omitempty"`
+}
+
+// Teleport join item states besides the shared Delivery* ones (pending,
+// delivered, fetched, failed, unsupported, superseded, expired, cancelled).
+const (
+	TeleportInstalling = "installing" // the agent reported it is installing (active)
+	TeleportJoined     = "joined"     // terminal: the node joined the cluster
+)
+
+// TeleportJoinActive reports whether a Teleport join item still waits for
+// (or is being worked on by) its agent: pending, delivered, fetched or
+// installing (the partial unique index inventory_teleport_items_active_uq:
+// one active item per host and cluster).
+func TeleportJoinActive(state string) bool {
+	return CertDeliveryActive(state) || state == TeleportInstalling
+}
+
+// Active reports whether the item is active (TeleportJoinActive).
+func (i TeleportJoinItem) Active() bool { return TeleportJoinActive(i.State) }
+
+// Teleport join reason codes besides the shared ones above (closed set,
+// ReportTeleportJoinRequest): reported by the agent ...
+const (
+	ReasonUnsupportedPlatform = "unsupported_platform"
+	ReasonDownloadFailed      = "download_failed"
+	ReasonInstallFailed       = "install_failed"
+	ReasonInvalidMaterial     = "invalid_material"
+	ReasonJoinFailed          = "join_failed"
+	ReasonClusterUnavailable  = "cluster_unavailable"
+	ReasonTimeout             = "timeout"
+)
+
+// AgentTeleportReasons are the reason codes an agent may report for a
+// Teleport join item.
+var AgentTeleportReasons = []string{ReasonUnsupportedPlatform, ReasonAlreadyInstalled, ReasonDisabledLocally,
+	ReasonDownloadFailed, ReasonChecksumMismatch, ReasonInstallFailed, ReasonInvalidMaterial, ReasonJoinFailed,
+	ReasonClusterUnavailable, ReasonTimeout, ReasonBusy, ReasonFetchFailed}
+
+// Teleport join bounds (spec 038).
+const (
+	MaxTeleportFetches = 5
+	MaxTeleportTTL     = 7 * 24 * time.Hour
 )
 
 // --- audit ---

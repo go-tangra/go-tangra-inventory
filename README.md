@@ -323,6 +323,33 @@ nginx -t && systemctl reload nginx
 
 `make test-agent-certs` runs the store and hook tests as root in a container.
 
+### Teleport SSH node join (feature 038)
+
+On Linux with systemd the agent can join its host to a Teleport cluster as
+an SSH node when the teleport module asks for it (server side:
+[deploy/README.md](deploy/README.md#teleport-join-teleport-module-ssh-node-enrollment-feature-038);
+module side: go-tangra-teleport `specs/002-agent-ssh-enrollment`). It
+always announces `teleport.v1` on Linux. A `TELEPORT_JOIN` command carries
+only an item id; the agent refuses before fetching when the host has no
+systemd or already runs Teleport (`/etc/teleport.yaml`, or an active or
+enabled teleport unit), pulls the single-use join material over its
+authenticated connection, validates it strictly, installs exactly the
+cluster's Teleport version from `https://cdn.teleport.dev` (checked against
+the published SHA-256, only the `teleport` binary, to
+`/usr/local/bin/teleport`), writes `/etc/teleport.yaml` (0600) and
+`/etc/systemd/system/teleport.service`, runs `systemctl enable --now
+teleport` and reports `joined` with `/var/lib/teleport/host_uuid`. After a
+failure the token is removed from `/etc/teleport.yaml` again and the unit
+stopped. The token is never logged or reported. Configuration
+(`agent.yaml`, all keys optional, defaults shown):
+
+```yaml
+teleport:
+  enabled: true                       # false: joins are answered disabled_locally
+  timeout_minutes: 15                 # 5-60; download, install and join
+  allow_insecure_transport: false     # development only (plaintext ingest edge)
+```
+
 ## Host reports for IPAM
 
 `inventory.v1.HostReportService` (mesh only, not proxied by the gateway) serves a

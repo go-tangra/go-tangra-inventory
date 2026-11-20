@@ -93,6 +93,21 @@ const (
 	ModuleDeliveryUnsupported EventType = "module_delivery_unsupported"
 	ModuleDeliveryExpired     EventType = "module_delivery_expired"
 	ModuleDeliveryRefused     EventType = "module_delivery_refused"
+	// Feature 038: Teleport join delivery. Item transitions are written
+	// through the repo in the transaction of the state change (SafeRow).
+	// Details carry identifiers, cluster, state, reason and the joined
+	// node's host uuid only: never the join token, CA pins or labels.
+	TeleportJoinCreated     EventType = "teleport_join_created"
+	TeleportJoinSuperseded  EventType = "teleport_join_superseded"
+	TeleportJoinDelivered   EventType = "teleport_join_delivered"
+	TeleportJoinFetched     EventType = "teleport_join_fetched"
+	TeleportJoinInstalling  EventType = "teleport_join_installing"
+	TeleportJoinJoined      EventType = "teleport_join_joined"
+	TeleportJoinFailed      EventType = "teleport_join_failed"
+	TeleportJoinUnsupported EventType = "teleport_join_unsupported"
+	TeleportJoinExpired     EventType = "teleport_join_expired"
+	TeleportJoinCancelled   EventType = "teleport_join_cancelled"
+	TeleportJoinRefused     EventType = "teleport_join_refused"
 )
 
 // certEvents are the certificate delivery event types (feature 033): their
@@ -106,6 +121,10 @@ var certEvents = map[EventType]bool{
 	ModuleDeliveryCreated: true, ModuleDeliverySuperseded: true, ModuleDeliveryDelivered: true, ModuleDeliveryFetched: true,
 	ModuleDeliveryInstalled: true, ModuleDeliveryFailed: true, ModuleDeliveryHookFailed: true, ModuleDeliveryUnsupported: true,
 	ModuleDeliveryExpired: true, ModuleDeliveryRefused: true,
+	// Feature 038 Teleport join events too.
+	TeleportJoinCreated: true, TeleportJoinSuperseded: true, TeleportJoinDelivered: true, TeleportJoinFetched: true,
+	TeleportJoinInstalling: true, TeleportJoinJoined: true, TeleportJoinFailed: true, TeleportJoinUnsupported: true,
+	TeleportJoinExpired: true, TeleportJoinCancelled: true, TeleportJoinRefused: true,
 }
 
 // PlatformTenant is the tenant id of platform-scope events (agent release
@@ -130,6 +149,8 @@ const (
 	SubjectCertDelivery = "cert_delivery"
 	// Feature 037: a module delivery item.
 	SubjectModuleDelivery = "module_delivery"
+	// Feature 038: a Teleport join item.
+	SubjectTeleportJoin = "teleport_join"
 )
 
 // Outcomes (closed set).
@@ -167,6 +188,8 @@ func init() {
 		CertDeliveryExpired, CertDeliveryCancelled, CertDeliveryRefused, HostCertificateRevoked,
 		ModuleDeliveryCreated, ModuleDeliverySuperseded, ModuleDeliveryDelivered, ModuleDeliveryFetched, ModuleDeliveryInstalled,
 		ModuleDeliveryFailed, ModuleDeliveryHookFailed, ModuleDeliveryUnsupported, ModuleDeliveryExpired, ModuleDeliveryRefused,
+		TeleportJoinCreated, TeleportJoinSuperseded, TeleportJoinDelivered, TeleportJoinFetched, TeleportJoinInstalling,
+		TeleportJoinJoined, TeleportJoinFailed, TeleportJoinUnsupported, TeleportJoinExpired, TeleportJoinCancelled, TeleportJoinRefused,
 	} {
 		known[t] = struct{}{}
 	}
@@ -212,7 +235,7 @@ func Validate(e Event) error {
 	}
 	switch e.SubjectKind {
 	case SubjectHost, SubjectSnapshot, SubjectAgent, SubjectToken, SubjectBackup, SubjectSystem, SubjectUpgradePolicy, SubjectRelease, SubjectAutoEnrollKey,
-		SubjectCertDelivery, SubjectModuleDelivery:
+		SubjectCertDelivery, SubjectModuleDelivery, SubjectTeleportJoin:
 	default:
 		return fmt.Errorf("audit: subject_kind %q", e.SubjectKind)
 	}

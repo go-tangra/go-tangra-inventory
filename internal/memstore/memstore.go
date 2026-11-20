@@ -36,6 +36,7 @@ type Mem struct {
 	aes      *autoEnrollState                    // feature 029 (lazily created)
 	cert     *certState                          // feature 033 (lazily created)
 	modules  map[string]store.ModuleDeliveryItem // feature 037, by id (lazily created)
+	teleport map[string]store.TeleportJoinItem   // feature 038, by id (lazily created)
 }
 
 // New builds an empty store.
