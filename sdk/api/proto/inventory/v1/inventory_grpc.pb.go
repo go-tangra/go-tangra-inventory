@@ -1171,6 +1171,8 @@ const (
 	IngestService_ReportCertificate_FullMethodName    = "/inventory.v1.IngestService/ReportCertificate"
 	IngestService_FetchModuleBundle_FullMethodName    = "/inventory.v1.IngestService/FetchModuleBundle"
 	IngestService_ReportModule_FullMethodName         = "/inventory.v1.IngestService/ReportModule"
+	IngestService_FetchTeleportJoin_FullMethodName    = "/inventory.v1.IngestService/FetchTeleportJoin"
+	IngestService_ReportTeleportJoin_FullMethodName   = "/inventory.v1.IngestService/ReportTeleportJoin"
 )
 
 // IngestServiceClient is the client API for IngestService service.
@@ -1196,6 +1198,10 @@ type IngestServiceClient interface {
 	// Module delivery (feature 037), bound to the verified agent's own items.
 	FetchModuleBundle(ctx context.Context, in *FetchModuleBundleRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ModuleBundleChunk], error)
 	ReportModule(ctx context.Context, in *ReportModuleRequest, opts ...grpc.CallOption) (*ReportModuleResponse, error)
+	// Teleport SSH-node enrollment (feature 038), bound to the verified agent's
+	// own items.
+	FetchTeleportJoin(ctx context.Context, in *FetchTeleportJoinRequest, opts ...grpc.CallOption) (*TeleportJoinMaterial, error)
+	ReportTeleportJoin(ctx context.Context, in *ReportTeleportJoinRequest, opts ...grpc.CallOption) (*ReportTeleportJoinResponse, error)
 }
 
 type ingestServiceClient struct {
@@ -1333,6 +1339,26 @@ func (c *ingestServiceClient) ReportModule(ctx context.Context, in *ReportModule
 	return out, nil
 }
 
+func (c *ingestServiceClient) FetchTeleportJoin(ctx context.Context, in *FetchTeleportJoinRequest, opts ...grpc.CallOption) (*TeleportJoinMaterial, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TeleportJoinMaterial)
+	err := c.cc.Invoke(ctx, IngestService_FetchTeleportJoin_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *ingestServiceClient) ReportTeleportJoin(ctx context.Context, in *ReportTeleportJoinRequest, opts ...grpc.CallOption) (*ReportTeleportJoinResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReportTeleportJoinResponse)
+	err := c.cc.Invoke(ctx, IngestService_ReportTeleportJoin_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // IngestServiceServer is the server API for IngestService service.
 // All implementations must embed UnimplementedIngestServiceServer
 // for forward compatibility.
@@ -1356,6 +1382,10 @@ type IngestServiceServer interface {
 	// Module delivery (feature 037), bound to the verified agent's own items.
 	FetchModuleBundle(*FetchModuleBundleRequest, grpc.ServerStreamingServer[ModuleBundleChunk]) error
 	ReportModule(context.Context, *ReportModuleRequest) (*ReportModuleResponse, error)
+	// Teleport SSH-node enrollment (feature 038), bound to the verified agent's
+	// own items.
+	FetchTeleportJoin(context.Context, *FetchTeleportJoinRequest) (*TeleportJoinMaterial, error)
+	ReportTeleportJoin(context.Context, *ReportTeleportJoinRequest) (*ReportTeleportJoinResponse, error)
 	mustEmbedUnimplementedIngestServiceServer()
 }
 
@@ -1395,6 +1425,12 @@ func (UnimplementedIngestServiceServer) FetchModuleBundle(*FetchModuleBundleRequ
 }
 func (UnimplementedIngestServiceServer) ReportModule(context.Context, *ReportModuleRequest) (*ReportModuleResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ReportModule not implemented")
+}
+func (UnimplementedIngestServiceServer) FetchTeleportJoin(context.Context, *FetchTeleportJoinRequest) (*TeleportJoinMaterial, error) {
+	return nil, status.Error(codes.Unimplemented, "method FetchTeleportJoin not implemented")
+}
+func (UnimplementedIngestServiceServer) ReportTeleportJoin(context.Context, *ReportTeleportJoinRequest) (*ReportTeleportJoinResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReportTeleportJoin not implemented")
 }
 func (UnimplementedIngestServiceServer) mustEmbedUnimplementedIngestServiceServer() {}
 func (UnimplementedIngestServiceServer) testEmbeddedByValue()                       {}
@@ -1576,6 +1612,42 @@ func _IngestService_ReportModule_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
+func _IngestService_FetchTeleportJoin_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FetchTeleportJoinRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IngestServiceServer).FetchTeleportJoin(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IngestService_FetchTeleportJoin_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IngestServiceServer).FetchTeleportJoin(ctx, req.(*FetchTeleportJoinRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IngestService_ReportTeleportJoin_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReportTeleportJoinRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IngestServiceServer).ReportTeleportJoin(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IngestService_ReportTeleportJoin_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IngestServiceServer).ReportTeleportJoin(ctx, req.(*ReportTeleportJoinRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // IngestService_ServiceDesc is the grpc.ServiceDesc for IngestService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1610,6 +1682,14 @@ var IngestService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ReportModule",
 			Handler:    _IngestService_ReportModule_Handler,
+		},
+		{
+			MethodName: "FetchTeleportJoin",
+			Handler:    _IngestService_FetchTeleportJoin_Handler,
+		},
+		{
+			MethodName: "ReportTeleportJoin",
+			Handler:    _IngestService_ReportTeleportJoin_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
@@ -2213,5 +2293,352 @@ var ModuleBundleSource_ServiceDesc = grpc.ServiceDesc{
 			ServerStreams: true,
 		},
 	},
+	Metadata: "inventory/v1/inventory.proto",
+}
+
+const (
+	TeleportJoinDeliveryService_CreateTeleportJoin_FullMethodName      = "/inventory.v1.TeleportJoinDeliveryService/CreateTeleportJoin"
+	TeleportJoinDeliveryService_GetTeleportJoins_FullMethodName        = "/inventory.v1.TeleportJoinDeliveryService/GetTeleportJoins"
+	TeleportJoinDeliveryService_CancelTeleportJoin_FullMethodName      = "/inventory.v1.TeleportJoinDeliveryService/CancelTeleportJoin"
+	TeleportJoinDeliveryService_ListTeleportJoinTargets_FullMethodName = "/inventory.v1.TeleportJoinDeliveryService/ListTeleportJoinTargets"
+)
+
+// TeleportJoinDeliveryServiceClient is the client API for TeleportJoinDeliveryService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// TeleportJoinDeliveryService (mesh only; not proxied by the gateway) is called
+// by the teleport module. Authorized by the inbound mesh policy and, in the
+// handler, by teleport_join.sources; every method returns FailedPrecondition
+// "disabled_on_server" while teleport_join.enabled is false.
+// CreateTeleportJoin refuses a host that cannot join with FailedPrecondition
+// whose message is exactly the reason token (no_agent, ambiguous_agent,
+// not_supported_platform, upgrade_required, retired); nothing is stored then.
+type TeleportJoinDeliveryServiceClient interface {
+	CreateTeleportJoin(ctx context.Context, in *CreateTeleportJoinRequest, opts ...grpc.CallOption) (*TeleportJoin, error)
+	GetTeleportJoins(ctx context.Context, in *GetTeleportJoinsRequest, opts ...grpc.CallOption) (*GetTeleportJoinsResponse, error)
+	CancelTeleportJoin(ctx context.Context, in *CancelTeleportJoinRequest, opts ...grpc.CallOption) (*TeleportJoin, error)
+	ListTeleportJoinTargets(ctx context.Context, in *ListTeleportJoinTargetsRequest, opts ...grpc.CallOption) (*ListTeleportJoinTargetsResponse, error)
+}
+
+type teleportJoinDeliveryServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewTeleportJoinDeliveryServiceClient(cc grpc.ClientConnInterface) TeleportJoinDeliveryServiceClient {
+	return &teleportJoinDeliveryServiceClient{cc}
+}
+
+func (c *teleportJoinDeliveryServiceClient) CreateTeleportJoin(ctx context.Context, in *CreateTeleportJoinRequest, opts ...grpc.CallOption) (*TeleportJoin, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TeleportJoin)
+	err := c.cc.Invoke(ctx, TeleportJoinDeliveryService_CreateTeleportJoin_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *teleportJoinDeliveryServiceClient) GetTeleportJoins(ctx context.Context, in *GetTeleportJoinsRequest, opts ...grpc.CallOption) (*GetTeleportJoinsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetTeleportJoinsResponse)
+	err := c.cc.Invoke(ctx, TeleportJoinDeliveryService_GetTeleportJoins_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *teleportJoinDeliveryServiceClient) CancelTeleportJoin(ctx context.Context, in *CancelTeleportJoinRequest, opts ...grpc.CallOption) (*TeleportJoin, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TeleportJoin)
+	err := c.cc.Invoke(ctx, TeleportJoinDeliveryService_CancelTeleportJoin_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *teleportJoinDeliveryServiceClient) ListTeleportJoinTargets(ctx context.Context, in *ListTeleportJoinTargetsRequest, opts ...grpc.CallOption) (*ListTeleportJoinTargetsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListTeleportJoinTargetsResponse)
+	err := c.cc.Invoke(ctx, TeleportJoinDeliveryService_ListTeleportJoinTargets_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// TeleportJoinDeliveryServiceServer is the server API for TeleportJoinDeliveryService service.
+// All implementations must embed UnimplementedTeleportJoinDeliveryServiceServer
+// for forward compatibility.
+//
+// TeleportJoinDeliveryService (mesh only; not proxied by the gateway) is called
+// by the teleport module. Authorized by the inbound mesh policy and, in the
+// handler, by teleport_join.sources; every method returns FailedPrecondition
+// "disabled_on_server" while teleport_join.enabled is false.
+// CreateTeleportJoin refuses a host that cannot join with FailedPrecondition
+// whose message is exactly the reason token (no_agent, ambiguous_agent,
+// not_supported_platform, upgrade_required, retired); nothing is stored then.
+type TeleportJoinDeliveryServiceServer interface {
+	CreateTeleportJoin(context.Context, *CreateTeleportJoinRequest) (*TeleportJoin, error)
+	GetTeleportJoins(context.Context, *GetTeleportJoinsRequest) (*GetTeleportJoinsResponse, error)
+	CancelTeleportJoin(context.Context, *CancelTeleportJoinRequest) (*TeleportJoin, error)
+	ListTeleportJoinTargets(context.Context, *ListTeleportJoinTargetsRequest) (*ListTeleportJoinTargetsResponse, error)
+	mustEmbedUnimplementedTeleportJoinDeliveryServiceServer()
+}
+
+// UnimplementedTeleportJoinDeliveryServiceServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedTeleportJoinDeliveryServiceServer struct{}
+
+func (UnimplementedTeleportJoinDeliveryServiceServer) CreateTeleportJoin(context.Context, *CreateTeleportJoinRequest) (*TeleportJoin, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateTeleportJoin not implemented")
+}
+func (UnimplementedTeleportJoinDeliveryServiceServer) GetTeleportJoins(context.Context, *GetTeleportJoinsRequest) (*GetTeleportJoinsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetTeleportJoins not implemented")
+}
+func (UnimplementedTeleportJoinDeliveryServiceServer) CancelTeleportJoin(context.Context, *CancelTeleportJoinRequest) (*TeleportJoin, error) {
+	return nil, status.Error(codes.Unimplemented, "method CancelTeleportJoin not implemented")
+}
+func (UnimplementedTeleportJoinDeliveryServiceServer) ListTeleportJoinTargets(context.Context, *ListTeleportJoinTargetsRequest) (*ListTeleportJoinTargetsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListTeleportJoinTargets not implemented")
+}
+func (UnimplementedTeleportJoinDeliveryServiceServer) mustEmbedUnimplementedTeleportJoinDeliveryServiceServer() {
+}
+func (UnimplementedTeleportJoinDeliveryServiceServer) testEmbeddedByValue() {}
+
+// UnsafeTeleportJoinDeliveryServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to TeleportJoinDeliveryServiceServer will
+// result in compilation errors.
+type UnsafeTeleportJoinDeliveryServiceServer interface {
+	mustEmbedUnimplementedTeleportJoinDeliveryServiceServer()
+}
+
+func RegisterTeleportJoinDeliveryServiceServer(s grpc.ServiceRegistrar, srv TeleportJoinDeliveryServiceServer) {
+	// If the following call panics, it indicates UnimplementedTeleportJoinDeliveryServiceServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&TeleportJoinDeliveryService_ServiceDesc, srv)
+}
+
+func _TeleportJoinDeliveryService_CreateTeleportJoin_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateTeleportJoinRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TeleportJoinDeliveryServiceServer).CreateTeleportJoin(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TeleportJoinDeliveryService_CreateTeleportJoin_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TeleportJoinDeliveryServiceServer).CreateTeleportJoin(ctx, req.(*CreateTeleportJoinRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TeleportJoinDeliveryService_GetTeleportJoins_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetTeleportJoinsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TeleportJoinDeliveryServiceServer).GetTeleportJoins(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TeleportJoinDeliveryService_GetTeleportJoins_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TeleportJoinDeliveryServiceServer).GetTeleportJoins(ctx, req.(*GetTeleportJoinsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TeleportJoinDeliveryService_CancelTeleportJoin_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CancelTeleportJoinRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TeleportJoinDeliveryServiceServer).CancelTeleportJoin(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TeleportJoinDeliveryService_CancelTeleportJoin_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TeleportJoinDeliveryServiceServer).CancelTeleportJoin(ctx, req.(*CancelTeleportJoinRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TeleportJoinDeliveryService_ListTeleportJoinTargets_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListTeleportJoinTargetsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TeleportJoinDeliveryServiceServer).ListTeleportJoinTargets(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TeleportJoinDeliveryService_ListTeleportJoinTargets_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TeleportJoinDeliveryServiceServer).ListTeleportJoinTargets(ctx, req.(*ListTeleportJoinTargetsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// TeleportJoinDeliveryService_ServiceDesc is the grpc.ServiceDesc for TeleportJoinDeliveryService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var TeleportJoinDeliveryService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "inventory.v1.TeleportJoinDeliveryService",
+	HandlerType: (*TeleportJoinDeliveryServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "CreateTeleportJoin",
+			Handler:    _TeleportJoinDeliveryService_CreateTeleportJoin_Handler,
+		},
+		{
+			MethodName: "GetTeleportJoins",
+			Handler:    _TeleportJoinDeliveryService_GetTeleportJoins_Handler,
+		},
+		{
+			MethodName: "CancelTeleportJoin",
+			Handler:    _TeleportJoinDeliveryService_CancelTeleportJoin_Handler,
+		},
+		{
+			MethodName: "ListTeleportJoinTargets",
+			Handler:    _TeleportJoinDeliveryService_ListTeleportJoinTargets_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "inventory/v1/inventory.proto",
+}
+
+const (
+	TeleportJoinSource_RenderTeleportJoin_FullMethodName = "/inventory.v1.TeleportJoinSource/RenderTeleportJoin"
+)
+
+// TeleportJoinSourceClient is the client API for TeleportJoinSource service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// TeleportJoinSource is served by the teleport module and called by the
+// inventory when an agent fetches its item. It mints the join token at that
+// moment. NotFound (unknown, expired, mismatched, cancelled or out of renders)
+// fails the item; any other error is retried by the agent within the item's
+// fetch budget.
+type TeleportJoinSourceClient interface {
+	RenderTeleportJoin(ctx context.Context, in *RenderTeleportJoinRequest, opts ...grpc.CallOption) (*TeleportJoinMaterial, error)
+}
+
+type teleportJoinSourceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewTeleportJoinSourceClient(cc grpc.ClientConnInterface) TeleportJoinSourceClient {
+	return &teleportJoinSourceClient{cc}
+}
+
+func (c *teleportJoinSourceClient) RenderTeleportJoin(ctx context.Context, in *RenderTeleportJoinRequest, opts ...grpc.CallOption) (*TeleportJoinMaterial, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TeleportJoinMaterial)
+	err := c.cc.Invoke(ctx, TeleportJoinSource_RenderTeleportJoin_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// TeleportJoinSourceServer is the server API for TeleportJoinSource service.
+// All implementations must embed UnimplementedTeleportJoinSourceServer
+// for forward compatibility.
+//
+// TeleportJoinSource is served by the teleport module and called by the
+// inventory when an agent fetches its item. It mints the join token at that
+// moment. NotFound (unknown, expired, mismatched, cancelled or out of renders)
+// fails the item; any other error is retried by the agent within the item's
+// fetch budget.
+type TeleportJoinSourceServer interface {
+	RenderTeleportJoin(context.Context, *RenderTeleportJoinRequest) (*TeleportJoinMaterial, error)
+	mustEmbedUnimplementedTeleportJoinSourceServer()
+}
+
+// UnimplementedTeleportJoinSourceServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedTeleportJoinSourceServer struct{}
+
+func (UnimplementedTeleportJoinSourceServer) RenderTeleportJoin(context.Context, *RenderTeleportJoinRequest) (*TeleportJoinMaterial, error) {
+	return nil, status.Error(codes.Unimplemented, "method RenderTeleportJoin not implemented")
+}
+func (UnimplementedTeleportJoinSourceServer) mustEmbedUnimplementedTeleportJoinSourceServer() {}
+func (UnimplementedTeleportJoinSourceServer) testEmbeddedByValue()                            {}
+
+// UnsafeTeleportJoinSourceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to TeleportJoinSourceServer will
+// result in compilation errors.
+type UnsafeTeleportJoinSourceServer interface {
+	mustEmbedUnimplementedTeleportJoinSourceServer()
+}
+
+func RegisterTeleportJoinSourceServer(s grpc.ServiceRegistrar, srv TeleportJoinSourceServer) {
+	// If the following call panics, it indicates UnimplementedTeleportJoinSourceServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&TeleportJoinSource_ServiceDesc, srv)
+}
+
+func _TeleportJoinSource_RenderTeleportJoin_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RenderTeleportJoinRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TeleportJoinSourceServer).RenderTeleportJoin(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TeleportJoinSource_RenderTeleportJoin_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TeleportJoinSourceServer).RenderTeleportJoin(ctx, req.(*RenderTeleportJoinRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// TeleportJoinSource_ServiceDesc is the grpc.ServiceDesc for TeleportJoinSource service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var TeleportJoinSource_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "inventory.v1.TeleportJoinSource",
+	HandlerType: (*TeleportJoinSourceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "RenderTeleportJoin",
+			Handler:    _TeleportJoinSource_RenderTeleportJoin_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
 	Metadata: "inventory/v1/inventory.proto",
 }
