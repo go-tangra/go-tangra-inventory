@@ -83,3 +83,17 @@ upgrade:
 #   deploy_hook: ""                    # e.g. /usr/local/sbin/module-compose-up
 #   hook_timeout_seconds: 600          # 30-1800; the hook's process group is killed after it
 #   allow_insecure_transport: false    # development only: accept bundles over a plaintext ingest connection
+
+# Teleport join (feature 038, Linux with systemd). The teleport module can
+# enroll this host as a Teleport SSH node: the agent receives a single-use
+# join token, installs exactly the cluster's Teleport version from
+# https://cdn.teleport.dev (checked against the published SHA-256) to
+# /usr/local/bin/teleport, writes /etc/teleport.yaml (0600) and the
+# teleport systemd unit, and starts it. A host that already has
+# /etc/teleport.yaml or an active or enabled teleport unit is never
+# touched (already_installed). After a failed join the token is removed
+# from /etc/teleport.yaml again.
+# teleport:
+#   enabled: true                      # false: refuse joins ("disabled locally")
+#   timeout_minutes: 15                # 5-60; download, install and join
+#   allow_insecure_transport: false    # development only: accept join tokens over a plaintext ingest connection

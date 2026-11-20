@@ -131,6 +131,11 @@ func commandToPB(cmd registry.Command) *inventoryv1.Command {
 		out.Type = inventoryv1.CommandType_COMMAND_TYPE_MODULE
 		out.Module = &inventoryv1.ModuleCommand{ItemId: m.ItemID, Module: m.Module, Attempt: uint32(max(m.Attempt, 0))} // #nosec G115 -- attempt <= 5
 	}
+	// Teleport joins carry the item id only, never the join token (feature 038).
+	if j := cmd.TeleportJoin; j != nil {
+		out.Type = inventoryv1.CommandType_COMMAND_TYPE_TELEPORT_JOIN
+		out.TeleportJoin = &inventoryv1.TeleportJoinCommand{ItemId: j.ItemID, Attempt: uint32(max(j.Attempt, 0))} // #nosec G115 -- attempt <= 5
+	}
 	return out
 }
 

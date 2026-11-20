@@ -51,17 +51,21 @@ func newDaemon(enabled bool, u *fakeUpgrader) *Daemon {
 
 func TestStreamRequestCarriesPlatformAndCapability(t *testing.T) {
 	d := newDaemon(true, &fakeUpgrader{})
+	d.goos = "windows" // teleport.v1 (Linux): TestTeleportCapabilityAnnounced
 	req := d.streamRequest()
 	if req.GetAgentVersion() != "4.4.0" || req.GetPlatform().GetInstallType() != "deb" || req.GetPlatform().GetOs() != "linux" ||
 		len(req.GetCapabilities()) != 1 || req.GetCapabilities()[0] != "upgrade.v1" {
 		t.Fatalf("request = %v", req)
 	}
 	// Disabled server-pushed upgrades: no capability (the fleet shows manual).
-	if req := newDaemon(false, &fakeUpgrader{}).streamRequest(); len(req.GetCapabilities()) != 0 || req.GetPlatform() == nil {
+	off := newDaemon(false, &fakeUpgrader{})
+	off.goos = "windows"
+	if req := off.streamRequest(); len(req.GetCapabilities()) != 0 || req.GetPlatform() == nil {
 		t.Fatalf("disabled = %v", req)
 	}
 	// Without a detectable platform nothing is announced.
 	plain := New(config.DefaultAgent(), "4.4.0")
+	plain.goos = "windows"
 	if req := plain.streamRequest(); req.GetPlatform() != nil || len(req.GetCapabilities()) != 0 || plain.Sender() == nil {
 		t.Fatalf("plain = %v", req)
 	}

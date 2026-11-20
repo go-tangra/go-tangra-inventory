@@ -272,3 +272,50 @@ func TestModuleCommandEncoding(t *testing.T) {
 		t.Fatalf("module command JSON keys = %v", flat)
 	}
 }
+
+// TestTeleportJoinCommandEncoding (feature 038): a Teleport join command
+// carries ids only, through the in-process registry and the JSON the Valkey
+// registry publishes (keys id, type, teleport_join.item_id,
+// teleport_join.attempt).
+func TestTeleportJoinCommandEncoding(t *testing.T) {
+	cmd := Command{ID: "c1", Type: CommandTeleportJoin, TeleportJoin: &TeleportJoinPayload{ItemID: "item-1", Attempt: 1}}
+	ctx := context.Background()
+	r := NewMemory()
+	ch, unregister, err := r.Register(ctx, ConnectedAgent{AgentID: "a1", TenantID: "t1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unregister()
+	if ok, err := r.Deliver(ctx, "a1", cmd); !ok || err != nil {
+		t.Fatalf("deliver: %v %v", ok, err)
+	}
+	if got := <-ch; got.Type != CommandTeleportJoin || got.TeleportJoin == nil || *got.TeleportJoin != *cmd.TeleportJoin {
+		t.Fatalf("memory round trip: %+v", got)
+	}
+	raw, err := json.Marshal(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back Command
+	if err := json.Unmarshal(raw, &back); err != nil || back.TeleportJoin == nil || *back.TeleportJoin != *cmd.TeleportJoin || back.Module != nil {
+		t.Fatalf("json round trip: %+v %v", back, err)
+	}
+	var keys map[string]any
+	if err := json.Unmarshal(raw, &keys); err != nil {
+		t.Fatal(err)
+	}
+	var flat []string
+	for k, v := range keys {
+		if m, ok := v.(map[string]any); ok {
+			for kk := range m {
+				flat = append(flat, k+"."+kk)
+			}
+			continue
+		}
+		flat = append(flat, k)
+	}
+	sort.Strings(flat)
+	if strings.Join(flat, ",") != "id,teleport_join.attempt,teleport_join.item_id,type" {
+		t.Fatalf("teleport join command JSON keys = %v", flat)
+	}
+}

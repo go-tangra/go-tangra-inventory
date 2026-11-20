@@ -63,3 +63,19 @@ func ModuleItemRow(t EventType, actorKind, actorID, outcome string, i store.Modu
 	return SafeRow(Event{TenantID: i.TenantID, EventType: t, ActorKind: actorKind, ActorID: actorID, SubjectKind: SubjectModuleDelivery,
 		SubjectID: i.ID, Outcome: outcome, Reason: i.Reason, Details: d}, now)
 }
+
+// TeleportItemRow is the audit row of a Teleport join item transition:
+// identifiers, cluster, state, reason and the joined node's host uuid, plus
+// extra (feature 038). Nothing of the join material is ever passed in.
+func TeleportItemRow(t EventType, actorKind, actorID, outcome string, i store.TeleportJoinItem, extra map[string]any, now time.Time) store.AuditRow {
+	d := map[string]any{"enrollment_id": i.EnrollmentID, "item_id": i.ID, "host_id": i.HostID, "agent_id": i.AgentID,
+		"source": i.Source, "cluster_id": i.ClusterID, "state": i.State, "reason": i.Reason}
+	if i.NodeHostUUID != "" {
+		d["node_host_uuid"] = i.NodeHostUUID
+	}
+	for k, v := range extra {
+		d[k] = v
+	}
+	return SafeRow(Event{TenantID: i.TenantID, EventType: t, ActorKind: actorKind, ActorID: actorID, SubjectKind: SubjectTeleportJoin,
+		SubjectID: i.ID, Outcome: outcome, Reason: i.Reason, Details: d}, now)
+}

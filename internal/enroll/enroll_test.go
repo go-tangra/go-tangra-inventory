@@ -26,6 +26,7 @@ type fakeStore struct {
 	repo.AutoEnrollStore
 	repo.CertDeliveryStore
 	repo.ModuleDeliveryStore
+	repo.TeleportJoinStore
 	mu             sync.Mutex
 	tokens         map[string]store.EnrollmentToken
 	agents         map[string]store.Agent

@@ -10,7 +10,11 @@
 // bundle by item id, installs it and reports the outcome. With a local
 // module writer (feature 037, Linux) it announces module.v1 and writes the
 // module bundles named by MODULE commands below its modules directory, one
-// at a time, runs the local hook and reports the outcome.
+// at a time, runs the local hook and reports the outcome. On Linux it
+// announces teleport.v1 (feature 038) and joins the host to a Teleport
+// cluster as an SSH node for a TELEPORT_JOIN command: it fetches the join
+// material by item id, installs Teleport, reports installing and then
+// joined or failed, one join at a time.
 package daemon
 
 import (
@@ -84,6 +88,12 @@ type Daemon struct {
 	moduleWriter    ModuleInstaller
 	newModuleClient func(agentID, credential string) ModuleClient
 	mods            *itemState[*invv1.ReportModuleRequest]
+
+	// Teleport join (feature 038).
+	teleport          TeleportJoiner
+	newTeleportClient func(agentID, credential string) TeleportClient
+	tps               *itemState[*invv1.ReportTeleportJoinRequest]
+	tpBusy            atomic.Bool
 }
 
 // New builds a Daemon for the given agent configuration and version.
@@ -96,11 +106,13 @@ func New(cfg config.AgentConfig, version string) *Daemon {
 		version: version,
 		certs:   newCertState(),
 		mods:    newItemState[*invv1.ReportModuleRequest](),
+		tps:     newItemState[*invv1.ReportTeleportJoinRequest](),
 		goos:    runtime.GOOS,
 	}
 	d.refresh = d.collectAndSubmit
 	d.newCertClient = func(agentID, credential string) CertClient { return d.sender.CertClient(agentID, credential) }
 	d.newModuleClient = func(agentID, credential string) ModuleClient { return d.sender.ModuleClient(agentID, credential) }
+	d.newTeleportClient = func(agentID, credential string) TeleportClient { return d.sender.TeleportClient(agentID, credential) }
 	return d
 }
 
@@ -117,8 +129,9 @@ func (d *Daemon) WithUpgrades(p agentrelease.Platform, factory UpgraderFactory) 
 // streamRequest is the StreamCommands request: version, platform and the
 // capabilities: upgrade.v1 when server-pushed upgrades are enabled and
 // possible, cert.v1 when certificate delivery is enabled locally, the
-// platform has a store (Linux) and the transport allows it, and module.v1
-// on the same terms for module delivery.
+// platform has a store (Linux) and the transport allows it, module.v1
+// on the same terms for module delivery, and teleport.v1 on Linux (a
+// disabled or unable agent reports why instead of staying silent).
 func (d *Daemon) streamRequest() *invv1.StreamRequest {
 	req := &invv1.StreamRequest{AgentId: d.agentID, AgentVersion: d.version}
 	if d.platform.OS != "" {
@@ -132,6 +145,9 @@ func (d *Daemon) streamRequest() *invv1.StreamRequest {
 	}
 	if d.modulesActive() {
 		req.Capabilities = append(req.Capabilities, store.CapModuleV1)
+	}
+	if d.cfg.Teleport.Announce(d.goos) {
+		req.Capabilities = append(req.Capabilities, store.CapTeleportV1)
 	}
 	return req
 }
@@ -163,6 +179,8 @@ func (d *Daemon) handleCommand(ctx context.Context, cmd *invv1.Command) {
 		d.enqueueCertificate(ctx, cmd)
 	case invv1.CommandType_COMMAND_TYPE_MODULE:
 		d.enqueueModule(ctx, cmd)
+	case invv1.CommandType_COMMAND_TYPE_TELEPORT_JOIN:
+		d.enqueueTeleport(ctx, cmd)
 	default:
 		log.Printf("daemon: ignoring unknown command type %d (id %s)", cmd.GetType(), cmd.GetCommandId())
 	}
@@ -203,6 +221,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	go d.periodicLoop(ctx)
 	go d.certLoop(ctx)
 	go d.moduleLoop(ctx)
+	go d.teleportLoop(ctx)
 	d.reconnectLoop(ctx)
 	return nil
 }
@@ -307,7 +326,7 @@ func (d *Daemon) streamLoop(ctx context.Context) error {
 	}
 	defer conn.Close()
 
-	// Certificate and module fetches are bounded by this stream: the server replays
+	// Certificate, module and Teleport join fetches are bounded by this stream: the server replays
 	// active items on the next connect.
 	sctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -335,6 +354,9 @@ func (d *Daemon) streamLoop(ctx context.Context) error {
 			continue
 		case invv1.CommandType_COMMAND_TYPE_MODULE:
 			d.enqueueModule(sctx, cmd)
+			continue
+		case invv1.CommandType_COMMAND_TYPE_TELEPORT_JOIN:
+			d.enqueueTeleport(sctx, cmd)
 			continue
 		}
 		d.handleCommand(ctx, cmd)

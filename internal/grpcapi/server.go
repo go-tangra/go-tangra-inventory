@@ -26,6 +26,7 @@ import (
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/repo"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/snapshots"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/stats"
+	"github.com/go-tangra/go-tangra-inventory/v4/internal/teleportjoin"
 	"github.com/go-tangra/go-tangra/v4/authn"
 )
 
@@ -96,6 +97,12 @@ type Deps struct {
 	// "disabled_on_server".
 	ModuleDelivery *moduledelivery.Service
 	ModuleSources  []string
+	// TeleportJoin serves TeleportJoinDeliveryService (feature 038) when
+	// set; TeleportSources are the mesh services allowed to call it
+	// (teleport_join.sources). A disabled relay answers FailedPrecondition
+	// "disabled_on_server".
+	TeleportJoin    *teleportjoin.Service
+	TeleportSources []string
 }
 
 // Register registers the inventory.v1 mesh servers on the gRPC server. Callers
@@ -118,6 +125,9 @@ func Register(gs grpc.ServiceRegistrar, d Deps) {
 	}
 	if d.ModuleDelivery != nil {
 		invv1.RegisterModuleDeliveryServiceServer(gs, &ModuleDeliveryServer{Svc: d.ModuleDelivery, Sources: d.ModuleSources})
+	}
+	if d.TeleportJoin != nil {
+		invv1.RegisterTeleportJoinDeliveryServiceServer(gs, &TeleportJoinServer{Svc: d.TeleportJoin, Sources: d.TeleportSources})
 	}
 	if d.Reports != nil {
 		invv1.RegisterHostReportServiceServer(gs, &HostReportServer{

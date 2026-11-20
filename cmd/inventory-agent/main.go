@@ -191,6 +191,10 @@ func runDaemon(cfg config.AgentConfig, configPath string) error {
 	if w := moduleWriter(cfg.Modules, agentmodules.Deps{}); w != nil {
 		d.WithModules(w)
 	}
+	// Teleport join (feature 038, Linux with systemd): Teleport only from
+	// https://cdn.teleport.dev, checked against its published SHA-256; the
+	// configuration and unit at fixed paths.
+	d.WithTeleport(teleportJoiner(cfg.Teleport))
 	// Self-upgrade (feature 023): announce the platform, confirm or report an
 	// upgrade in flight, act on upgrade commands when enabled.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

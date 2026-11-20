@@ -66,6 +66,10 @@ enum CommandType {
   // Install the module bundle of delivery item Command.module.item_id
   // (feature 037). Agents older than 037 log and ignore it.
   COMMAND_TYPE_MODULE = 4;
+  // Join Teleport as an SSH node with the material of item
+  // Command.teleport_join.item_id (feature 038). Agents older than 038 log and
+  // ignore it.
+  COMMAND_TYPE_TELEPORT_JOIN = 5;
 }
 
 // ---- Shared identity + host messages
@@ -794,6 +798,10 @@ service IngestService {
   // Module delivery (feature 037), bound to the verified agent's own items.
   rpc FetchModuleBundle(FetchModuleBundleRequest) returns (stream ModuleBundleChunk);
   rpc ReportModule(ReportModuleRequest) returns (ReportModuleResponse);
+  // Teleport SSH-node enrollment (feature 038), bound to the verified agent's
+  // own items.
+  rpc FetchTeleportJoin(FetchTeleportJoinRequest) returns (TeleportJoinMaterial);
+  rpc ReportTeleportJoin(ReportTeleportJoinRequest) returns (ReportTeleportJoinResponse);
 }
 
 message EnrollRequest {
@@ -857,6 +865,15 @@ message Command {
   UpgradeCommand upgrade = 3;        // set when type = UPGRADE
   CertificateCommand certificate = 4; // set when type = CERTIFICATE (feature 033)
   ModuleCommand module = 5;           // set when type = MODULE (feature 037)
+  TeleportJoinCommand teleport_join = 6; // set when type = TELEPORT_JOIN (feature 038)
+}
+
+// TeleportJoinCommand carries only references; the agent pulls the join
+// material with FetchTeleportJoin over its authenticated connection
+// (feature 038). The join token never travels in a command.
+message TeleportJoinCommand {
+  string item_id = 1;                // uuid of the Teleport join item
+  uint32 attempt = 2;
 }
 
 // ModuleCommand carries only references; the agent pulls the bundle with
@@ -1263,6 +1280,160 @@ service ModuleBundleSource {
 message RenderModuleBundleRequest {
   string tenant_id = 1;
   string delivery_id = 2;
+  string host_id = 3;                // the verified agent's host
+  string item_id = 4;                // for the source's audit only
+}
+
+// ---- Teleport join delivery (feature 038)
+//
+// The teleport module enrolls inventory hosts as Teleport SSH nodes. It asks
+// the inventory for a join item per (host, enrollment); the inventory pushes
+// COMMAND_TYPE_TELEPORT_JOIN (references only); the agent fetches the join
+// material, and only then does the inventory ask the teleport module to
+// render it (TeleportJoinSource, over the mesh). The inventory relays the
+// material and keeps nothing; the agent installs Teleport, joins and reports.
+
+message FetchTeleportJoinRequest {
+  string item_id = 1;                // uuid of the agent's own active join item
+}
+
+// TeleportJoinMaterial holds a single-use join token. It is never logged,
+// stored, cached or published by the inventory, and the agent writes it only
+// into /etc/teleport.yaml (0600).
+message TeleportJoinMaterial {
+  string item_id = 1;                // set by the inventory toward the agent; "" from the source
+  string token = 2;                  // single-use Teleport provision token, role Node only
+  string proxy_addr = 3;             // host:port of the cluster's proxy
+  repeated string ca_pins = 4;       // "sha256:<64 lowercase hex>", 1..4
+  string teleport_version = 5;       // x.y.z the cluster runs; the agent installs exactly this
+  map<string, string> labels = 6;    // static node labels, keys under "tangra.io/", <= 64
+  int64 token_expires_at = 7;        // unix seconds
+  string enrollment_id = 8;          // the source's enrollment id
+}
+
+// ReportTeleportJoinRequest states: installing | joined | failed. Reason codes
+// (closed set): unsupported_platform, already_installed, disabled_locally,
+// download_failed, checksum_mismatch, install_failed, invalid_material,
+// join_failed, cluster_unavailable, timeout, busy, fetch_failed.
+message ReportTeleportJoinRequest {
+  string item_id = 1;
+  string state = 2;
+  string reason = 3;
+  string node_host_uuid = 4;         // set with joined: /var/lib/teleport/host_uuid
+  string detail = 5;                 // <= 256 bytes, sanitised; never command output or the token
+}
+
+message ReportTeleportJoinResponse {
+  bool accepted = 1;                 // false = ignored (terminal/duplicate)
+}
+
+// TeleportJoinDeliveryService (mesh only; not proxied by the gateway) is called
+// by the teleport module. Authorized by the inbound mesh policy and, in the
+// handler, by teleport_join.sources; every method returns FailedPrecondition
+// "disabled_on_server" while teleport_join.enabled is false.
+// CreateTeleportJoin refuses a host that cannot join with FailedPrecondition
+// whose message is exactly the reason token (no_agent, ambiguous_agent,
+// not_supported_platform, upgrade_required, retired); nothing is stored then.
+service TeleportJoinDeliveryService {
+  rpc CreateTeleportJoin(CreateTeleportJoinRequest) returns (TeleportJoin);
+  rpc GetTeleportJoins(GetTeleportJoinsRequest) returns (GetTeleportJoinsResponse);
+  rpc CancelTeleportJoin(CancelTeleportJoinRequest) returns (TeleportJoin);
+  rpc ListTeleportJoinTargets(ListTeleportJoinTargetsRequest) returns (ListTeleportJoinTargetsResponse);
+}
+
+enum TeleportJoinState {
+  TELEPORT_JOIN_STATE_UNSPECIFIED = 0;
+  TELEPORT_JOIN_STATE_PENDING = 1;     // stored, command not yet acknowledged
+  TELEPORT_JOIN_STATE_DELIVERED = 2;   // command sent to the online agent
+  TELEPORT_JOIN_STATE_FETCHED = 3;     // the agent fetched the material
+  TELEPORT_JOIN_STATE_INSTALLING = 4;
+  TELEPORT_JOIN_STATE_JOINED = 5;
+  TELEPORT_JOIN_STATE_FAILED = 6;
+  TELEPORT_JOIN_STATE_UNSUPPORTED = 7; // the agent cannot run the command
+  TELEPORT_JOIN_STATE_SUPERSEDED = 8;
+  TELEPORT_JOIN_STATE_EXPIRED = 9;
+  TELEPORT_JOIN_STATE_CANCELLED = 10;
+}
+
+message CreateTeleportJoinRequest {
+  string tenant_id = 1;
+  string enrollment_id = 2;          // uuid; idempotency key per (tenant, source)
+  string host_id = 3;
+  string cluster_id = 4;             // uuid; a newer item for (host, cluster) supersedes
+  int64 expires_at = 5;              // unix seconds, in (now, now + 7 days]
+}
+
+message GetTeleportJoinsRequest {
+  string tenant_id = 1;
+  repeated string enrollment_ids = 2; // 1..200
+}
+
+message GetTeleportJoinsResponse {
+  repeated TeleportJoin items = 1;    // unknown ids are omitted
+}
+
+message CancelTeleportJoinRequest {
+  string tenant_id = 1;
+  string enrollment_id = 2;
+}
+
+message TeleportJoin {
+  string item_id = 1;
+  string enrollment_id = 2;
+  string tenant_id = 3;
+  string host_id = 4;
+  string hostname = 5;
+  string cluster_id = 6;
+  TeleportJoinState state = 7;
+  string reason = 8;                 // closed set
+  string node_host_uuid = 9;
+  bool agent_online = 10;
+  int64 created_at = 11;             // unix seconds
+  int64 updated_at = 12;
+  int64 expires_at = 13;
+  bool created = 14;                 // false = idempotent replay
+}
+
+message ListTeleportJoinTargetsRequest {
+  string tenant_id = 1;
+  string query = 2;                  // hostname substring, <= 64
+  int32 limit = 3;                   // 1..200, default 50
+  repeated string host_ids = 4;      // instead of query: exactly these hosts (<= 200)
+}
+
+// TeleportJoinTarget is a host with the facts the module turns into labels.
+message TeleportJoinTarget {
+  string host_id = 1;
+  string hostname = 2;
+  string os_name = 3;
+  string os_version = 4;
+  string os_arch = 5;
+  string manufacturer = 6;
+  string model = 7;
+  map<string, string> tags = 8;
+  bool agent_online = 9;
+  // enabled | upgrade_required | not_supported_platform | no_agent |
+  // ambiguous_agent | retired | disabled_on_server
+  string capability = 10;
+}
+
+message ListTeleportJoinTargetsResponse {
+  repeated TeleportJoinTarget hosts = 1;
+  bool truncated = 2;
+}
+
+// TeleportJoinSource is served by the teleport module and called by the
+// inventory when an agent fetches its item. It mints the join token at that
+// moment. NotFound (unknown, expired, mismatched, cancelled or out of renders)
+// fails the item; any other error is retried by the agent within the item's
+// fetch budget.
+service TeleportJoinSource {
+  rpc RenderTeleportJoin(RenderTeleportJoinRequest) returns (TeleportJoinMaterial);
+}
+
+message RenderTeleportJoinRequest {
+  string tenant_id = 1;
+  string enrollment_id = 2;
   string host_id = 3;                // the verified agent's host
   string item_id = 4;                // for the source's audit only
 }

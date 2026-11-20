@@ -152,3 +152,61 @@ func TestPolicyModuleDelivery(t *testing.T) {
 		}
 	}
 }
+
+// The teleport-join rule (feature 038) admits svc/teleport to the four
+// TeleportJoinDeliveryService RPCs and health, and to nothing else in
+// inventory; no other module but the gateway (gateway-forwards; the handler
+// then refuses it by teleport_join.sources) reaches the service.
+func TestPolicyTeleportJoin(t *testing.T) {
+	for _, file := range []string{"../../deploy/policy.yaml", "../../deploy/bundle/policy.yaml"} {
+		raw, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pol, err := authz.Load(strings.NewReader(strings.ReplaceAll(string(raw), "${TRUST_DOMAIN}", "example.org")))
+		if err != nil {
+			t.Fatalf("%s: %v", file, err)
+		}
+		teleport := identity.ForService("example.org", "teleport")
+		allowed := map[string]bool{
+			"/inventory.v1.TeleportJoinDeliveryService/CreateTeleportJoin":      true,
+			"/inventory.v1.TeleportJoinDeliveryService/GetTeleportJoins":        true,
+			"/inventory.v1.TeleportJoinDeliveryService/CancelTeleportJoin":      true,
+			"/inventory.v1.TeleportJoinDeliveryService/ListTeleportJoinTargets": true,
+			"/grpc.health.v1.Health/Check":                                      true,
+		}
+		ops := append(inventoryOps(t), "/grpc.health.v1.Health/Check", "/grpc.health.v1.Health/Watch")
+		seen := 0
+		for _, op := range ops {
+			d := pol.Authorize(context.Background(), teleport, "inventory", op)
+			if d.Allowed != allowed[op] {
+				t.Errorf("%s: teleport %s: allowed=%v (rule %q)", file, op, d.Allowed, d.RuleID)
+			}
+			if d.Allowed {
+				seen++
+				if d.RuleID != "teleport-join" {
+					t.Errorf("%s: teleport %s allowed by %q", file, op, d.RuleID)
+				}
+			}
+		}
+		if seen != len(allowed) {
+			t.Fatalf("%s: teleport allowed %d operations, want %d", file, seen, len(allowed))
+		}
+		for op := range allowed {
+			if !strings.HasPrefix(op, "/inventory.v1.TeleportJoinDeliveryService/") {
+				continue
+			}
+			for _, svc := range []string{"deployer", "ipam", "asset", "lcm", "scheduler"} {
+				if pol.Authorize(context.Background(), identity.ForService("example.org", svc), "inventory", op).Allowed {
+					t.Errorf("%s: %s may call %s", file, svc, op)
+				}
+			}
+		}
+		// The agent-facing RPCs are on the ingest edge, never the mesh.
+		for _, op := range []string{"/inventory.v1.IngestService/FetchTeleportJoin", "/inventory.v1.IngestService/ReportTeleportJoin"} {
+			if pol.Authorize(context.Background(), teleport, "inventory", op).Allowed {
+				t.Errorf("%s: teleport may call %s", file, op)
+			}
+		}
+	}
+}

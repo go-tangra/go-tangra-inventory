@@ -111,6 +111,26 @@ func TestSampleModulesSection(t *testing.T) {
 	}
 }
 
+// TestSampleTeleportSection (feature 038): the commented teleport section
+// is the defaults.
+func TestSampleTeleportSection(t *testing.T) {
+	out := sampleSection(t, "teleport")
+	if len(out) != 4 {
+		t.Fatalf("teleport section has %d lines:\n%s", len(out), strings.Join(out, "\n"))
+	}
+	p := filepath.Join(t.TempDir(), "agent.yaml")
+	if err := os.WriteFile(p, []byte(strings.Join(out, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadAgent(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Teleport != config.DefaultAgent().Teleport {
+		t.Fatalf("sample %+v differs from the defaults %+v", cfg.Teleport, config.DefaultAgent().Teleport)
+	}
+}
+
 // TestExampleModuleHook (feature 037): the shipped example hook is a POSIX
 // sh script that starts the module with docker compose in MODULE_DIR, and
 // the packages carry it.

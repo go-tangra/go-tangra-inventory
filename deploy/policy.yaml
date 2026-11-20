@@ -10,7 +10,10 @@
 # module deliveries (ModuleDeliveryService, feature 037) through
 # gateway-forwards; the handler additionally checks module_delivery.sources.
 # Inventory calls the gateway's ModuleBundleSource as a client (the rule
-# lives in the gateway's policy).
+# lives in the gateway's policy). The teleport module enrolls hosts as
+# Teleport SSH nodes (TeleportJoinDeliveryService, feature 038); the handler
+# additionally checks teleport_join.sources. Inventory calls the teleport
+# module's TeleportJoinSource as a client (the rule lives in its policy).
 version: inventory-dev-1
 rules:
   - id: gateway-forwards
@@ -50,5 +53,14 @@ rules:
                  "/inventory.v1.CertificateDeliveryService/PreviewCertificateTargets",
                  "/inventory.v1.CertificateDeliveryService/VerifyHostCertificates",
                  "/inventory.v1.CertificateDeliveryService/MarkCertificateRevoked",
+                 "/grpc.health.v1.Health/Check"]
+    effect: allow
+  - id: teleport-join
+    # the teleport module asks for SSH-node enrollments of inventory hosts
+    # and reads their state (feature 038); references only, never the join
+    # token. The handler additionally checks teleport_join.sources.
+    from: ["spiffe://example.org/svc/teleport"]
+    to: ["inventory"]
+    operations: ["/inventory.v1.TeleportJoinDeliveryService/*",
                  "/grpc.health.v1.Health/Check"]
     effect: allow

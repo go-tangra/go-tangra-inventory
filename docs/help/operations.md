@@ -62,6 +62,7 @@ start with `config: <file>: ...`. Besides the framework keys (`service_name`,
 | `agent_releases.*` | see below | agent self-upgrade |
 | `cert_delivery.*` | off | certificate delivery for the deployer, see below |
 | `module_delivery.*` | off | module bundles from the gateway's add-module wizard |
+| `teleport_join.*` | off | Teleport SSH-node enrollment for the teleport module, see below |
 
 `registry.heartbeat_seconds`, `jobs.workers`, `jobs.interval_seconds`,
 `events.enabled`, `enroll.token_ttl_seconds` and
@@ -102,6 +103,28 @@ cert_delivery:
 Inventory also needs `discovery.static.lcm`. The deployer needs
 `discovery.static.inventory` and `inventory: { service: inventory }`.
 
+### Teleport join
+
+```yaml
+teleport_join:
+  enabled: true
+  sources: [teleport]          # mesh services allowed to request joins
+  source_service: teleport     # discovery name of the teleport module
+  report_timeout_minutes: 30   # 15-180; keep above the agents' teleport.timeout_minutes
+  max_concurrent_fetches: 20   # 1-500 per replica
+  source_timeout_seconds: 10   # 2-120
+```
+
+The teleport module enrolls hosts as Teleport SSH nodes: inventory pushes
+the join to the host's agent and relays the single-use join token from the
+teleport module when the agent pulls it, keeping no token anywhere. The
+agent installs the cluster's Teleport version from `https://cdn.teleport.dev`
+(checked against the published SHA-256), writes `/etc/teleport.yaml` and the
+teleport systemd unit and reports `joined` with the node's host uuid. A
+host that already runs Teleport is never touched (`already_installed`).
+Agents can opt out with `teleport.enabled: false` in `agent.yaml`
+(`disabled_locally`). Inventory also needs `discovery.static.teleport`.
+
 ## Service policies
 
 Inventory's own policy:
@@ -123,11 +146,21 @@ rules:
                  "/inventory.v1.CertificateDeliveryService/MarkCertificateRevoked",
                  "/grpc.health.v1.Health/Check"]
     effect: allow
+  - id: teleport-join
+    from: ["spiffe://<trust domain>/svc/teleport"]
+    to: ["inventory"]
+    operations: ["/inventory.v1.TeleportJoinDeliveryService/*",
+                 "/grpc.health.v1.Health/Check"]
+    effect: allow
 ```
 
 `gateway-forwards` covers the browser API, the module delivery service and
-the help pages (`GET /docs/v1/bundle`). The shipped policy also has
-`ipam-hostsync` and `asset-sync` for the host report readers.
+the help pages (`GET /docs/v1/bundle`). `teleport-join` admits the teleport
+module to `TeleportJoinDeliveryService` (`CreateTeleportJoin`,
+`GetTeleportJoins`, `CancelTeleportJoin`, `ListTeleportJoinTargets`) and
+health; the handler also requires it in `teleport_join.sources`. The
+shipped policy also has `ipam-hostsync` and `asset-sync` for the host
+report readers.
 
 Other modules must admit inventory:
 
@@ -135,6 +168,7 @@ Other modules must admit inventory:
 |---|---|---|
 | lcm | `/lcm.v1.Certificates/Download` (rule `inventory-download`) | fetch the certificate when an agent pulls a delivery |
 | gateway | `/inventory.v1.ModuleBundleSource/RenderModuleBundle` (rule `inventory-module-bundle`) | module delivery |
+| teleport | `/inventory.v1.TeleportJoinSource/RenderTeleportJoin` | Teleport join: the join token when an agent pulls it |
 
 ## Troubleshooting
 

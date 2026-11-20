@@ -6,13 +6,15 @@
 # verification, the agent-side upgrade core and the server upgrade lifecycle;
 # feature 033: the certificate material rules, the certificate delivery relay
 # and the agent certificate store core; feature 037: the module delivery relay
-# and the agent module writer).
+# and the agent module writer; feature 038: the Teleport join relay and the
+# agent Teleport installer).
 set -euo pipefail
 PROFILE="${1:-coverage.out}"
 MODULE="github.com/go-tangra/go-tangra-inventory/v4"
 SECURITY_PKGS=("internal/authz" "internal/sealed" "internal/enroll" "internal/hostreport" "internal/agentrelease" "internal/selfupdate" "internal/upgrades"
   "internal/certmaterial" "internal/certdelivery" "internal/agentcerts"
-  "internal/moduledelivery" "internal/agentmodules")
+  "internal/moduledelivery" "internal/agentmodules"
+  "internal/teleportjoin" "internal/agentteleport")
 total=$(go tool cover -func="$PROFILE" | awk '/^total:/ {gsub("%","",$3); print $3}')
 echo "coverage: total ${total}%"
 fail=0
@@ -24,7 +26,9 @@ for p in "${SECURITY_PKGS[@]}"; do
       # OS glue of the agent certificate store (ownership, process groups,
       # user lookups) is covered by the privileged container test
       # (make test-agent-certs), not by the unit gate.
-      if (pre ~ /internal\/agentcerts\/$/ && $1 ~ /_linux\.go:/) next; gsub("%","",$3); s+=$3; n++ }
+      if (pre ~ /internal\/agentcerts\/$/ && $1 ~ /_linux\.go:/) next
+      # Likewise the systemctl runner of the Teleport installer.
+      if (pre ~ /internal\/agentteleport\/$/ && $1 ~ /_linux\.go:/) next; gsub("%","",$3); s+=$3; n++ }
     END { if (n==0) print "n/a"; else printf "%.1f", s/n }')
   echo "coverage: $p ${pct}%"
   if [[ "$pct" != "n/a" ]]; then awk -v v="$pct" 'BEGIN { if (v+0 < 100) exit 1 }' || { echo "coverage: $p must be 100%" >&2; fail=1; }; fi

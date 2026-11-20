@@ -57,6 +57,64 @@ type Config struct {
 	// ModuleDelivery relays rendered module bundles to inventory agents for
 	// the gateway's add-module wizard (feature 037); off by default.
 	ModuleDelivery ModuleDelivery `yaml:"module_delivery"`
+	// TeleportJoin relays single-use Teleport join material to inventory
+	// agents for the teleport module's SSH-node enrollment (feature 038);
+	// off by default.
+	TeleportJoin TeleportJoin `yaml:"teleport_join"`
+}
+
+// TeleportJoin configures the Teleport join relay (feature 038). Sources
+// are the mesh service names (last SPIFFE path segment) allowed to call
+// TeleportJoinDeliveryService, on top of the inbound mesh policy;
+// SourceService is the discovery name of the service serving
+// TeleportJoinSource (the teleport module). ReportTimeoutMinutes fails a
+// fetched or installing item without a report; it should exceed the
+// agents' teleport.timeout_minutes. AllowPlaintextIngest lets
+// FetchTeleportJoin serve join tokens over a plaintext ingest edge
+// (development stack only; refused in production).
+type TeleportJoin struct {
+	Enabled              bool     `yaml:"enabled"`
+	Sources              []string `yaml:"sources"`
+	SourceService        string   `yaml:"source_service"`
+	ReportTimeoutMinutes int      `yaml:"report_timeout_minutes"`
+	MaxConcurrentFetches int      `yaml:"max_concurrent_fetches"`
+	SourceTimeoutSeconds int      `yaml:"source_timeout_seconds"`
+	AllowPlaintextIngest bool     `yaml:"allow_plaintext_ingest"`
+}
+
+// ReportTimeout fails a fetched or installing Teleport join item whose
+// agent does not report.
+func (d TeleportJoin) ReportTimeout() time.Duration {
+	return time.Duration(d.ReportTimeoutMinutes) * time.Minute
+}
+
+// SourceTimeout bounds one RenderTeleportJoin call.
+func (d TeleportJoin) SourceTimeout() time.Duration {
+	return time.Duration(d.SourceTimeoutSeconds) * time.Second
+}
+
+func (d TeleportJoin) validate(prod bool) error {
+	if len(d.Sources) > 32 {
+		return errors.New("config: teleport_join.sources allows at most 32 services")
+	}
+	for _, s := range d.Sources {
+		if !serviceNameRE.MatchString(s) {
+			return fmt.Errorf("config: teleport_join.sources entry %q is not a service name", s)
+		}
+	}
+	switch {
+	case !serviceNameRE.MatchString(d.SourceService):
+		return errors.New("config: teleport_join.source_service must be a service name")
+	case d.ReportTimeoutMinutes < 15 || d.ReportTimeoutMinutes > 180:
+		return errors.New("config: teleport_join.report_timeout_minutes must be within [15, 180]")
+	case d.MaxConcurrentFetches < 1 || d.MaxConcurrentFetches > 500:
+		return errors.New("config: teleport_join.max_concurrent_fetches must be within [1, 500]")
+	case d.SourceTimeoutSeconds < 2 || d.SourceTimeoutSeconds > 120:
+		return errors.New("config: teleport_join.source_timeout_seconds must be within [2, 120]")
+	case prod && d.AllowPlaintextIngest:
+		return errors.New("config: teleport_join.allow_plaintext_ingest is not permitted in production")
+	}
+	return nil
 }
 
 // ModuleDelivery configures the module delivery relay (feature 037).
@@ -371,6 +429,8 @@ func Default() Config {
 			ReportTimeoutMinutes: 15, MaxConcurrentFetches: 50, LCMTimeoutSeconds: 10},
 		ModuleDelivery: ModuleDelivery{Sources: []string{"gateway"}, SourceService: "gateway", ReportTimeoutMinutes: 30,
 			MaxConcurrentFetches: 20, SourceTimeoutSeconds: 30},
+		TeleportJoin: TeleportJoin{Sources: []string{"teleport"}, SourceService: "teleport", ReportTimeoutMinutes: 30,
+			MaxConcurrentFetches: 20, SourceTimeoutSeconds: 10},
 	}
 }
 
@@ -468,6 +528,9 @@ func (c Config) Validate() error {
 	if err := c.ModuleDelivery.validate(prod); err != nil {
 		return err
 	}
+	if err := c.TeleportJoin.validate(prod); err != nil {
+		return err
+	}
 	return c.AgentReleases.validate()
 }
 
@@ -519,6 +582,9 @@ func (c Config) Warnings() []string {
 	}
 	if c.ModuleDelivery.AllowPlaintextIngest {
 		w = append(w, "module_delivery.allow_plaintext_ingest: module bundles with secrets served to agents without TLS (development only)")
+	}
+	if c.TeleportJoin.AllowPlaintextIngest {
+		w = append(w, "teleport_join.allow_plaintext_ingest: Teleport join tokens served to agents without TLS (development only)")
 	}
 	return w
 }
@@ -626,6 +692,45 @@ type AgentConfig struct {
 	// server chooses only the module name; nothing runs unless DeployHook
 	// is set here.
 	Modules AgentModules `yaml:"modules"`
+
+	// Teleport configures the Teleport SSH-node enrollment the platform
+	// delivers to this host (feature 038, Linux with systemd). The agent
+	// downloads Teleport only from the fixed origin cdn.teleport.dev,
+	// verifies its SHA-256 and writes /etc/teleport.yaml and the teleport
+	// systemd unit; the server chooses only the cluster's join material.
+	Teleport AgentTeleport `yaml:"teleport"`
+}
+
+// AgentTeleport is the agent's Teleport join configuration (specs/038).
+// Disabled agents still announce teleport.v1 on Linux and answer every
+// join with failed/disabled_locally, so the operator sees why.
+type AgentTeleport struct {
+	Enabled                bool `yaml:"enabled"`
+	TimeoutMinutes         int  `yaml:"timeout_minutes"`
+	AllowInsecureTransport bool `yaml:"allow_insecure_transport"`
+}
+
+// Validate checks the teleport section (also when disabled).
+func (c AgentTeleport) Validate() error {
+	if c.TimeoutMinutes < 5 || c.TimeoutMinutes > 60 {
+		return errors.New("config: agent teleport.timeout_minutes must be within [5, 60]")
+	}
+	return nil
+}
+
+// Timeout bounds one whole join: download, install and join.
+func (c AgentTeleport) Timeout() time.Duration {
+	return time.Duration(c.TimeoutMinutes) * time.Minute
+}
+
+// Announce reports whether the agent announces teleport.v1: on Linux,
+// whether or not it is enabled (a disabled agent reports disabled_locally).
+func (c AgentTeleport) Announce(goos string) bool { return goos == "linux" }
+
+// Accepts reports whether the agent joins Teleport: enabled, and over TLS
+// unless the plaintext opt-out is set locally.
+func (c AgentTeleport) Accepts(insecureTransport bool) bool {
+	return c.Enabled && (!insecureTransport || c.AllowInsecureTransport)
 }
 
 // AgentModules is the agent's module directory configuration
@@ -811,7 +916,8 @@ func DefaultAgent() AgentConfig {
 		Upgrade: AgentUpgrade{Enabled: true, ConfirmTimeoutSeconds: 300},
 		Certificates: AgentCertificates{Enabled: true, Directory: "/etc/inventory-agent/certs", Owner: "root", Group: "root",
 			DirMode: "0750", CertMode: "0644", KeyMode: "0600", KeepPrevious: 1, HookTimeoutSeconds: 300},
-		Modules: AgentModules{Enabled: true, Directory: "/opt/tangra/modules", Owner: "root", Group: "root", HookTimeoutSeconds: 600}}
+		Modules:  AgentModules{Enabled: true, Directory: "/opt/tangra/modules", Owner: "root", Group: "root", HookTimeoutSeconds: 600},
+		Teleport: AgentTeleport{Enabled: true, TimeoutMinutes: 15}}
 }
 
 // LoadAgent reads the endpoint agent's YAML over DefaultAgent(); unknown fields
@@ -881,7 +987,10 @@ func (a AgentConfig) Validate() error {
 	if err := a.Certificates.Validate(); err != nil {
 		return err
 	}
-	return a.Modules.Validate()
+	if err := a.Modules.Validate(); err != nil {
+		return err
+	}
+	return a.Teleport.Validate()
 }
 
 // Warnings lists accepted insecure opt-outs of the agent (logged at start).
@@ -892,6 +1001,9 @@ func (a AgentConfig) Warnings() []string {
 	}
 	if a.Insecure && a.Modules.AllowInsecureTransport {
 		w = append(w, "modules.allow_insecure_transport: module bundles with secrets received over a plaintext ingest connection (development only)")
+	}
+	if a.Insecure && a.Teleport.AllowInsecureTransport {
+		w = append(w, "teleport.allow_insecure_transport: Teleport join tokens received over a plaintext ingest connection (development only)")
 	}
 	return w
 }
