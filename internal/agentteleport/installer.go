@@ -3,6 +3,7 @@ package agentteleport
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -30,6 +31,13 @@ const stagingRel = "var/lib/inventory-agent/teleport-staging"
 
 // pollInterval is how often the join is checked.
 const pollInterval = 2 * time.Second
+
+// recheckInterval is how often, while waiting for the join, the server is
+// asked whether the item is still active (not cancelled or failed).
+const recheckInterval = 30 * time.Second
+
+// probeTimeout bounds one readiness probe.
+const probeTimeout = 5 * time.Second
 
 // maxDetail bounds a report detail.
 const maxDetail = 200
@@ -151,8 +159,12 @@ func (in *Installer) Preflight(ctx context.Context) string {
 // Join validates m, reports installing (installing returns false when the
 // server no longer accepts the item), installs Teleport m.Version, writes
 // the configuration and the unit, starts it and waits until the node
-// joined. m's token is wiped before Join returns. After a failure past the
-// configuration, the token is removed from it and the unit stopped.
+// joined: the unit active, Teleport's /readyz answering 200 and the host
+// uuid written. While waiting it asks installing again every
+// recheckInterval; once the item is no longer accepted the join is rolled
+// back and Aborted. m's token is wiped before Join returns. After a
+// failure past the configuration, the token is removed from it and the
+// unit stopped.
 func (in *Installer) Join(ctx context.Context, m Material, installing func() bool) Result {
 	defer m.Wipe()
 	if err := m.Validate(); err != nil {
@@ -177,7 +189,11 @@ func (in *Installer) Join(ctx context.Context, m Material, installing func() boo
 	if err != nil {
 		return in.rollback(ctx, m, nodename, fail(reasonInstall, "write /etc/teleport.yaml"))
 	}
-	uuid, f := in.start(ctx)
+	uuid, f := in.start(ctx, installing)
+	if f == errAborted {
+		in.rollback(ctx, m, nodename, fail(reasonJoin, "no longer accepted"))
+		return Result{Aborted: true}
+	}
 	if f != nil {
 		return in.rollback(ctx, m, nodename, f)
 	}
@@ -204,8 +220,12 @@ func (in *Installer) installBinary(ctx context.Context, version string) *failure
 	return nil
 }
 
-// start writes the unit, enables and starts it and waits for the join.
-func (in *Installer) start(ctx context.Context) (string, *failure) {
+// errAborted: the server no longer accepts the item.
+var errAborted = &failure{}
+
+// start writes the unit, enables and starts it and waits for the join
+// (errAborted once installing returns false).
+func (in *Installer) start(ctx context.Context, installing func() bool) (string, *failure) {
 	if err := replace(in.path(UnitPath), 0o644, []byte(unitFile)); err != nil {
 		return "", fail(reasonInstall, "write the teleport unit")
 	}
@@ -216,13 +236,20 @@ func (in *Installer) start(ctx context.Context) (string, *failure) {
 		return "", fail(reasonJoin, "systemctl enable --now teleport failed")
 	}
 	deadline := in.now().Add(in.timeout)
+	recheck := in.now().Add(recheckInterval)
 	for {
-		if in.sys.Run(ctx, "is-active", "--quiet", UnitName) == nil {
+		if in.sys.Run(ctx, "is-active", "--quiet", UnitName) == nil && in.ready(ctx) {
 			if raw, err := os.ReadFile(in.path(HostUUIDRel)); err == nil {
 				if u := strings.TrimSpace(string(raw)); uuidRE.MatchString(u) {
 					return u, nil
 				}
 			}
+		}
+		if !in.now().Before(recheck) {
+			if !installing() {
+				return "", errAborted
+			}
+			recheck = in.now().Add(recheckInterval)
 		}
 		if !in.now().Before(deadline) {
 			return "", fail(reasonTimeout, "teleport did not join in time")
@@ -231,6 +258,22 @@ func (in *Installer) start(ctx context.Context) (string, *failure) {
 			return "", fail(reasonTimeout, "join wait cancelled")
 		}
 	}
+}
+
+// ready reports whether the node's /readyz answers 200: it joined and is
+// connected to the cluster.
+func (in *Installer) ready(ctx context.Context) bool {
+	pctx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
+	// ReadyURL is a constant, valid URL: the request cannot fail to build.
+	req, _ := http.NewRequestWithContext(pctx, http.MethodGet, ReadyURL, nil)
+	res, err := in.http.Do(req)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = res.Body.Close() }()
+	_, _ = io.Copy(io.Discard, io.LimitReader(res.Body, 4096))
+	return res.StatusCode == http.StatusOK
 }
 
 // rollback removes the token from the configuration and stops the unit

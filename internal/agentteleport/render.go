@@ -16,6 +16,12 @@ const (
 	HostUUIDRel = "var/lib/teleport/host_uuid"
 	// UnitName is the systemd unit the agent installs.
 	UnitName = "teleport.service"
+	// DiagAddr is the node's diagnostic listener (loopback only). Its
+	// /readyz answers 200 once the node has joined and connected to the
+	// cluster; the host uuid file alone is written before that.
+	DiagAddr = "127.0.0.1:3434"
+	// ReadyURL is the readiness probe on DiagAddr.
+	ReadyURL = "http://" + DiagAddr + "/readyz"
 )
 
 // marker starts every file the agent writes, so a configuration left by a
@@ -37,6 +43,7 @@ type teleportSection struct {
 	JoinParams  joinParams `yaml:"join_params"`
 	ProxyServer string     `yaml:"proxy_server"`
 	CAPin       []string   `yaml:"ca_pin"`
+	DiagAddr    string     `yaml:"diag_addr"`
 }
 
 type enabledOnly struct {
@@ -63,7 +70,7 @@ type fileConfig struct {
 func renderConfig(nodename string, m Material, token string) []byte {
 	c := fileConfig{Version: "v3",
 		Teleport: teleportSection{NodeName: nodename, DataDir: DataDir, JoinParams: joinParams{Method: "token", TokenName: token},
-			ProxyServer: m.ProxyAddr, CAPin: m.CAPins},
+			ProxyServer: m.ProxyAddr, CAPin: m.CAPins, DiagAddr: DiagAddr},
 		AuthService: enabledOnly{Enabled: "no"}, ProxyService: enabledOnly{Enabled: "no"},
 		SSHService: sshSection{Enabled: "yes", Labels: m.Labels}}
 	var b bytes.Buffer

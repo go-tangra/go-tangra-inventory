@@ -178,8 +178,9 @@ func (s *Service) GetMany(ctx context.Context, tenantID, source string, enrollme
 
 // Cancel ends the active item of a source's enrollment id (cancelled,
 // audited); a terminal item is returned unchanged. An agent that already
-// fetched the material is not stopped: its later report is ignored, and
-// the source is expected to revoke the token it minted.
+// fetched the material learns of it at its next installing check (every
+// 30 s) and rolls its join back; its later report is ignored, and the
+// source revokes the token it minted.
 func (s *Service) Cancel(ctx context.Context, tenantID, source, requestedBy, enrollmentID string) (View, error) {
 	if !s.cfg.Enabled {
 		return View{}, ErrDisabled
