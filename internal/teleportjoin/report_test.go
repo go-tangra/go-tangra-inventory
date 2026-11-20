@@ -21,9 +21,14 @@ func TestReportJoined(t *testing.T) {
 	if i := f.item(t, v.ID); i.State != store.TeleportInstalling || i.ReportedAt == nil {
 		t.Fatalf("item = %+v", i)
 	}
-	// A repeated installing is ignored without a refusal.
-	if ok, err := f.svc.Report(ctx, a, Report{ItemID: v.ID, State: store.TeleportInstalling}); ok || err != nil || f.met.refused[RefusedNotFetched] != 0 {
+	// A repeated installing is the agent asking whether the item is still
+	// active: accepted, unchanged, not audited again, no refusal.
+	before := f.item(t, v.ID).UpdatedAt
+	if ok, err := f.svc.Report(ctx, a, Report{ItemID: v.ID, State: store.TeleportInstalling}); !ok || err != nil || f.met.refused[RefusedNotFetched] != 0 {
 		t.Fatalf("repeated installing: %v %v", ok, err)
+	}
+	if i := f.item(t, v.ID); !i.UpdatedAt.Equal(before) {
+		t.Fatalf("repeated installing moved updated_at: %v -> %v", before, i.UpdatedAt)
 	}
 	ok, err := f.svc.Report(ctx, a, Report{ItemID: v.ID, State: store.TeleportJoined, NodeHostUUID: strings.ToUpper(nodeID), Detail: "ok\x00\n"})
 	if !ok || err != nil {

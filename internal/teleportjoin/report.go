@@ -85,8 +85,9 @@ var errIgnored = errors.New("teleportjoin: report ignored")
 // Report records agent a's result for its own item. installing and joined
 // require fetched material; installing only follows fetched, and joined
 // and failed end the item. A report for an item that is no longer active
-// (terminal, or a repeat of the terminal report) and a repeated installing
-// are ignored (accepted false).
+// (terminal, or a repeat of the terminal report) is ignored (accepted
+// false); a repeated installing is accepted without a change, so the agent
+// can tell an item still active from a cancelled or failed one.
 func (s *Service) Report(ctx context.Context, a store.Agent, r Report) (bool, error) {
 	if !s.cfg.Enabled {
 		return false, ErrDisabled
@@ -105,6 +106,11 @@ func (s *Service) Report(ctx context.Context, a store.Agent, r Report) (bool, er
 		switch {
 		case !cur.Active():
 			return nil, errIgnored
+		case r.State == store.TeleportInstalling && cur.State == store.TeleportInstalling:
+			// The agent asking, while it waits for the join, whether the
+			// item is still active: accepted, unchanged (the report
+			// timeout still runs from the first installing).
+			return nil, errNoChange
 		case r.State == store.TeleportInstalling && cur.State != store.DeliveryFetched:
 			notFetched = cur.State != store.TeleportInstalling
 			return nil, errIgnored

@@ -183,6 +183,7 @@ func newKit(t *testing.T) *kit {
 		if call == "enable --now "+UnitName {
 			started = true
 			write(t, root, HostUUIDRel, testUUID+"\n")
+			k.ready(200)
 		}
 	}
 	k.sys.active = func() bool { return started }
@@ -200,6 +201,26 @@ func newKit(t *testing.T) *kit {
 func (k *kit) serve(url string, archive []byte, sumFile string) {
 	k.http.files[url] = resp{status: 200, body: bytes.NewReader(archive)}
 	k.http.files[url+".sha256"] = resp{status: 200, body: strings.NewReader(sumFile)}
+}
+
+// ready makes the node's diagnostic /readyz answer status.
+func (k *kit) ready(status int) {
+	k.http.mu.Lock()
+	defer k.http.mu.Unlock()
+	k.http.files[ReadyURL] = resp{status: status, body: strings.NewReader("{}")}
+}
+
+// cdnURLs are the requested URLs below the download origin.
+func (k *kit) cdnURLs() []string {
+	k.http.mu.Lock()
+	defer k.http.mu.Unlock()
+	var out []string
+	for _, u := range k.http.urls {
+		if strings.HasPrefix(u, testBase+"/") {
+			out = append(out, u)
+		}
+	}
+	return out
 }
 
 func (k *kit) join(t *testing.T) Result {

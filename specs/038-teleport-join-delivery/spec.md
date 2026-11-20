@@ -75,7 +75,10 @@ the rest.
 - **FR-007** ReportTeleportJoin: states `installing` (after a fetch),
   `joined` (with the node's lowercase host uuid) and `failed` (with a
   reason from the closed set); a report for a terminal item or a repeat
-  answers `accepted=false`; `detail` is sanitised and at most 256 bytes.
+  answers `accepted=false`, except a repeated `installing`, which answers
+  `accepted=true` without a change while the item is installing (the
+  agent's "is this item still active?" check; the report timeout still
+  runs from the first one); `detail` is sanitised and at most 256 bytes.
 - **FR-008** Every transition and refusal writes an audit row in the same
   transaction (`teleport_join_created`, `_superseded`, `_delivered`,
   `_fetched`, `_installing`, `_joined`, `_failed`, `_unsupported`,
@@ -108,15 +111,21 @@ the rest.
   `/usr/local/bin/teleport` (0755) → `install_failed`.
 - **FR-014** Write `/etc/teleport.yaml` (0600, yaml.v3, `version: v3`,
   nodename = hostname, `data_dir: /var/lib/teleport`, `join_params`
-  token, `proxy_server`, `ca_pin`, auth/proxy services off, ssh_service on
-  with the labels) and `/etc/systemd/system/teleport.service`
+  token, `proxy_server`, `ca_pin`, `diag_addr: 127.0.0.1:3434` (loopback
+  diagnostics), auth/proxy services off, ssh_service on with the labels)
+  and `/etc/systemd/system/teleport.service`
   (`ExecStart=/usr/local/bin/teleport start --config=/etc/teleport.yaml`,
   `Restart=on-failure`); `systemctl daemon-reload`, `systemctl enable
   --now teleport` (fixed argv and environment, no shell).
-- **FR-015** Wait until the unit is active and
+- **FR-015** Wait until the unit is active, Teleport's
+  `http://127.0.0.1:3434/readyz` answers 200 (the node registered and is
+  connected; the host uuid file is written before that) and
   `/var/lib/teleport/host_uuid` holds a uuid → `joined` with
   `node_host_uuid`; otherwise `timeout` after `timeout_minutes`;
-  systemctl failures → `join_failed`.
+  systemctl failures → `join_failed`. Every 30 s of the wait the agent
+  reports `installing` again; `accepted=false` (the item was cancelled or
+  failed meanwhile) rolls the join back as in FR-016 and nothing more is
+  reported.
 - **FR-016** Any failure after the configuration was written rewrites it
   with an empty `token_name` (or removes it) and stops and disables the
   unit. The token is never logged, reported or left in a report detail.

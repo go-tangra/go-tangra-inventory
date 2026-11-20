@@ -28,9 +28,10 @@ func TestJoin(t *testing.T) {
 		t.Fatal("token not wiped")
 	}
 	want := []string{testBase + "/teleport-v17.4.2-linux-amd64-bin.tar.gz.sha256", testBase + "/teleport-v17.4.2-linux-amd64-bin.tar.gz"}
-	if strings.Join(k.http.urls, ",") != strings.Join(want, ",") {
+	if strings.Join(k.cdnURLs(), ",") != strings.Join(want, ",") {
 		t.Fatalf("urls = %v", k.http.urls)
 	}
+
 	if got := read(t, k.root, BinaryPath); got != "#!teleport-binary" {
 		t.Fatalf("binary = %q", got)
 	}
@@ -57,6 +58,9 @@ func TestJoin(t *testing.T) {
 		len(c.Teleport.CAPin) != 1 || c.Teleport.CAPin[0] != testPin || c.AuthService.Enabled != "no" || c.ProxyService.Enabled != "no" ||
 		c.SSHService.Enabled != "yes" || c.SSHService.Labels["tangra.io/os"] != "Debian 12" || len(c.SSHService.Labels) != 2 {
 		t.Fatalf("config = %+v", c)
+	}
+	if c.Teleport.DiagAddr != DiagAddr || ReadyURL != "http://"+DiagAddr+"/readyz" {
+		t.Fatalf("diag_addr = %q, ready url %q", c.Teleport.DiagAddr, ReadyURL)
 	}
 	if ours([]byte(raw)) {
 		t.Fatal("a config with a token counts as a leftover")
@@ -225,6 +229,30 @@ func TestJoinFailuresRemoveToken(t *testing.T) {
 			k.sys.onCall = nil
 			k.sys.active = func() bool { return k.slept > 0 }
 		}, reasonTimeout},
+		// The host uuid is written before the node registers: joined needs
+		// Teleport's own readiness (the node connected to the cluster).
+		"not ready": {func(k *kit) {
+			on := false
+			k.sys.onCall = func(c string) {
+				if c == "enable --now "+UnitName {
+					on = true
+					write(t, k.root, HostUUIDRel, testUUID+"\n")
+					k.ready(503)
+				}
+			}
+			k.sys.active = func() bool { return on }
+		}, reasonTimeout},
+		"probe unreachable": {func(k *kit) {
+			on := false
+			k.sys.onCall = func(c string) {
+				if c == "enable --now "+UnitName {
+					on = true
+					write(t, k.root, HostUUIDRel, testUUID+"\n")
+					k.http.files[ReadyURL] = resp{err: errors.New("connection refused")}
+				}
+			}
+			k.sys.active = func() bool { return on }
+		}, reasonTimeout},
 		"cancelled": {func(k *kit) {
 			k.sys.active = func() bool { return false }
 			k.in.sleep = func(context.Context, time.Duration) error { return context.Canceled }
@@ -259,6 +287,56 @@ func TestJoinFailuresRemoveToken(t *testing.T) {
 	k.sys.active = func() bool { n++; return n > 3 }
 	if r := k.join(t); r.State != StateJoined {
 		t.Fatalf("slow start = %+v", r)
+	}
+}
+
+// TestJoinWaitsForReadiness: a node that is starting (readyz not 200) is
+// not joined until Teleport reports ready.
+func TestJoinWaitsForReadiness(t *testing.T) {
+	k := newKit(t)
+	n, on := 0, false
+	k.sys.onCall = func(c string) {
+		if c == "enable --now "+UnitName {
+			on = true
+			write(t, k.root, HostUUIDRel, testUUID+"\n")
+			k.ready(503)
+		}
+	}
+	k.sys.active = func() bool { return on }
+	k.in.sleep = func(ctx context.Context, d time.Duration) error {
+		k.slept++
+		k.now = k.now.Add(d)
+		if n++; n == 3 {
+			k.ready(200)
+		}
+		return nil
+	}
+	if r := k.join(t); r != (Result{State: StateJoined, NodeHostUUID: testUUID}) || k.slept < 3 {
+		t.Fatalf("result = %+v after %d polls", r, k.slept)
+	}
+}
+
+// TestJoinStopsWhenNoLongerAccepted: while waiting for the join the agent
+// asks the server whether the item is still active; once it is cancelled
+// or failed, the agent removes the token, stops the unit and reports
+// nothing more.
+func TestJoinStopsWhenNoLongerAccepted(t *testing.T) {
+	k := newKit(t)
+	k.sys.active = func() bool { return false } // never joins on its own
+	asks := 0
+	r := k.in.Join(context.Background(), material(), func() bool { asks++; return asks == 1 })
+	if !r.Aborted || r.State != "" {
+		t.Fatalf("result = %+v", r)
+	}
+	if asks != 2 {
+		t.Fatalf("asked %d times", asks)
+	}
+	if k.now.Sub(time.Unix(1_700_000_000, 0)) > 2*recheckInterval {
+		t.Fatalf("stopped only after %s", k.now.Sub(time.Unix(1_700_000_000, 0)))
+	}
+	noToken(t, k.root, r)
+	if !ours([]byte(read(t, k.root, ConfigPath))) || !k.sys.called("disable --now "+UnitName) {
+		t.Fatalf("not rolled back: %v", k.sys.calls)
 	}
 }
 
