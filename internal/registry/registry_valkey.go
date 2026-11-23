@@ -2,6 +2,8 @@ package registry
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"sync"
 	"time"
@@ -38,9 +40,17 @@ func tenantKey(tenantID string) string {
 	return "inv:agent:tenant:" + tenantID
 }
 
-// Register writes the online marker + metadata, joins the tenant set, starts a
-// heartbeat and a Pub/Sub subscriber, and returns the command channel with an
-// idempotent unregister.
+// Register writes the connection's registration (online marker, metadata and
+// tenant-set membership), starts a heartbeat and a Pub/Sub subscriber, and
+// returns the command channel with an idempotent unregister.
+//
+// The online marker holds a per-connection owner token. The heartbeat
+// rewrites the whole registration while the marker is this connection's (or
+// gone), so a Valkey restart or a pruned set member heals within ttl/3
+// instead of leaving a connected agent listed offline until it reconnects.
+// Unregister removes the registration only while this connection still owns
+// it, so a superseded connection closing late does not mark the agent that
+// reconnected offline.
 func (v *Valkey) Register(ctx context.Context, a ConnectedAgent) (<-chan Command, func(), error) {
 	if a.AgentID == "" {
 		return nil, nil, ErrInvalid
@@ -52,28 +62,19 @@ func (v *Valkey) Register(ctx context.Context, a ConnectedAgent) (<-chan Command
 	if sec <= 0 {
 		sec = 30
 	}
+	owner := v.instanceID + "/" + connToken()
 
-	// Online marker owned by this instance.
-	if err := v.c.Do(ctx, v.c.B().Set().Key(onlineKey(a.AgentID)).Value(v.instanceID).ExSeconds(sec).Build()).Error(); err != nil {
+	// A new connection takes the registration over unconditionally.
+	if err := v.write(ctx, a, owner, sec, true); err != nil {
 		return nil, nil, err
 	}
-	// Metadata hash (best-effort; do not fail Register if these lag).
-	_ = v.c.Do(ctx, v.c.B().Hset().Key(metaKey(a.AgentID)).FieldValue().
-		FieldValue("agent_id", a.AgentID).
-		FieldValue("tenant_id", a.TenantID).
-		FieldValue("host_id", a.HostID).
-		FieldValue("version", a.Version).
-		FieldValue("connected_at", a.ConnectedAt.UTC().Format(time.RFC3339Nano)).
-		Build()).Error()
-	_ = v.c.Do(ctx, v.c.B().Expire().Key(metaKey(a.AgentID)).Seconds(sec).Build()).Error()
-	_ = v.c.Do(ctx, v.c.B().Sadd().Key(tenantKey(a.TenantID)).Member(a.AgentID).Build()).Error()
 
 	runCtx, cancel := context.WithCancel(context.Background())
 	out := make(chan Command, deliverBuffer)
 	var wg sync.WaitGroup
 
-	// Heartbeat: refresh the online marker (and metadata TTL) so a crashed
-	// instance's agents expire out of the registry.
+	// Heartbeat: keep the registration alive (so a crashed instance's agents
+	// expire out of the registry) and restore whatever part of it is missing.
 	// TODO(ops): tune the refresh fraction and add jitter for large fleets.
 	wg.Add(1)
 	go func() {
@@ -85,8 +86,7 @@ func (v *Valkey) Register(ctx context.Context, a ConnectedAgent) (<-chan Command
 			case <-runCtx.Done():
 				return
 			case <-t.C:
-				_ = v.c.Do(runCtx, v.c.B().Set().Key(onlineKey(a.AgentID)).Value(v.instanceID).ExSeconds(sec).Build()).Error()
-				_ = v.c.Do(runCtx, v.c.B().Expire().Key(metaKey(a.AgentID)).Seconds(sec).Build()).Error()
+				_ = v.write(runCtx, a, owner, sec, false)
 			}
 		}
 	}()
@@ -117,14 +117,73 @@ func (v *Valkey) Register(ctx context.Context, a ConnectedAgent) (<-chan Command
 			// Best-effort teardown with a fresh short context.
 			tctx, tcancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer tcancel()
-			_ = v.c.Do(tctx, v.c.B().Del().Key(onlineKey(a.AgentID)).Build()).Error()
-			_ = v.c.Do(tctx, v.c.B().Del().Key(metaKey(a.AgentID)).Build()).Error()
-			_ = v.c.Do(tctx, v.c.B().Srem().Key(tenantKey(a.TenantID)).Member(a.AgentID).Build()).Error()
+			v.remove(tctx, a, owner)
 			wg.Wait()
 			close(out)
 		})
 	}
 	return out, unregister, nil
+}
+
+// write stores the registration: the online marker (owner token, with TTL),
+// the metadata hash (with TTL) and the tenant-set membership. Without force
+// (the heartbeat) it writes nothing while another connection owns the
+// marker. Single-key commands only, so the keys may live in different
+// cluster slots; the owner check and the writes are not atomic, and a lost
+// race heals on the next heartbeat.
+func (v *Valkey) write(ctx context.Context, a ConnectedAgent, owner string, sec int64, force bool) error {
+	if !force {
+		cur, err := v.c.Do(ctx, v.c.B().Get().Key(onlineKey(a.AgentID)).Build()).ToString()
+		if err != nil && !valkey.IsValkeyNil(err) {
+			return err
+		}
+		if err == nil && cur != owner {
+			return nil // superseded by a newer connection
+		}
+	}
+	if err := v.c.Do(ctx, v.c.B().Set().Key(onlineKey(a.AgentID)).Value(owner).ExSeconds(sec).Build()).Error(); err != nil {
+		return err
+	}
+	// Metadata and membership are best-effort; the heartbeat rewrites them.
+	for _, r := range v.c.DoMulti(ctx,
+		v.c.B().Hset().Key(metaKey(a.AgentID)).FieldValue().
+			FieldValue("agent_id", a.AgentID).
+			FieldValue("tenant_id", a.TenantID).
+			FieldValue("host_id", a.HostID).
+			FieldValue("version", a.Version).
+			FieldValue("connected_at", a.ConnectedAt.UTC().Format(time.RFC3339Nano)).
+			Build(),
+		v.c.B().Expire().Key(metaKey(a.AgentID)).Seconds(sec).Build(),
+		v.c.B().Sadd().Key(tenantKey(a.TenantID)).Member(a.AgentID).Build(),
+	) {
+		_ = r.Error()
+	}
+	return nil
+}
+
+// remove deletes the registration while owner still owns the online marker,
+// so a superseded connection closing late leaves the newer one in place.
+func (v *Valkey) remove(ctx context.Context, a ConnectedAgent, owner string) {
+	cur, err := v.c.Do(ctx, v.c.B().Get().Key(onlineKey(a.AgentID)).Build()).ToString()
+	if err == nil && cur != owner {
+		return
+	}
+	if err != nil && !valkey.IsValkeyNil(err) {
+		return
+	}
+	v.c.DoMulti(ctx,
+		v.c.B().Del().Key(onlineKey(a.AgentID)).Build(),
+		v.c.B().Del().Key(metaKey(a.AgentID)).Build(),
+		v.c.B().Srem().Key(tenantKey(a.TenantID)).Member(a.AgentID).Build(),
+	)
+}
+
+// connToken returns a random token that tells this connection's registration
+// apart from a later one of the same agent.
+func connToken() string {
+	b := make([]byte, 8)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
 }
 
 // Deliver publishes a command to the agent's channel. It reports delivered when
