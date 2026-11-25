@@ -53,7 +53,7 @@ func TestDiff_SchemaTransitionSuppressesHardware(t *testing.T) {
 	if !ok || c.ChangeType != store.ChangeModified || c.Before != "0" || c.After != "2" {
 		t.Fatalf("hardware_schema change = %+v %v", c, ok)
 	}
-	if _, ok := find(changes, diff.CatSoftware, "vim\x009.0"); !ok {
+	if _, ok := find(changes, diff.CatSoftware, "vim · 9.0"); !ok {
 		t.Fatal("non-hardware changes must still be recorded")
 	}
 	// Schema 1 (explicit) behaves the same.
@@ -83,20 +83,20 @@ func TestDiff_MemoryKeyedByLocator(t *testing.T) {
 			mem = append(mem, c)
 		}
 	}
-	if len(mem) != 1 || mem[0].ChangeType != store.ChangeModified || mem[0].ComponentKey != "P1-DIMMA1\x00P0_Node0_Channel0_Dimm0" {
+	if len(mem) != 1 || mem[0].ChangeType != store.ChangeModified || mem[0].ComponentKey != "P1-DIMMA1 · P0_Node0_Channel0_Dimm0" {
 		t.Fatalf("memory changes = %+v", mem)
 	}
 	// Empty slot populated.
 	next = currentHW()
 	next.Memory.Modules[1] = store.MemoryModule{DeviceLocator: "P1-DIMMB1", BankLocator: "P0_Node0_Channel1_Dimm0", Populated: true, CapacityBytes: 16 << 30, MemoryType: "DDR4"}
-	c, ok := find(diff.Diff(prev, next), diff.CatMemory, "P1-DIMMB1\x00P0_Node0_Channel1_Dimm0")
+	c, ok := find(diff.Diff(prev, next), diff.CatMemory, "P1-DIMMB1 · P0_Node0_Channel1_Dimm0")
 	if !ok || c.ChangeType != store.ChangeModified {
 		t.Fatalf("empty -> populated slot = %+v %v", c, ok)
 	}
 	// Module removed (slot becomes empty) is a change of that slot too.
 	next = currentHW()
 	next.Memory.Modules[0] = store.MemoryModule{DeviceLocator: "P1-DIMMA1", BankLocator: "P0_Node0_Channel0_Dimm0"}
-	if _, ok := find(diff.Diff(prev, next), diff.CatMemory, "P1-DIMMA1\x00P0_Node0_Channel0_Dimm0"); !ok {
+	if _, ok := find(diff.Diff(prev, next), diff.CatMemory, "P1-DIMMA1 · P0_Node0_Channel0_Dimm0"); !ok {
 		t.Fatal("populated -> empty slot not recorded")
 	}
 }
@@ -118,21 +118,21 @@ func TestDiff_DisksKeyedByNameAndSerial(t *testing.T) {
 	next.Disks = append(next.Disks, store.Disk{Name: "sdc", Model: "USB"})
 	next.Disks[0].SizeBytes++ // same disk, changed field -> modified
 	changes := diff.Diff(prev, next)
-	if c, ok := find(changes, diff.CatDisk, "nvme0n1\x00S64"); !ok || c.ChangeType != store.ChangeModified {
+	if c, ok := find(changes, diff.CatDisk, "nvme0n1 · S64"); !ok || c.ChangeType != store.ChangeModified {
 		t.Fatalf("nvme change = %+v %v", c, ok)
 	}
-	if c, ok := find(changes, diff.CatDisk, "sdd\x00"); !ok || c.ChangeType != store.ChangeRemoved {
+	if c, ok := find(changes, diff.CatDisk, "sdd · "); !ok || c.ChangeType != store.ChangeRemoved {
 		t.Fatalf("serial-less disks keyed by name: %+v %v", c, ok)
 	}
-	if _, ok := find(changes, diff.CatDisk, "sdc\x00"); ok {
+	if _, ok := find(changes, diff.CatDisk, "sdc · "); ok {
 		t.Fatal("unchanged serial-less disk reported")
 	}
 	// A disk replaced under the same name (new serial) is removed + added.
 	next = currentHW()
 	next.Disks[0].Serial = "S65"
 	changes = diff.Diff(currentHW(), next)
-	_, removed := find(changes, diff.CatDisk, "nvme0n1\x00S64")
-	_, added := find(changes, diff.CatDisk, "nvme0n1\x00S65")
+	_, removed := find(changes, diff.CatDisk, "nvme0n1 · S64")
+	_, added := find(changes, diff.CatDisk, "nvme0n1 · S65")
 	if !removed || !added {
 		t.Fatalf("replaced disk = %+v", changes)
 	}

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/diff"
 	"github.com/go-tangra/go-tangra-inventory/v4/internal/store"
@@ -189,5 +190,28 @@ func TestDiff_MemoryKeyedByLocatorAndSerial(t *testing.T) {
 	}
 	if added != 1 || removed != 1 {
 		t.Errorf("swapped memory module: added=%d removed=%d, want 1/1", added, removed)
+	}
+}
+
+// Component keys are stored in a Postgres text column and shown in the
+// portal: no NUL byte (refused by Postgres) and valid UTF-8, also for
+// composite keys of every keyed category.
+func TestComponentKeysStorable(t *testing.T) {
+	prev := store.Inventory{
+		Programs: []store.Program{{Name: "nginx", Version: "1.24"}},
+		Disks:    []store.Disk{{Name: "sda", Serial: "S1"}},
+	}
+	next := store.Inventory{
+		Programs: []store.Program{{Name: "nginx", Version: "1.26"}},
+		Disks:    []store.Disk{{Name: "sda", Serial: "S2"}},
+	}
+	changes := diff.Diff(prev, next)
+	if len(changes) == 0 {
+		t.Fatal("expected changes")
+	}
+	for _, c := range changes {
+		if strings.ContainsRune(c.ComponentKey, 0) || !utf8.ValidString(c.ComponentKey) {
+			t.Fatalf("%s key %q cannot be stored", c.Category, c.ComponentKey)
+		}
 	}
 }

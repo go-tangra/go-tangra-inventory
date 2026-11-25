@@ -46,9 +46,12 @@ const (
 	CatHardwareSchema = "hardware_schema"
 )
 
-// nullSep joins the parts of a composite component key. A NUL byte cannot
-// appear in the DMI/inventory string fields it separates, so keys stay unique.
-const nullSep = "\x00"
+// nullSep joins the parts of a composite component key (disk name and
+// serial, program name and version, ...). It must be printable: the key is
+// stored in a Postgres text column, which refuses a NUL byte ("invalid byte
+// sequence for encoding UTF8: 0x00" — every change of a composite component
+// failed to be recorded), and the portal shows it as the change's component.
+const nullSep = " · "
 
 // Diff compares prev against next and returns the component-level changes in a
 // deterministic order: categories in a fixed sequence, and within each keyed
